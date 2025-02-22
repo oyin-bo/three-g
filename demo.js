@@ -41,9 +41,9 @@ input.oninput = () => {
 
 function createSpots(count) {
   return [...Array(count)].map(() => ({
-    x: Math.sqrt(Math.random()) * Math.sign(Math.random() - 0.5),
-    y: Math.sqrt(Math.random()) * Math.sign(Math.random() - 0.5),
-    z: Math.sqrt(Math.random()) * Math.sign(Math.random() - 0.5),
+    x: Math.sqrt(Math.random()) * 2 * Math.sign(Math.random() - 0.5),
+    y: Math.sqrt(Math.random()) * 2 * Math.sign(Math.random() - 0.5),
+    z: Math.random() * Math.sign(Math.random() - 0.5),
     mass: Math.random() * 0.003,
   }));
 }
