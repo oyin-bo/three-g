@@ -21,7 +21,7 @@ const m = massSpotMesh({
 
 <a href="https://raw.githack.com/mihailik/three-g/refs/heads/main/index.html">
 
-<img alt="Live demo of rotating green cube" src="https://raw.githubusercontent.com/mihailik/three-g/refs/heads/main/demo.gif">
+<img alt="Live demo of rotating green cube" src="https://raw.githubusercontent.com/mihailik/three-g/refs/heads/main/demog.gif">
 
 </a>
 
