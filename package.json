@@ -1,0 +1,20 @@
+{
+  "name": "three-g",
+  "version": "0.0.1",
+  "description": "THREE.js galaxy primitives.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "npx esbuild --serve=8302 --servedir=."
+  },
+  "repository": "https://github.com/mihailik/three-g",
+  "keywords": ["three", "boilerplate", "mihailik", "galaxy", "atlas"],
+  "author": "Oleg Mihailik",
+  "license": "MIT",
+  "devDependencies": {
+    "three": "*"
+  },
+  "overrides": {
+    "three": "$three"
+  }
+}
