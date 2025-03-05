@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { createScene } from 'three-pop';
 import { massSpotMesh } from 'three-g';
 
-const { scene, container } = createScene({
+const { scene, camera, container } = createScene({
   renderer: { antialias: true },
   camera: { fov: 40 }
 });
@@ -23,10 +23,16 @@ const m = massSpotMesh({
 });
 scene.add(m);
 
+container.style.cssText =
+  'position: absolute; top: 0; left: 0; inset: 0;';
+
+camera.position.y = 2;
+
 document.body.appendChild(container);
 
 const input = document.createElement('input');
-input.value = 40000;
+input.style.cssText = 'position: absolute; top: 0.5em; right: 1em; background: transparent; color: #5ec15e; font-size: 200%; text-align: right; backdrop-filter: blur(2px);';
+input.value = 40 * 1000;
 document.body.appendChild(input);
 
 input.oninput = () => {
@@ -44,6 +50,6 @@ function createSpots(count) {
     x: Math.sqrt(Math.random()) * 2 * Math.sign(Math.random() - 0.5),
     y: Math.sqrt(Math.random()) * 2 * Math.sign(Math.random() - 0.5),
     z: Math.random() * Math.sign(Math.random() - 0.5),
-    mass: Math.random() * 0.003,
+    mass: Math.random() * 0.02,
   }));
 }
