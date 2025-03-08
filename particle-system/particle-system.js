@@ -55,6 +55,8 @@ export class ParticleSystem {
 
     this._gridDimensions = { x: 16, y: 16, z: 16 };
 
+    this._lastTick = this._clock.now();
+
     this.update(particles);
   }
 
