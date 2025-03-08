@@ -44,11 +44,16 @@ export class ParticleSystem {
     this._get = get;
     this._apply = apply;
 
+    /** @type {typeof update} */
     this.update = update.bind(this);
+
     this.compute = this.compute.bind(this);
     this._computeCore = computeCore.bind(this);
+
     this._applyCore = applyCore.bind(this);
     this._positionsBufferCore = positionsBufferCore.bind(this);
+
+    this._gridDimensions = { x: 16, y: 16, z: 16 };
 
     this.update(particles);
   }
