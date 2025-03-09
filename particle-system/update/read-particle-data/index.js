@@ -1,3 +1,3 @@
 // @ts-check
 
-export { readParticleData } from './read-particle-data';
+export { readParticleData } from './read-particle-data.js';

@@ -1,3 +1,3 @@
 // @ts-check
 
-export { sortParticleData } from './sort-particle-data';
+export { sortParticleData } from './sort-particle-data.js';

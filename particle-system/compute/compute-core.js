@@ -1,7 +1,7 @@
 // @ts-check
 
-import { computePositionsVelocities } from './1-positions-velocities/compute-positions-velocities';
-import { gl_init } from './gl-0-init';
+import { computePositionsVelocities } from './1-positions-velocities/compute-positions-velocities.js';
+import { gl_init } from './gl-0-init.js';
 
 /**
  * @typedef {{

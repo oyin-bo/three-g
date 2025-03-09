@@ -1,6 +1,6 @@
 // @ts-check
 
-import { glCode, glErrorShaderCompilationString, glErrorString } from './gl-errors';
+import { glCode, glErrorShaderCompilationString, glErrorString } from './gl-errors.js';
 
 /**
  * Creates and compiles a WebGL shader.

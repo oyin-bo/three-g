@@ -1,8 +1,8 @@
 // @ts-check
 
-import { createOrUpdateGlBuffer } from './create-or-update-gl-buffer';
-import { readParticleData } from './read-particle-data';
-import { sortParticleData } from './sort-particle-data';
+import { createOrUpdateGlBuffer } from './create-or-update-gl-buffer.js';
+import { readParticleData } from './read-particle-data/index.js';
+import { sortParticleData } from './sort-particle-data/index.js';
 
 /**
  * @this {import('..').ParticleSystem}

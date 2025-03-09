@@ -1,3 +1,3 @@
 // @ts-check
 
-export { computeCore } from './compute-core';
+export { computeCore } from './compute-core.js';

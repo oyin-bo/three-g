@@ -2,7 +2,7 @@ export const gl_Moore = `
 // Injected lookup table data from JavaScript:
 /* INSERT generateMoore3DLookupTableString() OUTPUT HERE */
 
-uint moore3D(uint x, uint y, uint z, uint iterations) {
+uint moore3D(uint x, uint y, uint z) {
   uint m = 0;
   uint mask = 1;
   uint dir;
@@ -14,7 +14,8 @@ uint moore3D(uint x, uint y, uint z, uint iterations) {
     0, 0, 0, 0, 1, 1, 1, 1  // rx
   );
 
-  for (uint i = 0; i < iterations; i++) {
+  // Fixed iteration count
+  for (int i = 0; i < 10; i++) {
     uint rx = (x & mask) >> i;
     uint ry = (y & mask) >> i;
     uint rz = (z & mask) >> i;
@@ -37,14 +38,13 @@ uint moore3D(uint x, uint y, uint z, uint iterations) {
 
     m = (m << 3) | dir;
 
-    // Apply transformation using const arrays
-    int tempX = x;
-    int tempY = y;
-    int tempZ = z;
+    // Apply transformation using matrix multiplication
+    vec4 coordinates = vec4(x, y, z, 1.0); // Homogeneous coordinates
+    vec4 transformedCoordinates = transformationMatrices[dir] * coordinates;
 
-    x = tempX * transformationX[dir] + tempY * transformationY[dir] + tempZ * transformationZ[dir];
-    y = tempX * transformationY[dir] - tempY * transformationX[dir] + tempZ * transformationZ[dir];
-    z = tempX * transformationZ[dir] + tempY * transformationX[dir] - tempZ * transformationY[dir];
+    x = uint(transformedCoordinates.x);
+    y = uint(transformedCoordinates.y);
+    z = uint(transformedCoordinates.z);
 
     mask <<= 1;
   }

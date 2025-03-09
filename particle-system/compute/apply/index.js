@@ -1,3 +1,3 @@
 // @ts-check
 
-export { applyCore } from './apply-core';
+export { applyCore } from './apply-core.js';

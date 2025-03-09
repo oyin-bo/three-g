@@ -1,8 +1,8 @@
 // @ts-check
 
-import { createAndCompileShader } from '../create-and-compile-shader';
-import { glErrorProgramLinkingString, glErrorString } from '../gl-errors';
-import { gl_PositionsAndVelocities } from './1-positions-velocities/glsl-positions-velocities';
+import { createAndCompileShader } from '../create-and-compile-shader.js';
+import { glErrorProgramLinkingString, glErrorString } from '../gl-errors.js';
+import { gl_PositionsAndVelocities } from './1-positions-velocities/glsl-positions-velocities.js';
 
 /**
  * @param {WebGL2RenderingContext} gl

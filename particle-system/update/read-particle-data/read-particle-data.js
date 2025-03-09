@@ -1,7 +1,7 @@
 // @ts-check
 
-import { initCoordsObj } from './init-coords-obj';
-import { storeInGlBuffers } from './store-in-gl-buffers';
+import { initCoordsObj } from './init-coords-obj.js';
+import { storeInGlBuffers } from './store-in-gl-buffers.js';
 
 /**
  * @param {Pick<ConstructorParameters<typeof import('../..').ParticleSystem>[0], 'particles' | 'get'>} _{

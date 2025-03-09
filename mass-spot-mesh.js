@@ -19,12 +19,15 @@ import {
  *  rgb?: number
  * }} TParticle
  *
+ * Note that vertexExtra will be injected inside the vertext shader,
+ * and can be used to adjust and recalculate **gl_Position**, **vDiameter** and RGB **vColor**.
  * @param {{
  *  spots: TParticle[],
- *  get?: (spot: TParticle, coords: { index: number, x: number, y: number, z: number, mass: number, rgb: number }) => void
- * }} _ 
+ *  get?: (spot: TParticle, coords: { index: number, x: number, y: number, z: number, mass: number, rgb: number }) => void,
+ *  vertexExtra?: string
+ * }} options
  */
-export function massSpotMesh({ spots, get }) {
+export function massSpotMesh({ spots, get, vertexExtra }) {
 
   const dummy = {
     index: 0,
@@ -84,6 +87,8 @@ export function massSpotMesh({ spots, get }) {
               vColor = vec4(float(rInt) / 255.0f, float(gInt) / 255.0f, float(bInt) / 255.0f, float(aInt) / 255.0f);
 
               vFogDist = distance(cameraPosition, offset);
+
+              ${vertexExtra || ''}
             }
           `,
     fragmentShader: /* glsl */`

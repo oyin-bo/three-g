@@ -1,6 +1,6 @@
 // @ts-check
 
-import { glCode } from '../../gl-errors';
+import { glCode } from '../../gl-errors.js';
 
 /**
  * @param {import('../..').ParticleSystem & { _computeState: import('../compute-core').GLComputeState}} self

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createScene } from 'three-pop';
-import { massSpotMesh } from 'three-g';
+import { massSpotMesh, ParticleSystem } from 'three-g';
 
 const { scene, camera, container } = createScene({
   renderer: { antialias: true },

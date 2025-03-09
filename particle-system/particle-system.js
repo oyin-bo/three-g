@@ -1,9 +1,9 @@
 // @ts-check
 
-import { computeCore } from './compute';
-import { applyCore } from './compute/apply';
-import { positionsBufferCore } from './compute/positions-buffer';
-import { update } from './update';
+import { computeCore } from './compute/index.js';
+import { applyCore } from './compute/apply/index.js';
+import { positionsBufferCore } from './compute/positions-buffer/index.js';
+import { update } from './update/index.js';
 
 export var DEFAULT_GRAVITY = 9.81;
 

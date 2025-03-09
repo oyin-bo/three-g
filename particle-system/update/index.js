@@ -1,3 +1,3 @@
 // @ts-check
 
-export { update } from './update';
+export { update } from './update.js';
