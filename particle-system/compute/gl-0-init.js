@@ -40,33 +40,23 @@ export function gl_init(gl) {
 
   gl.bindVertexArray(vao);
 
-  // Setup attributes (Dummy buffers, the real ones will be binded in computeCore)
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); // Dummy buffer for a_position
-  const positionLocation = gl.getAttribLocation(program, 'a_position');
-  gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0);
-  gl.enableVertexAttribArray(positionLocation);
+  // Get Uniform Buffer Binding Points
+  const cellSpanOffsetBindingPoint = gl.getUniformBlockIndex(program, 'CellSpanOffsetBuffer');
+  gl.uniformBlockBinding(program, cellSpanOffsetBindingPoint, 0);
 
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); // Dummy buffer for a_velocity
-  const velocityLocation = gl.getAttribLocation(program, 'a_velocity');
-  gl.vertexAttribPointer(velocityLocation, 3, gl.FLOAT, false, 0, 0);
-  gl.enableVertexAttribArray(velocityLocation);
+  const cellTotalMassBindingPoint = gl.getUniformBlockIndex(program, 'CellTotalMassBuffer');
+  gl.uniformBlockBinding(program, cellTotalMassBindingPoint, 1);
 
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); // Dummy buffer for a_mass
-  const massLocation = gl.getAttribLocation(program, 'a_mass');
-  gl.vertexAttribPointer(massLocation, 1, gl.FLOAT, false, 0, 0);
-  gl.enableVertexAttribArray(massLocation);
+  const particlePositionsBindingPoint = gl.getUniformBlockIndex(program, 'ParticlePositionsBuffer');
+  gl.uniformBlockBinding(program, particlePositionsBindingPoint, 2);
 
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); // Dummy buffer for a_cellSpanOffset
-  const cellSpanOffsetLocation = gl.getAttribLocation(program, 'a_cellSpanOffset');
-  gl.vertexAttribPointer(cellSpanOffsetLocation, 1, gl.FLOAT, false, 0, 0);
-  gl.enableVertexAttribArray(cellSpanOffsetLocation);
+  const particleMassesBindingPoint = gl.getUniformBlockIndex(program, 'ParticleMassesBuffer');
+  gl.uniformBlockBinding(program, particleMassesBindingPoint, 3);
 
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); // Dummy buffer for a_cellTotalMass
-  const cellTotalMassLocation = gl.getAttribLocation(program, 'a_cellTotalMass');
-  gl.vertexAttribPointer(cellTotalMassLocation, 1, gl.FLOAT, false, 0, 0);
-  gl.enableVertexAttribArray(cellTotalMassLocation);
+  const particleVelocitiesBindingPoint = gl.getUniformBlockIndex(program, 'ParticleVelocitiesBuffer');
+  gl.uniformBlockBinding(program, particleVelocitiesBindingPoint, 4);
 
-  gl.bindVertexArray(null); // Unbind the VAO
+  gl.bindVertexArray(null);
 
   // Get Uniform Locations
   const deltaTimeLocation = getUniformLocationOrThrow('u_deltaTime');
@@ -75,14 +65,9 @@ export function gl_init(gl) {
 
   return {
     program,
-    positionLocation,
-    velocityLocation,
-    massLocation,
     deltaTimeLocation,
     gravityConstantLocation,
     gridDimensionsLocation,
-    cellSpanOffsetLocation,
-    cellTotalMassLocation,
     transformFeedback,
     vao
   };
