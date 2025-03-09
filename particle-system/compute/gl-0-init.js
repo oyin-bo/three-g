@@ -2,7 +2,7 @@
 
 import { createAndCompileShader } from '../create-and-compile-shader';
 import { glErrorProgramLinkingString, glErrorString } from '../gl-errors';
-import { gl_PositionsAndVelocities } from './gl-1-positions-and-velocities';
+import { gl_PositionsAndVelocities } from './1-positions-velocities/glsl-positions-velocities';
 
 /**
  * @param {WebGL2RenderingContext} gl
