@@ -24,10 +24,11 @@ import {
  * @param {{
  *  spots: TParticle[],
  *  get?: (spot: TParticle, coords: { index: number, x: number, y: number, z: number, mass: number, rgb: number }) => void,
- *  vertexExtra?: string
+ *  fog: number | { start?: number, gray?: number },
+ *  glsl?: { definitions?: string, vertex?: string },
  * }} options
  */
-export function massSpotMesh({ spots, get, vertexExtra }) {
+export function massSpotMesh({ spots, get, fog, glsl }) {
 
   const dummy = {
     index: 0,
@@ -53,9 +54,25 @@ export function massSpotMesh({ spots, get, vertexExtra }) {
   geometry.setAttribute('color', new InstancedBufferAttribute(colorBuf, 1));
   geometry.instanceCount = spots.length;
 
+  let fogStart = 0.6;
+  let fogGray = 1.0;
+  if (fog) {
+    if (typeof fog === 'number') {
+      fogStart = fog;
+      fogGray = fog * 4 / 10;
+    } else {
+      if (fog.start) fogStart = fog.start;
+      if (fog.gray) fogGray = fog.gray;
+    }
+  }
+
   const material = new ShaderMaterial({
+    uniforms: {
+      fogStart: { value: fogStart },
+      fogGray: { value: fogGray }
+    },
     blending: AdditiveBlending,
-    vertexShader: /* glsl */`
+    vertexShader: (glsl?.definitions || '') + /* glsl */`
             precision highp float;
 
             attribute vec3 offset;
@@ -68,6 +85,7 @@ export function massSpotMesh({ spots, get, vertexExtra }) {
             varying vec4 vColor;
 
             void main(){
+
               vDiameter = diameter;
 
               gl_Position = projectionMatrix * (modelViewMatrix * vec4(offset, 1.0));
@@ -88,7 +106,7 @@ export function massSpotMesh({ spots, get, vertexExtra }) {
 
               vFogDist = distance(cameraPosition, offset);
 
-              ${vertexExtra || ''}
+              ${glsl?.vertex || ''}
             }
           `,
     fragmentShader: /* glsl */`
@@ -98,6 +116,10 @@ export function massSpotMesh({ spots, get, vertexExtra }) {
             varying float vFogDist;
 
             varying float vDiameter;
+
+            uniform float fogStart;
+            uniform float fogGray;
+
 
             void main() {
               gl_FragColor = vColor;
@@ -112,8 +134,6 @@ export function massSpotMesh({ spots, get, vertexExtra }) {
               float radiusRatio =
                 dist < 0.5 ? 1.0 - dist * 2.0 : 0.0;
 
-              float fogStart = 0.6;
-              float fogGray = 1.0;
               float fogRatio = vFogDist < fogStart ? 0.0 : vFogDist > fogGray ? 1.0 : (vFogDist - fogStart) / (fogGray - fogStart);
 
               vec4 tintColor = vColor;

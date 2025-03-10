@@ -1,7 +1,7 @@
+// @ts-check
+
 export function calculateMoore3DTransformations() {
-  const transformationX = new Int32Array(8);
-  const transformationY = new Int32Array(8);
-  const transformationZ = new Int32Array(8);
+  const transformations =[] ; // Single array to store all transformations
 
   // Define base transformations
   const rotateX90 = [1, 0, 0, 0, 0, -1, 0, 1, 0];
@@ -53,35 +53,23 @@ export function calculateMoore3DTransformations() {
       currentTranslation = translate100;
     }
 
-    // Store transformation values in the lookup tables
-    transformationX[direction] = currentRotation[0] + currentRotation[4] + currentRotation[8] + currentTranslation[0];
-    transformationY[direction] = currentRotation[1] + currentRotation[5] + currentRotation[6] + currentTranslation[1];
-    transformationZ[direction] = currentRotation[2] + currentRotation[3] + currentRotation[7] + currentTranslation[2];
+    // Store transformation values in the single array
+    transformations.push(
+      currentRotation[0] + currentRotation[4] + currentRotation[8] + currentTranslation[0],
+      currentRotation[1] + currentRotation[5] + currentRotation[6] + currentTranslation[1],
+      currentRotation[2] + currentRotation[3] + currentRotation[7] + currentTranslation[2]
+    );
   }
 
-  return { transformationX, transformationY, transformationZ };
+  return transformations; // Return the single array
 }
 
 export function generateMoore3DLookupTableString() {
   const transformationData = calculateMoore3DTransformations();
-  let glslString = "const int transformationX[8] = int[8](";
-  for (let i = 0; i < 8; i++) {
-    glslString += transformationData.transformationX[i];
-    if (i < 7) glslString += ", ";
-  }
-  glslString += ");\n";
-
-  glslString += "const int transformationY[8] = int[8](";
-  for (let i = 0; i < 8; i++) {
-    glslString += transformationData.transformationY[i];
-    if (i < 7) glslString += ", ";
-  }
-  glslString += ");\n";
-
-  glslString += "const int transformationZ[8] = int[8](";
-  for (let i = 0; i < 8; i++) {
-    glslString += transformationData.transformationZ[i];
-    if (i < 7) glslString += ", ";
+  let glslString = "const int transformData[24] = int[24](";
+  for (let i = 0; i < 24; i++) {
+    glslString += transformationData[i];
+    if (i < 23) glslString += ", ";
   }
   glslString += ");\n";
 

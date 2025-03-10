@@ -15,16 +15,16 @@ export class ParticleSystem {
     /** @type {WebGLBuffer} */ _cpuOriginalIndexBuffer;
 
     /** @type {WebGLBuffer} */ _positionsBufferPing;
+    /** @type {WebGLBuffer} */ _positionsBufferArcPing;
     /** @type {WebGLBuffer} */ _positionsBufferPong;
 
     /** @type {WebGLBuffer} */ _velocitiesBufferPing;
+    /** @type {WebGLBuffer} */ _velocitiesBufferArcPing;
     /** @type {WebGLBuffer} */ _velocitiesBufferPong;
 
     /** @type {WebGLBuffer} */_massBuffer;
+    /** @type {WebGLBuffer} */_massArcBuffer;
   
-    /** @type {WebGLBuffer} */_cellSpanOffsetBuffer;
-    /** @type {WebGLBuffer} */_cellTotalMassBuffer;
-
   /**
    * @param {{
    *  gl: WebGL2RenderingContext,

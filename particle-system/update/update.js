@@ -1,6 +1,6 @@
 // @ts-check
 
-import { createOrUpdateGlBuffer } from './create-or-update-gl-buffer.js';
+import { createOrUpdateGLBuffer } from './create-or-update-gl-buffer.js';
 import { readParticleData } from './read-particle-data/index.js';
 import { sortParticleData } from './sort-particle-data/index.js';
 
@@ -12,39 +12,23 @@ export function update(newParticles) {
   this._particles = newParticles;
 
   const {
-    rawPositionData,
-    rawVelocityData,
-    rawMassData,
+    positionData,
+    velocityData,
+    massData,
     cpuOriginalIndexData,
     bounds,
   } = readParticleData({ particles: this._particles, get: this._get });
 
-  const {
-    positionData,
-    velocityData,
-    massData,
-    cellSpanOffsetData,
-    cellTotalMassData
-  } = sortParticleData({
-    particleCount: this._particles.length,
-    gridDimensions: this._gridDimensions,
-    rawPositionData,
-    rawVelocityData,
-    rawMassData,
-    cpuOriginalIndexData,
-    bounds
-  });
+  this._positionsBufferPing = createOrUpdateGLBuffer(this._gl, this._positionsBufferPing, positionData);
+  this._positionsBufferArcPing = createOrUpdateGLBuffer(this._gl, this._positionsBufferArcPing, positionData);
+  this._positionsBufferPong = createOrUpdateGLBuffer(this._gl, this._positionsBufferPong);
 
-  this._positionsBufferPing = createOrUpdateGlBuffer(this._gl, this._positionsBufferPing, positionData);
-  this._positionsBufferPong = createOrUpdateGlBuffer(this._gl, this._positionsBufferPong);
+  this._velocitiesBufferPing = createOrUpdateGLBuffer(this._gl, this._velocitiesBufferPing, velocityData);
+  this._velocitiesBufferArcPing = createOrUpdateGLBuffer(this._gl, this._velocitiesBufferArcPing, velocityData);
+  this._velocitiesBufferPong = createOrUpdateGLBuffer(this._gl, this._velocitiesBufferPong);
 
-  this._velocitiesBufferPing = createOrUpdateGlBuffer(this._gl, this._velocitiesBufferPing, velocityData);
-  this._velocitiesBufferPong = createOrUpdateGlBuffer(this._gl, this._velocitiesBufferPong);
+  this._massBuffer = createOrUpdateGLBuffer(this._gl, this._massBuffer, massData);
+  this._massArcBuffer = createOrUpdateGLBuffer(this._gl, this._massBuffer, massData);
 
-  this._massBuffer = createOrUpdateGlBuffer(this._gl, this._massBuffer, massData);
-
-  this._cpuOriginalIndexBuffer = createOrUpdateGlBuffer(this._gl, this._cpuOriginalIndexBuffer, cpuOriginalIndexData);
-
-  this._cellSpanOffsetBuffer = createOrUpdateGlBuffer(this._gl, this._cellSpanOffsetBuffer, cellSpanOffsetData);
-  this._cellTotalMassBuffer = createOrUpdateGlBuffer(this._gl, this._cellTotalMassBuffer, cellTotalMassData);
+  this._cpuOriginalIndexBuffer = createOrUpdateGLBuffer(this._gl, this._cpuOriginalIndexBuffer, cpuOriginalIndexData);
 }

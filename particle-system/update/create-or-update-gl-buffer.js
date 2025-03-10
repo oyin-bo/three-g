@@ -5,7 +5,7 @@
  * @param {WebGLBuffer} buffer
  * @param {ArrayBufferView} [data]
  */
-export function createOrUpdateGlBuffer(gl, buffer, data) {
+export function createOrUpdateGLBuffer(gl, buffer, data) {
   if (!buffer) {
     buffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);

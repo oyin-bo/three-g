@@ -1,16 +1,16 @@
 // @ts-check
 
 import { initCoordsObj } from './init-coords-obj.js';
-import { storeInGlBuffers } from './store-in-gl-buffers.js';
+import { storeInWebGLBuffers } from './store-in-gl-buffers.js';
 
 /**
  * @param {Pick<ConstructorParameters<typeof import('../..').ParticleSystem>[0], 'particles' | 'get'>} _{
  * }} _
  */
 export function readParticleData({ particles, get }) {
-  const rawPositionData = new Float32Array(particles.length * 3);
-  const rawVelocityData = new Float32Array(particles.length * 3);
-  const rawMassData = new Float32Array(particles.length);
+  const positionData = new Float32Array(particles.length * 3);
+  const velocityData = new Float32Array(particles.length * 3);
+  const massData = new Float32Array(particles.length);
   const cpuOriginalIndexData = new Int32Array(particles.length);
 
   const coords = {
@@ -30,9 +30,9 @@ export function readParticleData({ particles, get }) {
   const bufState = {
     offset: 0,
     coords,
-    positionData: rawPositionData,
-    velocityData: rawVelocityData,
-    massData: rawMassData,
+    positionData: positionData,
+    velocityData: velocityData,
+    massData: massData,
     bounds,
   };
 
@@ -45,13 +45,13 @@ export function readParticleData({ particles, get }) {
     if (typeof get === 'function') get(particle, coords);
 
     bufState.offset = i;
-    storeInGlBuffers(bufState);
+    storeInWebGLBuffers(bufState);
   }
 
   return {
-    rawPositionData,
-    rawVelocityData,
-    rawMassData,
+    positionData,
+    velocityData,
+    massData,
     cpuOriginalIndexData,
     bounds
   };

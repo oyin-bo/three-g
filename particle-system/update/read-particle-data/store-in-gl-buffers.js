@@ -22,7 +22,7 @@
  *  }
  * }} _
  */
-export function storeInGlBuffers({ offset, coords, positionData, velocityData, massData, bounds }) {
+export function storeInWebGLBuffers({ offset, coords, positionData, velocityData, massData, bounds }) {
 
   positionData[offset * 3 + 0] = coords.x;
   positionData[offset * 3 + 1] = coords.y;
