@@ -12,8 +12,7 @@
  *    vz: number,
  *    mass: number
  *  },
- *  positionData: Float32Array,
- *  velocityData: Float32Array,
+ *  dynamicData: Float32Array,
  *  massData: Float32Array,
  *  bounds: {
  *    x: { min: number, max: number },
@@ -22,15 +21,15 @@
  *  }
  * }} _
  */
-export function storeInWebGLBuffers({ offset, coords, positionData, velocityData, massData, bounds }) {
+export function storeInWebGLBuffers({ offset, coords, dynamicData, massData, bounds }) {
 
-  positionData[offset * 3 + 0] = coords.x;
-  positionData[offset * 3 + 1] = coords.y;
-  positionData[offset * 3 + 2] = coords.z;
+  dynamicData[offset * 3 + 0] = coords.x;
+  dynamicData[offset * 3 + 1] = coords.y;
+  dynamicData[offset * 3 + 2] = coords.z;
 
-  velocityData[offset * 3 + 0] = coords.vx;
-  velocityData[offset * 3 + 1] = coords.vy;
-  velocityData[offset * 3 + 2] = coords.vz;
+  dynamicData[offset * 3 + 3] = coords.vx;
+  dynamicData[offset * 3 + 4] = coords.vy;
+  dynamicData[offset * 3 + 5] = coords.vz;
 
   massData[offset] = coords.mass;
 

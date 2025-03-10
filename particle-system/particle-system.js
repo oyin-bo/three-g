@@ -3,7 +3,7 @@
 import { computeCore } from './compute/index.js';
 import { applyCore } from './compute/apply/index.js';
 import { positionsBufferCore } from './compute/positions-buffer/index.js';
-import { update } from './update/index.js';
+import { upload } from './upload/index.js';
 
 export var DEFAULT_GRAVITY = 9.81;
 
@@ -12,18 +12,14 @@ export var DEFAULT_GRAVITY = 9.81;
  */
 export class ParticleSystem {
 
-    /** @type {WebGLBuffer} */ _cpuOriginalIndexBuffer;
+    /** @type {WebGLBuffer} */ _dynamicBuffer;
+    /** @type {WebGLBuffer} */ _dynamicBufferOut;
 
-    /** @type {WebGLBuffer} */ _positionsBufferPing;
-    /** @type {WebGLBuffer} */ _positionsBufferArcPing;
-    /** @type {WebGLBuffer} */ _positionsBufferPong;
+    /** @type {WebGLBuffer} */ _staticBuffer;
+    /** @type {WebGLBuffer} */ _staticBufferOut;
 
-    /** @type {WebGLBuffer} */ _velocitiesBufferPing;
-    /** @type {WebGLBuffer} */ _velocitiesBufferArcPing;
-    /** @type {WebGLBuffer} */ _velocitiesBufferPong;
-
-    /** @type {WebGLBuffer} */_massBuffer;
-    /** @type {WebGLBuffer} */_massArcBuffer;
+    /** @type {WebGLBuffer} */ _ordersBuffer;
+    /** @type {WebGLBuffer} */ _ordersBufferOut;
   
   /**
    * @param {{
@@ -44,8 +40,8 @@ export class ParticleSystem {
     this._get = get;
     this._apply = apply;
 
-    /** @type {typeof update} */
-    this.update = update.bind(this);
+    /** @type {typeof upload} */
+    this.upload = upload.bind(this);
 
     this.compute = this.compute.bind(this);
     this._computeCore = computeCore.bind(this);
@@ -57,7 +53,7 @@ export class ParticleSystem {
 
     this._lastTick = this._clock.now();
 
-    this.update(particles);
+    this.upload(particles);
   }
 
   /** @param {number} iterations */

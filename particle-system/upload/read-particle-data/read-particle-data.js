@@ -4,12 +4,11 @@ import { initCoordsObj } from './init-coords-obj.js';
 import { storeInWebGLBuffers } from './store-in-gl-buffers.js';
 
 /**
- * @param {Pick<ConstructorParameters<typeof import('../..').ParticleSystem>[0], 'particles' | 'get'>} _{
- * }} _
+ * @template {import('../..').ParticleCore} TParticle
+ * @param {Pick<Parameters<typeof import('..').upload<TParticle>>[0], 'particles' | 'get'>} _
  */
 export function readParticleData({ particles, get }) {
-  const positionData = new Float32Array(particles.length * 3);
-  const velocityData = new Float32Array(particles.length * 3);
+  const dynamicData = new Float32Array(particles.length * 3 * 2);
   const massData = new Float32Array(particles.length);
   const cpuOriginalIndexData = new Int32Array(particles.length);
 
@@ -30,9 +29,8 @@ export function readParticleData({ particles, get }) {
   const bufState = {
     offset: 0,
     coords,
-    positionData: positionData,
-    velocityData: velocityData,
-    massData: massData,
+    dynamicData,
+    massData,
     bounds,
   };
 
@@ -49,8 +47,7 @@ export function readParticleData({ particles, get }) {
   }
 
   return {
-    positionData,
-    velocityData,
+    dynamicData,
     massData,
     cpuOriginalIndexData,
     bounds
