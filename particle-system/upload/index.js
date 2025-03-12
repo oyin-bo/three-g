@@ -13,8 +13,6 @@ export { upload } from './upload.js';
  *  ordersBuffer: WebGLBuffer,
  *  ordersBufferOut: WebGLBuffer,
  *  uploadProgram: WebGLProgram,
- *  physicsProgram: WebGLProgram,
- *  hilbertProgram: WebGLProgram,
- *  sortingProgram: WebGLProgram
+ *  computeState: import('../compute/index.js').GLComputeState,
  * }} ParticleSystemState
  */

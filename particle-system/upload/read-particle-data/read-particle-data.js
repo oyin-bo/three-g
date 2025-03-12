@@ -10,7 +10,6 @@ import { storeInWebGLBuffers } from './store-in-gl-buffers.js';
 export function readParticleData({ particles, get }) {
   const dynamicData = new Float32Array(particles.length * 3 * 2);
   const massData = new Float32Array(particles.length);
-  const cpuOriginalIndexData = new Int32Array(particles.length);
 
   const coords = {
     index: 0,
@@ -36,7 +35,6 @@ export function readParticleData({ particles, get }) {
 
   for (let i = 0; i < particles.length; i++) {
     const particle = particles[i];
-    cpuOriginalIndexData[i] = i;
 
     initCoordsObj(i, particle, coords);
 
@@ -49,7 +47,6 @@ export function readParticleData({ particles, get }) {
   return {
     dynamicData,
     massData,
-    cpuOriginalIndexData,
     bounds
   };
 }

@@ -3,7 +3,7 @@
 import { glCode } from '../../gl-errors.js';
 
 /**
- * @param {import('../..').ParticleSystem & { _computeState: import('../compute-core').GLComputeState}} self
+ * @param {import('../../index.js').ParticleSystem & { _computeState: import('../compute.js').GLComputeState}} self
  */
 export function computePositionsVelocities(self) {
   const gl = self._gl;
