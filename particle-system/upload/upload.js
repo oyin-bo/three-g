@@ -3,6 +3,7 @@
 import { createComputeState } from '../compute/index.js';
 import { createAndCompileShader } from '../gl-utils/create-and-compile-shader.js';
 import { glErrorProgramLinkingString } from '../gl-utils/gl-errors.js';
+import { linkValidateProgram } from '../gl-utils/link-validate-program.js';
 import { createGLBuffer } from './create-gl-buffer.js';
 import { readParticleData } from './read-particle-data/index.js';
 
@@ -60,12 +61,12 @@ layout (location = 0) in vec3 position;
 layout (location = 1) in vec3 velocity;
 layout (location = 2) in float mass;
 
-out float outMass;
-out float outMass_arc;
-out vec3 outPosition_arc;
-out vec3 outVelocity_arc;
-out int outCpuIndex;
-out int outCpuIndex_arc;
+flat out float outMass;
+flat out float outMass_arc;
+flat out vec3 outPosition_arc;
+flat out vec3 outVelocity_arc;
+flat out int outCpuIndex;
+flat out int outCpuIndex_arc;
 
 void main() {
   outMass = mass;
@@ -77,8 +78,13 @@ void main() {
 }
       `);
 
+    const fragmentShader = createAndCompileShader(gl, gl.FRAGMENT_SHADER, `
+        #version 300 es
+        void main() {}`);
+
     const program = gl.createProgram();
     gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
 
     // Transform feedback variables
     gl.transformFeedbackVaryings(
@@ -94,20 +100,7 @@ void main() {
       gl.INTERLEAVED_ATTRIBS
     );
 
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      const errorString = glErrorProgramLinkingString({ gl, program });
-      gl.deleteProgram(program);
-      throw new Error(errorString);
-    }
-
-    gl.validateProgram(program);
-
-    if (!gl.getProgramParameter(program, gl.VALIDATE_STATUS)) {
-      const errorString = glErrorProgramLinkingString({ gl, program });
-      gl.deleteProgram(program);
-      throw new Error(errorString);
-    }
+    linkValidateProgram(gl, program);
 
     return program;
   }

@@ -4,16 +4,16 @@ export const gl_sorting = /* glsl */`
 precision highp float;
 
 // Output Attributes
-out vec3 positionOut;
-out vec3 velocityOut;
-out float massOut;
-out float massArcOut;
-out vec3 positionArcOut;
-out vec3 velocityArcOut;
-out uint cpuIndexOut;
-out uint cpuIndexArcOut;
-out uint sourceIdxHilbertOut;
-out uint sourceIdxHilbertArcOut;
+flat out vec3 positionOut;
+flat out vec3 velocityOut;
+flat out float massOut;
+flat out float massArcOut;
+flat out vec3 positionArcOut;
+flat out vec3 velocityArcOut;
+flat out uint cpuIndexOut;
+flat out uint cpuIndexArcOut;
+flat out uint sourceIdxHilbertOut;
+flat out uint sourceIdxHilbertArcOut;
 
 // Uniforms
 uniform int bufferSize;

@@ -2,15 +2,38 @@
 
 /**
  * @template {import('../..').ParticleCore} TParticle
- * @param {WebGL2RenderingContext} gl
- * @param {import('../../upload').ParticleSystemState<TParticle>} state
- * @param {number} timeDelta
+ * @param {{
+ *  gl: WebGL2RenderingContext,
+ *  state: import('../../upload').ParticleSystemState<TParticle>,
+ *  gravity: number,
+ *  timeDelta: number
+ * }} _
  */
-export function runPhysics(gl, state, timeDelta) {
-  gl.useProgram(state.computeState.physics.program);
+export function runPhysics({ gl, state, gravity, timeDelta }) {
+  const {
+    computeState: {
+      physics: {
+        program,
+        gravityLocation,
+        timeDeltaLocation,
+        bufferSizeLocation,
+      },
+    },
+    dynamicBuffer,
+    staticBuffer,
+    dynamicBufferOut,
+    particles: { length: bufferSize },
+  } = state;
+
+  gl.useProgram(program);
+
+  // Set uniform values
+  gl.uniform1f(gravityLocation, gravity);
+  gl.uniform1f(timeDeltaLocation, timeDelta);
+  gl.uniform1i(bufferSizeLocation, bufferSize);
 
   // Bind input buffers
-  gl.bindBuffer(gl.ARRAY_BUFFER, state.dynamicBuffer);
+  gl.bindBuffer(gl.ARRAY_BUFFER, dynamicBuffer);
 
   // Setup vertex attribute pointers for positions and velocities
   const positionLocation = 0;
@@ -29,7 +52,7 @@ export function runPhysics(gl, state, timeDelta) {
   gl.vertexAttribPointer(velocityLocation, velocitySize, gl.FLOAT, false, stride, velocityOffset);
 
   // Bind static buffer
-  gl.bindBuffer(gl.ARRAY_BUFFER, state.staticBuffer);
+  gl.bindBuffer(gl.ARRAY_BUFFER, staticBuffer);
 
   // Setup vertex attribute pointers for masses
   const massLocation = 2;
@@ -40,10 +63,10 @@ export function runPhysics(gl, state, timeDelta) {
   gl.vertexAttribPointer(massLocation, massSize, gl.FLOAT, false, staticStride, massOffset);
 
   // Bind output buffer for transform feedback
-  gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, state.dynamicBufferOut);
+  gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, dynamicBufferOut);
 
   gl.beginTransformFeedback(gl.POINTS);
-  gl.drawArrays(gl.POINTS, 0, state.particles.length);
+  gl.drawArrays(gl.POINTS, 0, bufferSize);
   gl.endTransformFeedback();
 
   // Disable vertex attribute arrays
@@ -52,7 +75,7 @@ export function runPhysics(gl, state, timeDelta) {
   gl.disableVertexAttribArray(massLocation);
 
   // Swap dynamic buffers
-  const temp = state.dynamicBuffer;
-  state.dynamicBuffer = state.dynamicBufferOut;
+  const temp = dynamicBuffer;
+  state.dynamicBuffer = dynamicBufferOut;
   state.dynamicBufferOut = temp;
 }

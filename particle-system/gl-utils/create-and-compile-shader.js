@@ -13,14 +13,14 @@ export function createAndCompileShader(gl, type, source) {
   const shader = gl.createShader(type);
   if (!shader) throw new Error('Failed to create ' + glCode(type, gl) + ': ' + glErrorString(gl));
 
-  gl.shaderSource(shader, source);
+  gl.shaderSource(shader, source.trimStart());
   gl.compileShader(shader);
 
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(glErrorShaderCompilationString({
     gl,
     shader,
     type,
-    source
+    source: source.trimStart()
   }));
 
   return shader;

@@ -32,15 +32,15 @@ export function createPhysicsState(gl) {
   if (!transformFeedback) throw new Error('Failed to create transform feedback ' + glErrorString(gl));
 
   // Get Uniform Locations
-  const deltaTimeLocation = getUniformLocationVerified(gl, program, 'u_deltaTime');
-  const gravityConstantLocation = getUniformLocationVerified(gl, program, 'u_gravityConstant');
-  const gridDimensionsLocation = getUniformLocationVerified(gl, program, 'u_gridDimensions');
+  const timeDeltaLocation = getUniformLocationVerified(gl, program, 'timeDelt');
+  const gravityLocation = getUniformLocationVerified(gl, program, 'gravity');
+  const bufferSizeLocation = getUniformLocationVerified(gl, program, 'bufferSize');
 
   return {
     program,
-    deltaTimeLocation,
-    gravityConstantLocation,
-    gridDimensionsLocation,
+    timeDeltaLocation,
+    gravityLocation,
+    bufferSizeLocation,
     transformFeedback,
     destroy
   };

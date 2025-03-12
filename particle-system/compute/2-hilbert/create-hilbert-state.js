@@ -20,10 +20,10 @@ export function createHilbertState(gl) {
 layout (location = 0) in vec3 position;
 layout (location = 1) in vec3 velocity;
 
-out uint sourceIdx;
-out uint hilbert;
-out uint sourceIdx_arc;
-out uint hilbert_arc;
+flat out uint sourceIdx;
+flat out uint hilbert;
+flat out uint sourceIdx_arc;
+flat out uint hilbert_arc;
 
 void main() {
   ivec2 hilbertIndices = hilbert3D_Dual(position);

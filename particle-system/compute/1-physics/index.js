@@ -3,9 +3,9 @@
 /**
  * @typedef {{
  * program: WebGLProgram,
- * deltaTimeLocation: WebGLUniformLocation,
- * gravityConstantLocation: WebGLUniformLocation,
- * gridDimensionsLocation: WebGLUniformLocation,
+ * timeDeltaLocation: WebGLUniformLocation,
+ * gravityLocation: WebGLUniformLocation,
+ * bufferSizeLocation: WebGLUniformLocation,
  * transformFeedback: WebGLTransformFeedback,
  * destroy(): void
  * }} GLPhysicsState

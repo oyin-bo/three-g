@@ -27,8 +27,8 @@ uniform float timeDelta;
 uniform int bufferSize;
 
 // Output Attributes (Dynamic Buffer)
-out vec3 positionOut;
-out vec3 velocityOut;
+flat out vec3 positionOut;
+flat out vec3 velocityOut;
 
 vec3 getPosition(int index) {
     return index >= 0 && index < bufferSize ? positions[index] : vec3(0.0);

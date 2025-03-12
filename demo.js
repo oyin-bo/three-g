@@ -1,9 +1,8 @@
 import * as THREE from 'three';
 import { createScene } from 'three-pop';
-import { massSpotMesh, ParticleSystem } from 'three-g';
-import { glsl_Hilbert, hilbert3D, glsl_hilbert3D_Dual } from 'three-g/particle-system/compute/2-hilbert/glsl-hilbert.js';
+import { massSpotMesh, particleSystem } from 'three-g';
 
-const { scene, camera, container } = createScene({
+const { scene, camera, container, renderer } = createScene({
   renderer: { antialias: true },
   camera: { fov: 40, near: 0.0001 }
 });
@@ -16,35 +15,13 @@ scene.add(new THREE.Mesh(
 const colors = [...Array(4000)].map(() =>
   new THREE.Color().setHSL(Math.random(), 1, 0.5).getHex());
 
-const loadHilbert = /hilbert/i.test(location + '');
-
+const spots = createSpots();
 const m = massSpotMesh({
   spots: createSpots(40000),
   get: (_spot, coords) => {
     coords.rgb = colors[coords.index % colors.length];
-    // if (loadHilbert) {
-    //   coords.rgb =
-    //     hilbert3D(coords.x, coords.y, coords.z);
-    //   // moore3D(coords.x, coords.y, coords.z);
-    // }
   },
-  fog: 200,
-  glsl: !loadHilbert ? undefined : {
-    definitions: glsl_hilbert3D_Dual,
-    vertex:
-  /* glsl */`
-  ivec2 derivedColor_Dual = hilbert3D_Dual(offset);
-
-  uint dRInt = (uint(derivedColor_Dual.y) / uint(256)) % uint(256);
-  uint dGInt = (uint(derivedColor_Dual.y)) % uint(256);
-  uint dBInt = uint(derivedColor_Dual.x) % uint(256);
-
-  vColor.r = float(dRInt) / 255.0f;
-  vColor.g = float(dGInt) / 255.0f;
-  vColor.b = float(dBInt) / 255.0f;
-
-  `
-  }
+  fog: 200
 });
 scene.add(m);
 
@@ -69,6 +46,26 @@ input.oninput = () => {
     }
   }, 600);
 };
+
+/**
+ * @type {ReturnType<typeof particleSystem>}
+ */
+var psys;
+
+setTimeout(() => {
+  runParticle();
+}, 1000);
+
+function runParticle() {
+  if (!psys) {
+    psys = particleSystem({
+      particles: spots,
+      gl: renderer.getContext()
+    });
+  }
+
+  psys.compute();
+}
 
 function createSpots(count) {
   return [...Array(count)].map(() => ({
