@@ -4,7 +4,7 @@
 
 import { createAndCompileShader } from '../../gl-utils/create-and-compile-shader.js';
 import { getUniformLocationVerified } from '../../gl-utils/get-uniform-location.js';
-import { glErrorProgramLinkingString, glErrorString } from '../../gl-utils/gl-errors.js';
+import { glErrorString } from '../../gl-utils/gl-errors.js';
 import { linkValidateProgram } from '../../gl-utils/link-validate-program.js';
 import { glsl_hilbert3D_Dual } from './glsl-hilbert3d.js';
 

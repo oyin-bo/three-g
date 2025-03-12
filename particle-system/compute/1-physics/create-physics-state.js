@@ -3,6 +3,7 @@
 import { createAndCompileShader } from '../../gl-utils/create-and-compile-shader.js';
 import { getUniformLocationVerified } from '../../gl-utils/get-uniform-location.js';
 import { glErrorProgramLinkingString, glErrorString } from '../../gl-utils/gl-errors.js';
+import { linkValidateProgram } from '../../gl-utils/link-validate-program.js';
 import { gl_PositionsAndVelocities } from './glsl-positions-velocities.js';
 
 /**
@@ -25,20 +26,7 @@ export function createPhysicsState(gl) {
   // Transform Feedback Varyings
   gl.transformFeedbackVaryings(program, ['v_position', 'v_velocity'], gl.INTERLEAVED_ATTRIBS);
 
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    const errorString = glErrorProgramLinkingString({ gl, program });
-    gl.deleteProgram(program);
-    throw new Error(errorString);
-  }
-
-  gl.validateProgram(program);
-
-  if (!gl.getProgramParameter(program, gl.VALIDATE_STATUS)) {
-    const errorString = glErrorProgramLinkingString({ gl, program });
-    gl.deleteProgram(program);
-    throw new Error(errorString);
-  }
+  linkValidateProgram(gl, program);
 
   const transformFeedback = gl.createTransformFeedback();
   if (!transformFeedback) throw new Error('Failed to create transform feedback ' + glErrorString(gl));
