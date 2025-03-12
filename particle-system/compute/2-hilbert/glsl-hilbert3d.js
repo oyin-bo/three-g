@@ -1,4 +1,4 @@
-export const glsl_hilbert3D_Dual = `
+export const glsl_hilbert3D_Dual = /* glsl */`
 
 uniform vec3 quantizationMin;
 uniform vec3 quantizationMax;

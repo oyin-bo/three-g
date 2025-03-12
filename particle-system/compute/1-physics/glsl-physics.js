@@ -7,11 +7,11 @@ precision highp float;
 // [ float mass, float mass_arc, vec3 position_arc, vec3 velocity_arc, uint cpu_idx ]
 layout(std140) uniform StaticBuffer {
     float masses[];
-    float massesArc[];
-    vec3 positionsArc[];
-    vec3 velocitiesArc[];
+    float masses_arc[];
+    vec3 positions_arc[];
+    vec3 velocities_arc[];
     uint cpuIndices[];
-    uint cpuIndicesArc[]; // TODO: propagate in the JS buffer definitions and loading/sorting
+    uint cpuIndices_arc[]; // TODO: propagate in the JS buffer definitions and loading/sorting
 };
 
 // Dynamic Buffer Layout:
@@ -35,7 +35,7 @@ vec3 getPosition(int index) {
 }
 
 vec3 getPosition_arc(int index) {
-    return index >= 0 && index < bufferSize ? positionsArc[index] : vec3(0.0);
+    return index >= 0 && index < bufferSize ? positions_arc[index] : vec3(0.0);
 }
 
 float getMass(int index) {
@@ -43,7 +43,7 @@ float getMass(int index) {
 }
 
 float getMass_arc(int index) {
-    return index >= 0 && index < bufferSize ? massesArc[index] : 0.0;
+    return index >= 0 && index < bufferSize ? masses_arc[index] : 0.0;
 }
 
 int getCpuIndex(int index) {
@@ -51,7 +51,7 @@ int getCpuIndex(int index) {
 }
 
 int getCpuIndex_arc(int index) {
-    return index >= 0 && index < bufferSize ? int(cpuIndicesArc[index]) : -1;
+    return index >= 0 && index < bufferSize ? int(cpuIndices_arc[index]) : -1;
 }
 
 vec3 calcForce(vec3 position, float mass, vec3 neighborPosition, float neighborMass) {
@@ -139,7 +139,7 @@ void main() {
         }
 
         // Aggregate forces
-        force += forceMainMinus + forceArcMinus + forceMainPlus + forceArcPlus;
+        force += forceMainMinus + force_arcMinus + forceMainPlus + force_arcPlus;
     }
 
     // Update velocity and position
