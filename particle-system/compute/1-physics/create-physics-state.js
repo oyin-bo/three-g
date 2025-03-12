@@ -4,14 +4,14 @@ import { createAndCompileShader } from '../../gl-utils/create-and-compile-shader
 import { getUniformLocationVerified } from '../../gl-utils/get-uniform-location.js';
 import { glErrorProgramLinkingString, glErrorString } from '../../gl-utils/gl-errors.js';
 import { linkValidateProgram } from '../../gl-utils/link-validate-program.js';
-import { gl_PositionsAndVelocities } from './glsl-positions-velocities.js';
+import { gl_physics } from './glsl-physics.js';
 
 /**
  * @param {WebGL2RenderingContext} gl
  * @returns {import('.').GLPhysicsState}
  */
 export function createPhysicsState(gl) {
-  const vertexShader = createAndCompileShader(gl, gl.VERTEX_SHADER, gl_PositionsAndVelocities);
+  const vertexShader = createAndCompileShader(gl, gl.VERTEX_SHADER, gl_physics);
 
   const fragmentShader = createAndCompileShader(gl, gl.FRAGMENT_SHADER, `
         #version 300 es

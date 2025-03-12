@@ -1,4 +1,8 @@
 export const glsl_hilbert3D_Dual = `
+
+uniform vec3 quantizationMin;
+uniform vec3 quantizationMax;
+
 const mat3 rotationMatrix = mat3(
   0.8660254, -0.25,      0.4330127,
   0.4330127,  0.8660254, -0.25,
@@ -6,13 +10,24 @@ const mat3 rotationMatrix = mat3(
 );
 
 ivec2 hilbert3D_Dual(vec3 pos) {
-  const float ratioPrecision = 150.0;
+  vec3 normalizedPos = (pos - quantizationMin) / (quantizationMax - quantizationMin);
+  vec3 rotatedNormalizedPos = rotationMatrix * normalizedPos;
 
-  vec3 pos1 = abs(round((pos + vec3(1.0)) * ratioPrecision));
-  vec3 pos2 = abs(round((rotationMatrix * pos + vec3(1.0)) * ratioPrecision));
+      // Scale and convert to ivec3 range [1, 2^31 - 1]
+    ivec3 pos1 = ivec3(
+        int(normalizedPos.x * 2147483645.0 + 1.0), // 2^31 - 2
+        int(normalizedPos.y * 2147483645.0 + 1.0),
+        int(normalizedPos.z * 2147483645.0 + 1.0)
+    );
 
-  int x1 = int(pos1.x); int y1 = int(pos1.y); int z1 = int(pos1.z);
-  int x2 = int(pos2.x); int y2 = int(pos2.y); int z2 = int(pos2.z);
+    ivec3 pos2 = ivec3(
+        int(rotatedNormalizedPos.x * 2147483645.0 + 1.0),
+        int(rotatedNormalizedPos.y * 2147483645.0 + 1.0),
+        int(rotatedNormalizedPos.z * 2147483645.0 + 1.0)
+);
+
+  int x1 = pos1.x; int y1 = pos1.y; int z1 = pos1.z;
+  int x2 = pos2.x; int y2 = pos2.y; int z2 = pos2.z;
 
   int h1 = 0;
   int h2 = 0;

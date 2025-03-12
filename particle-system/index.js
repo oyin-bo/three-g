@@ -1,6 +1,6 @@
 // @ts-check
 
-export { ParticleSystem } from './particle-system.js';
+export { particleSystem } from './particle-system.js';
 
 /**
  * @typedef {{

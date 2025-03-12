@@ -61,17 +61,19 @@ layout (location = 1) in vec3 velocity;
 layout (location = 2) in float mass;
 
 out float outMass;
-out float outMassArc;
-out vec3 outPositionArc;
-out vec3 outVelocityArc;
+out float outMass_arc;
+out vec3 outPosition_arc;
+out vec3 outVelocity_arc;
 out int outCpuIndex;
+out int outCpuIndex_arc;
 
 void main() {
   outMass = mass;
-  outMassArc = mass;
-  outPositionArc = position;
-  outVelocityArc = velocity;
+  outMass_arc = mass;
+  outPosition_arc = position;
+  outVelocity_arc = velocity;
   outCpuIndex = gl_VertexID;
+  outCpuIndex_arc = gl_VertexID;
 }
       `);
 
@@ -79,14 +81,18 @@ void main() {
     gl.attachShader(program, vertexShader);
 
     // Transform feedback variables
-    const varyings = [
-      'outMass',
-      'outMassArc',
-      'outPositionArc',
-      'outVelocityArc',
-      'outCpuIndex'
-    ];
-    gl.transformFeedbackVaryings(program, varyings, gl.INTERLEAVED_ATTRIBS);
+    gl.transformFeedbackVaryings(
+      program,
+      [
+        'outMass',
+        'outMass_arc',
+        'outPosition_arc',
+        'outVelocity_arc',
+        'outCpuIndex',
+        'outCpuIndex_arc'
+      ],
+      gl.INTERLEAVED_ATTRIBS
+    );
 
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {

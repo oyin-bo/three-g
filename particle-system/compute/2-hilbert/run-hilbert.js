@@ -1,18 +1,25 @@
 // @ts-check
 
+export var DEFAULT_SPACE = {
+  x: { min: -10, max: 10 },
+  y: { min: -10, max: 10 },
+  z: { min: -10, max: 10 }
+};
+
 /**
  * @template {import('../..').ParticleCore} TParticle
  * @param {WebGL2RenderingContext} gl
  * @param {import('../../upload').ParticleSystemState<TParticle>} state
- * @param {number} timeDelta
+ * @param {Parameters<typeof import('../..').particleSystem>[0]['space']} space
  */
-export function runPhysics(gl, state, timeDelta) {
-  gl.useProgram(state.computeState.physics.program);
+export function runHilbert(gl, state, space) {
+  // 1. Program Activation
+  gl.useProgram(state.computeState.hilbert.program);
 
-  // Bind input buffers
+  // 2. Input Buffer Binding
   gl.bindBuffer(gl.ARRAY_BUFFER, state.dynamicBuffer);
 
-  // Setup vertex attribute pointers for positions and velocities
+  // 3. Vertex Attribute Setup
   const positionLocation = 0;
   const velocityLocation = 1;
 
@@ -28,31 +35,33 @@ export function runPhysics(gl, state, timeDelta) {
   gl.vertexAttribPointer(positionLocation, positionSize, gl.FLOAT, false, stride, positionOffset);
   gl.vertexAttribPointer(velocityLocation, velocitySize, gl.FLOAT, false, stride, velocityOffset);
 
-  // Bind static buffer
-  gl.bindBuffer(gl.ARRAY_BUFFER, state.staticBuffer);
+  // 4. Uniform Setting
+  gl.uniform3fv(
+    state.computeState.hilbert.quantizationMinLocation,
+    [
+      space?.x?.min ?? DEFAULT_SPACE.x.min,
+      space?.y?.min ?? DEFAULT_SPACE.y.min,
+      space?.z?.min ?? DEFAULT_SPACE.z.min
+    ]
+  );
+  gl.uniform3fv(
+    state.computeState.hilbert.quantizationMaxLocation, 
+    [
+      space?.x?.max ?? DEFAULT_SPACE.x.max,
+      space?.y?.max ?? DEFAULT_SPACE.y.max,
+      space?.z?.max ?? DEFAULT_SPACE.z.max
+    ]
+  );
 
-  // Setup vertex attribute pointers for masses
-  const massLocation = 2;
-  const massSize = 1;
-  const staticStride = massSize * Float32Array.BYTES_PER_ELEMENT;
-  const massOffset = 0;
+  // 5. Output Buffer Binding
+  gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, state.ordersBuffer);
 
-  gl.vertexAttribPointer(massLocation, massSize, gl.FLOAT, false, staticStride, massOffset);
-
-  // Bind output buffer for transform feedback
-  gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, state.dynamicBufferOut);
-
+  // 6. Transform Feedback Execution
   gl.beginTransformFeedback(gl.POINTS);
   gl.drawArrays(gl.POINTS, 0, state.particles.length);
   gl.endTransformFeedback();
 
-  // Disable vertex attribute arrays
+  // 7. Attribute Array Disabling
   gl.disableVertexAttribArray(positionLocation);
   gl.disableVertexAttribArray(velocityLocation);
-  gl.disableVertexAttribArray(massLocation);
-
-  // Swap dynamic buffers
-  const temp = state.dynamicBuffer;
-  state.dynamicBuffer = state.dynamicBufferOut;
-  state.dynamicBufferOut = temp;
 }
