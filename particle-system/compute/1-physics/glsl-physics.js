@@ -5,20 +5,28 @@ precision highp float;
 
 // Static Buffer Layout:
 // [ float mass, float mass_arc, vec3 position_arc, vec3 velocity_arc, uint cpu_idx ]
-layout(std140) uniform StaticBuffer {
-    float masses[];
-    float masses_arc[];
-    vec3 positions_arc[];
-    vec3 velocities_arc[];
-    uint cpuIndices[];
-    uint cpuIndices_arc[]; // TODO: propagate in the JS buffer definitions and loading/sorting
+struct StaticBufferElement {
+    float mass;
+    float mass_arc;
+    vec3 position_arc;
+    vec3 velocity_arc;
+    uint cpuIndex;
+    uint cpuIndex_arc;
+};
+
+uniform StaticBuffer {
+    StaticBufferElement[] staticBuffer;
 };
 
 // Dynamic Buffer Layout:
 // [ vec3 positions, vec3 velocities ]
-layout(std140) uniform DynamicBuffer {
-    vec3 positions[];
-    vec3 velocities[];
+struct DynamicBufferElement {
+    vec3 position;
+    vec3 velocity;
+};
+
+uniform DynamicBuffer {
+    DynamicBufferElement[] dynamicBuffer;
 };
 
 // Uniforms
@@ -31,27 +39,27 @@ flat out vec3 positionOut;
 flat out vec3 velocityOut;
 
 vec3 getPosition(int index) {
-    return index >= 0 && index < bufferSize ? positions[index] : vec3(0.0);
+    return index >= 0 && index < bufferSize ? dynamicBuffer[index].position : vec3(0.0);
 }
 
 vec3 getPosition_arc(int index) {
-    return index >= 0 && index < bufferSize ? positions_arc[index] : vec3(0.0);
+    return index >= 0 && index < bufferSize ? staticBuffer[index].position_arc : vec3(0.0);
 }
 
 float getMass(int index) {
-    return index >= 0 && index < bufferSize ? masses[index] : 0.0;
+    return index >= 0 && index < bufferSize ? staticBuffer[index].mass : 0.0;
 }
 
 float getMass_arc(int index) {
-    return index >= 0 && index < bufferSize ? masses_arc[index] : 0.0;
+    return index >= 0 && index < bufferSize ? staticBuffer[index].mass : 0.0;
 }
 
 int getCpuIndex(int index) {
-    return index >= 0 && index < bufferSize ? int(cpuIndices[index]) : -1;
+    return index >= 0 && index < bufferSize ? int(staticBuffer[index]cpuIndex) : -1;
 }
 
 int getCpuIndex_arc(int index) {
-    return index >= 0 && index < bufferSize ? int(cpuIndices_arc[index]) : -1;
+    return index >= 0 && index < bufferSize ? int(staticBuffer[index].cpuIndex_arc[index]) : -1;
 }
 
 vec3 calcForce(vec3 position, float mass, vec3 neighborPosition, float neighborMass) {
@@ -68,7 +76,7 @@ void main() {
 
     vec3 position = positions[gl_VertexID];
     vec3 velocity = positions[gl_VertexID];
-    float mass = masses[gl_VertexID];
+    float mass = staticBuffer.masses[gl_VertexID];
 
     for (int separationOffset = 1; separationOffset <= ${NEIGHBOR_WINDOW_SIZE}; separationOffset++) {
         int indexMinus = gl_VertexID - separationOffset;

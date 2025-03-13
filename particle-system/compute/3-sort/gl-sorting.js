@@ -21,7 +21,7 @@ uniform int sortStage;
 uniform int sortPhase;
 
 // Static Buffer Layout
-layout(std140) uniform StaticBuffer {
+layout(std140) buffer StaticBuffer {
     float masses[];
     float massesArc[];
     vec3 positionsArc[];
@@ -31,13 +31,13 @@ layout(std140) uniform StaticBuffer {
 };
 
 // Dynamic Buffer Layout
-layout(std140) uniform DynamicBuffer {
+layout(std140) buffer DynamicBuffer {
     vec3 positions[];
     vec3 velocities[];
 };
 
 // Orders Buffer Layout
-layout(std140) uniform OrdersBuffer {
+layout(std140) buffer OrdersBuffer {
     uint sourceIdx[];
     uint hilbert[];
     uint sourceIdxArc[];
