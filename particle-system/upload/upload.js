@@ -2,7 +2,6 @@
 
 import { createComputeState } from '../compute/index.js';
 import { createAndCompileShader } from '../gl-utils/create-and-compile-shader.js';
-import { glErrorProgramLinkingString } from '../gl-utils/gl-errors.js';
 import { linkValidateProgram } from '../gl-utils/link-validate-program.js';
 import { createGLBuffer } from './create-gl-buffer.js';
 import { readParticleData } from './read-particle-data/index.js';
@@ -13,19 +12,28 @@ import { readParticleData } from './read-particle-data/index.js';
  *  gl: WebGL2RenderingContext,
  *  state?: import('./index.js').ParticleSystemState<TParticle>,
  *  get?: (particle: TParticle, coords: import('..').CoordsParam) => void,
- *  particles: TParticle[]
+ *  particles: TParticle[],
  * }} _
  * @returns {import('.').ParticleSystemState<TParticle>}
  */
 export function upload({ gl, state, get, particles }) {
 
+  const stride = (gl.getParameter(gl.MAX_TEXTURE_SIZE) / 2) | 0;
+  let rowCount = (particles.length / stride) | 0;
+  if (stride * rowCount < particles.length) rowCount++;
+
   const {
     dynamicData,
     massData,
-  } = readParticleData({ particles, get });
+  } = readParticleData({ particles, get, stride });
 
   const dynamicBuffer = createGLBuffer(gl, state?.dynamicBuffer, dynamicData);
   const dynamicBufferOut = createGLBuffer(gl, state?.dynamicBufferOut);
+  const dynamicTexture = gl.createTexture();
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB32F, stride, rowCount, 0, gl.RGB, gl.FLOAT, dynamicData);
+
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
   const staticBuffer = createGLBuffer(gl, state?.staticBuffer);
   const staticBufferOut = createGLBuffer(gl, state?.staticBufferOut);
@@ -45,6 +53,7 @@ export function upload({ gl, state, get, particles }) {
     particles,
     dynamicBuffer,
     dynamicBufferOut,
+    dynamicTexture,
     staticBuffer,
     staticBufferOut,
     ordersBuffer,

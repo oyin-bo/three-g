@@ -5,11 +5,16 @@ import { storeInWebGLBuffers } from './store-in-gl-buffers.js';
 
 /**
  * @template {import('../..').ParticleCore} TParticle
- * @param {Pick<Parameters<typeof import('..').upload<TParticle>>[0], 'particles' | 'get'>} _
+ * @param {Pick<Parameters<typeof import('..').upload<TParticle>>[0], 'particles' | 'get'> & {
+ *  stride: number
+ * }} _
  */
-export function readParticleData({ particles, get }) {
-  const dynamicData = new Float32Array(particles.length * 3 * 2);
-  const massData = new Float32Array(particles.length);
+export function readParticleData({ particles, get, stride }) {
+  let rowCount = (particles.length / stride) | 0;
+  if (rowCount * stride < particles.length) rowCount++;
+
+  const dynamicData = new Float32Array(stride * rowCount * 3 * 2);
+  const massData = new Float32Array(stride * rowCount);
 
   const coords = {
     index: 0,
