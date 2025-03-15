@@ -3,7 +3,7 @@
 import { createComputeState } from '../compute/index.js';
 import { createAndCompileShader } from '../gl-utils/create-and-compile-shader.js';
 import { linkValidateProgram } from '../gl-utils/link-validate-program.js';
-import { createGLBuffer } from './create-gl-buffer.js';
+import { createGLBuffer } from './create-buffers-and-texture.js';
 import { readParticleData } from './read-particle-data/index.js';
 
 /**

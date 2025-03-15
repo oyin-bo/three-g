@@ -45,9 +45,16 @@ export function glErrorShaderCompilationString({ gl, shader, type, source }) {
       const startLine = Math.max(0, lineNumber - 3);
       const endLine = Math.min(lines.length, lineNumber + 2);
 
-      formattedError += `${errorLine}\n`;
+      formattedError += '\n' + errorLine + '\n';
       for (let i = startLine; i < endLine; i++) {
-        formattedError += `${lines[i]}\n`;
+        const ln = lines[i];
+        if (i + 1 === lineNumber) {
+          const trimedStart = ln.trimStart();
+          const leadSpaceCount = ln.length - trimedStart.length;
+          formattedError += (i + 1) + '>>' + Array(leadSpaceCount - 1).fill('>').join('') + ' ' + trimedStart + '\n';
+        } else {
+          formattedError += (i + 1) + ': ' + ln + '\n';
+        }
       }
     } else if (errorLine.trim() !== '') {
       formattedError += `${errorLine}\n`;
@@ -56,6 +63,7 @@ export function glErrorShaderCompilationString({ gl, shader, type, source }) {
 
   return formattedError;
 }
+
 
 export function glErrorProgramLinkingString({ gl, program }) {
   const genericError = glErrorString(gl);
