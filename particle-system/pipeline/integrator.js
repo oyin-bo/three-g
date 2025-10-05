@@ -2,6 +2,16 @@
 export function integratePhysics(ctx) {
   const gl = ctx.gl;
 
+  const posIndexBefore = ctx.positionTextures.currentIndex;
+  const velIndexBefore = ctx.velocityTextures.currentIndex;
+  
+  // CRITICAL: Ensure GL state allows writes (THREE.js may have disabled them!)
+  gl.disable(gl.DEPTH_TEST);  // No depth buffer in our FBOs
+  gl.depthMask(false);  // Don't try to write depth
+  gl.colorMask(true, true, true, true);  // CRITICAL: Enable color writes!
+  gl.disable(gl.BLEND);  // No blending for integration
+  gl.disable(gl.CULL_FACE);  // No culling for fullscreen quad
+
   // 1) Update velocities using forces
   gl.useProgram(ctx.programs.velIntegrate);
   ctx.unbindAllTextures();
@@ -37,7 +47,17 @@ export function integratePhysics(ctx) {
   // 2) Update positions using new velocities
   gl.useProgram(ctx.programs.posIntegrate);
   ctx.unbindAllTextures();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, ctx.positionTextures.getTargetFramebuffer());
+  
+  const targetFB = ctx.positionTextures.getTargetFramebuffer();
+  const targetTex = ctx.positionTextures.getTargetTexture();
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, targetFB);
+  
+  if (ctx.frameCount < 2) {
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    console.log(`Frame ${ctx.frameCount} pos integrate: writing to index ${1 - ctx.positionTextures.currentIndex}, FBO status: ${status === gl.FRAMEBUFFER_COMPLETE ? 'COMPLETE' : 'INCOMPLETE'}`);
+  }
+  
   gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
   gl.viewport(0, 0, ctx.textureWidth, ctx.textureHeight);
   gl.disable(gl.SCISSOR_TEST);
@@ -63,11 +83,11 @@ export function integratePhysics(ctx) {
   ctx.checkGl('posIntegrate');
   ctx.positionTextures.swap();
   
-  // DEBUG: Log position after integration
-  if (ctx.frameCount < 5) {
-    const px = new Float32Array(4);
-    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, px);
-    console.log(`Frame ${ctx.frameCount}: P0 position: [${px[0].toFixed(5)}, ${px[1].toFixed(5)}, ${px[2].toFixed(5)}]`);
+  const posIndexAfter = ctx.positionTextures.currentIndex;
+  const velIndexAfter = ctx.velocityTextures.currentIndex;
+  
+  if (ctx.frameCount < 3) {
+    console.log(`Frame ${ctx.frameCount}: pos ${posIndexBefore}→${posIndexAfter}, vel ${velIndexBefore}→${velIndexAfter}`);
   }
   
   // Unbind FBO

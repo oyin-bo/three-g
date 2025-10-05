@@ -52,7 +52,8 @@ export function particleSystem(options) {
     // Get GPU textures for rendering (GPU-to-GPU data flow)
     // These return WebGLTexture objects that can be wrapped in THREE.ExternalTexture
     getPositionTexture: () => system.getPositionTexture(),
-    getTargetPositionTexture: () => system.getTargetPositionTexture(),  // Just-written buffer after swap
+    getPositionTextures: () => system.getPositionTextures(),  // Returns array of BOTH ping-pong textures
+    getCurrentIndex: () => system.getCurrentIndex(),          // Returns current ping-pong index (0 or 1)
     getColorTexture: () => system.getColorTexture(),
     getTextureSize: () => system.getTextureSize(),
     

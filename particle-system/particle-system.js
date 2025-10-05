@@ -108,7 +108,7 @@ export class ParticleSystem {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.bindTexture(gl.TEXTURE_2D, null);
       gl.bindVertexArray(null);
-      gl.useProgram(null);
+      // NOTE: Don't call gl.useProgram(null) - breaks THREE.js shaders!
       gl.disable(gl.BLEND);
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.SCISSOR_TEST);
@@ -268,7 +268,7 @@ export class ParticleSystem {
     this.positionTextures = this.createPingPongTextures(this.textureWidth, this.textureHeight);
     this.velocityTextures = this.createPingPongTextures(this.textureWidth, this.textureHeight);
     this.forceTexture = this.createRenderTexture(this.textureWidth, this.textureHeight);
-    this.colorTexture = this.createRenderTexture(this.textureWidth, this.textureHeight, gl.RGBA, gl.UNSIGNED_BYTE);
+    this.colorTexture = this.createRenderTexture(this.textureWidth, this.textureHeight, gl.RGBA8, gl.UNSIGNED_BYTE);
     
     console.log(`Created ${this.numLevels} octree level textures and particle textures`);
   }
@@ -388,10 +388,14 @@ export class ParticleSystem {
       velocities[base + 2] = (Math.random() - 0.5) * 2.0 * speed;
       velocities[base + 3] = 0.0;
 
-      const dist = Math.sqrt(positions[base]**2 + positions[base+1]**2 + positions[base+2]**2);
-      colors[base + 0] = (0.2 + 0.8 * (1 - dist / 10)) * 255;
-      colors[base + 1] = (0.4 + 0.6 * (1 - dist / 10)) * 255;
-      colors[base + 2] = 0.8 * 255;
+      // Color gradient based on initial position (shows intermixing)
+      const x = (positions[base + 0] - bounds.min[0]) / (bounds.max[0] - bounds.min[0]);
+      const y = (positions[base + 1] - bounds.min[1]) / (bounds.max[1] - bounds.min[1]);
+      const z = (positions[base + 2] - bounds.min[2]) / (bounds.max[2] - bounds.min[2]);
+      
+      colors[base + 0] = Math.floor(x * 255); // Red varies with X
+      colors[base + 1] = Math.floor(y * 255); // Green varies with Y
+      colors[base + 2] = Math.floor(z * 255); // Blue varies with Z
       colors[base + 3] = 255;
     }
     
@@ -427,7 +431,7 @@ export class ParticleSystem {
     gl.activeTexture(gl.TEXTURE0);  // CRITICAL: Reset active texture unit
     gl.bindTexture(gl.TEXTURE_2D, null);
     gl.bindVertexArray(null);
-    gl.useProgram(null);
+    // NOTE: Don't call gl.useProgram(null) - THREE.js needs its programs!
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.SCISSOR_TEST);
@@ -473,9 +477,13 @@ export class ParticleSystem {
     return this.positionTextures.getCurrentTexture();
   }
   
-  // Get the target (just-written) position texture for rendering
-  getTargetPositionTexture() {
-    return this.positionTextures.getTargetTexture();
+  getPositionTextures() {
+    // Returns BOTH textures for ping-pong
+    return this.positionTextures.textures;
+  }
+  
+  getCurrentIndex() {
+    return this.positionTextures.currentIndex;
   }
   
   getColorTexture() {

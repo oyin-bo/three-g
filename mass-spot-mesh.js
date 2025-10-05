@@ -289,28 +289,32 @@ function createTextureBasedMesh({ particleCount, positionTexture, colorTexture, 
       uniform float fogGray;
       
       void main() {
-        gl_FragColor = vColor;
-        float dist = distance(gl_PointCoord, vec2(0.5, 0.5));
-        dist = vDiameter < 0.0 ? dist * 2.0 : dist;
+        // Calculate distance from center of point sprite
+        vec2 center = gl_PointCoord - vec2(0.5, 0.5);
+        float dist = length(center);
         
-        float rad = 0.25;
-        float areola = rad * 2.0;
-        float bodyRatio =
-          dist < rad ? 1.0 :
-          dist > areola ? 0.0 :
-          (areola - dist) / (areola - rad);
+        // Discard fragments outside the circle
+        if (dist > 0.5) {
+          discard;
+        }
         
-        float radiusRatio = dist < 0.5 ? 1.0 - dist * 2.0 : 0.0;
+        // Create soft edge with smooth falloff
+        float alpha = 1.0 - smoothstep(0.3, 0.5, dist);
         
+        // Brighten center for glow effect
+        float brightness = 1.0 + (1.0 - dist * 2.0) * 0.5;
+        
+        // Apply color with brightness
+        vec3 color = vColor.rgb * brightness;
+        
+        // Fog effect
         float fogRatio = vFogDist < fogStart ? 0.0 : 
           vFogDist > fogGray ? 1.0 : 
           (vFogDist - fogStart) / (fogGray - fogStart);
         
-        vec4 tintColor = vColor;
-        tintColor.a = radiusRatio;
-        gl_FragColor = mix(gl_FragColor, vec4(1.0,1.0,1.0,0.7), fogRatio * 0.7);
-        gl_FragColor = vDiameter < 0.0 ? vec4(0.6,0.0,0.0,1.0) : gl_FragColor;
-        gl_FragColor.a = bodyRatio;
+        color = mix(color, vec3(1.0, 1.0, 1.0), fogRatio * 0.3);
+        
+        gl_FragColor = vec4(color, alpha * vColor.a);
       }
     `,
     side: BackSide,

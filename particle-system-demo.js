@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { createScene } from 'three-pop';
-import { massSpotMesh } from './index.js';
+import { massSpotMesh } from './mass-spot-mesh.js';
 import { particleSystem } from './particle-system/index.js';
 
 // 1. Setup Scene using three-pop (matching texture-mode.js)
@@ -21,7 +21,7 @@ window.scene = scene;
 // Debug cube to verify scene rendering
 scene.add(new THREE.Mesh(
   new THREE.BoxGeometry(1, 1, 1),
-  new THREE.MeshBasicMaterial({ color: 0x00ff80, wireframe: true })
+  new THREE.MeshBasicMaterial({ color: 0x00ff80, wireframe: true, visible: false })  // Hidden by default
 ));
 
 container.style.cssText =
@@ -48,7 +48,7 @@ const physics = particleSystem({
   gravityStrength: 0.0003,
   softening: 0.2,
   initialSpeed: 0.05,
-  dt: 10 / 60
+  dt: 1 / 60  // Reduced from 10/60 to 1/60 for slower motion
 });
 
 // Get texture info
@@ -65,28 +65,39 @@ const mesh = massSpotMesh({
   }
 });
 
-// Update texture references before each render (after physics.compute() has run)
-mesh.onBeforeRender = () => {
-  // After swap(), getCurrentTexture() points to the JUST-WRITTEN buffer with new positions
-  const newPosTexture = physics.getPositionTexture();
-  const newColorTexture = physics.getColorTexture();
-  
-  // CRITICAL: Recreate ExternalTexture wrappers each frame
-  // Simply setting .image doesn't trigger proper rebinding
-  mesh.material.uniforms.u_positionTexture.value = new THREE.ExternalTexture(newPosTexture);
-  mesh.material.uniforms.u_colorTexture.value = new THREE.ExternalTexture(newColorTexture);
-};
-
 scene.add(mesh);
 window.mesh = mesh;  // Expose for debugging
 window.physics = physics;  // Expose for debugging
 console.log('Particle mesh created with', particleCount, 'particles');
 
-// 4. Set up animation callback for physics compute
+// 4. Create TWO ExternalTexture wrappers for ping-pong buffers (after first render)
+let positionTextureWrappers = null;
+let isInitialized = false;
+
+// Set up animation callback - swap between the two ExternalTexture wrappers
 outcome.animate = () => {
-  // Compute physics (swaps ping-pong buffers)
-  // Texture refs will be updated in mesh.onBeforeRender() before next render
+  // Initialize wrappers AFTER first render so shaders compile properly
+  if (!isInitialized) {
+    const positionTextures = physics.getPositionTextures();
+    const positionTexture0 = new THREE.ExternalTexture(positionTextures[0]);
+    const positionTexture1 = new THREE.ExternalTexture(positionTextures[1]);
+    positionTextureWrappers = [positionTexture0, positionTexture1];
+    
+    const colorTexture = new THREE.ExternalTexture(physics.getColorTexture());
+    mesh.material.uniforms.u_colorTexture.value = colorTexture;
+    
+    isInitialized = true;
+    console.log('Texture wrappers initialized after first render');
+    return;  // Skip physics compute on first frame
+  }
+  
   physics.compute();
+  
+  // Just swap which wrapper we use - no recreation, no copying
+  const currentIndex = physics.getCurrentIndex();
+  const wrapper = positionTextureWrappers[currentIndex];
+  mesh.material.uniforms.u_positionTexture.value = wrapper;
+  wrapper.needsUpdate = true;  // Tell THREE.js the GPU texture has new data
 };
 
 console.log('Animation callback set up - PHYSICS COMPUTE ENABLED');
