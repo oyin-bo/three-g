@@ -1,0 +1,105 @@
+// Render particles using Plan M's original WebGL rendering
+// NOTE: three-g integration attempted but shader override compatibility issues found.
+// The zero-latency GPU→GPU texture sampling approach is sound, but requires either:
+// 1. Modifications to three-g's massSpotMesh to support texture-based attributes
+// 2. Custom rendering system inspired by three-g's visual techniques
+// For now, using Plan M's proven rendering pipeline.
+
+export function renderParticles(ctx) {
+  if (!ctx.renderer || !ctx.scene) return;
+
+  const camera = ctx.getCameraFromScene();
+  if (!camera) {
+    console.warn('Plan M: No camera found for rendering');
+    return;
+  }
+
+  const gl = ctx.gl;
+
+  // Save WebGL state
+  const oldViewport = gl.getParameter(gl.VIEWPORT);
+  const oldProgram = gl.getParameter(gl.CURRENT_PROGRAM);
+  const oldFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+
+  try {
+    // Use render program
+    gl.useProgram(ctx.programs.render);
+
+    // Default framebuffer (screen)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.scissor(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+
+    // Bind particle positions
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, ctx.positionTextures.getCurrentTexture());
+
+    // Calculate projection-view matrix
+    camera.updateMatrixWorld();
+    camera.updateProjectionMatrix();
+    const projectionMatrix = camera.projectionMatrix;
+    const viewMatrix = camera.matrixWorldInverse;
+    const projectionViewMatrix = new Float32Array(16);
+    
+    // Multiply projection * view manually (column-major order)
+    const p = projectionMatrix.elements;
+    const v = viewMatrix.elements;
+    for (let col = 0; col < 4; col++) {
+      for (let row = 0; row < 4; row++) {
+        projectionViewMatrix[col * 4 + row] = 
+          p[0 * 4 + row] * v[col * 4 + 0] +
+          p[1 * 4 + row] * v[col * 4 + 1] +
+          p[2 * 4 + row] * v[col * 4 + 2] +
+          p[3 * 4 + row] * v[col * 4 + 3];
+      }
+    }
+
+    // Uniforms
+    const u_positions = gl.getUniformLocation(ctx.programs.render, 'u_positions');
+    const u_texSize = gl.getUniformLocation(ctx.programs.render, 'u_texSize');
+    const u_pointSize = gl.getUniformLocation(ctx.programs.render, 'u_pointSize');
+    const u_projectionView = gl.getUniformLocation(ctx.programs.render, 'u_projectionView');
+    const u_worldMin = gl.getUniformLocation(ctx.programs.render, 'u_worldMin');
+    const u_worldMax = gl.getUniformLocation(ctx.programs.render, 'u_worldMax');
+
+    gl.uniform1i(u_positions, 0);
+    gl.uniform2f(u_texSize, ctx.textureWidth, ctx.textureHeight);
+    gl.uniform1f(u_pointSize, ctx.options.pointSize);
+    if (u_projectionView) gl.uniformMatrix4fv(u_projectionView, false, projectionViewMatrix);
+    if (u_worldMin) gl.uniform3f(u_worldMin, 
+      ctx.options.worldBounds.min[0], 
+      ctx.options.worldBounds.min[1],
+      ctx.options.worldBounds.min[2]);
+    if (u_worldMax) gl.uniform3f(u_worldMax, 
+      ctx.options.worldBounds.max[0], 
+      ctx.options.worldBounds.max[1],
+      ctx.options.worldBounds.max[2]);
+
+    // Blending for particles
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.disable(gl.DEPTH_TEST);
+
+    // Draw
+    gl.bindVertexArray(ctx.particleVAO);
+    gl.drawArrays(gl.POINTS, 0, ctx.options.particleCount);
+    gl.bindVertexArray(null);
+
+    gl.disable(gl.BLEND);
+    gl.disable(gl.DEPTH_TEST);
+    
+    // Unbind textures to avoid conflicts
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
+    if (ctx.frameCount < 3) {
+      console.log(`Plan M: Rendered ${ctx.options.particleCount} particles at frame ${ctx.frameCount}`);
+    }
+  } catch (error) {
+    console.error('Plan M render error:', error);
+  } finally {
+    gl.useProgram(oldProgram);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, oldFramebuffer);
+  }
+}

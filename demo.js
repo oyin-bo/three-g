@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createScene } from 'three-pop';
-import { massSpotMesh, particleSystem } from 'three-g';
+import { massSpotMesh } from 'three-g';
 
 const { scene, camera, container, renderer } = createScene({
   renderer: { antialias: true },
@@ -15,7 +15,6 @@ scene.add(new THREE.Mesh(
 const colors = [...Array(4000)].map(() =>
   new THREE.Color().setHSL(Math.random(), 1, 0.5).getHex());
 
-const spots = createSpots();
 const m = massSpotMesh({
   spots: createSpots(40000),
   get: (_spot, coords) => {
@@ -46,26 +45,6 @@ input.oninput = () => {
     }
   }, 600);
 };
-
-/**
- * @type {ReturnType<typeof particleSystem>}
- */
-var psys;
-
-setTimeout(() => {
-  runParticle();
-}, 1000);
-
-function runParticle() {
-  if (!psys) {
-    psys = particleSystem({
-      particles: spots,
-      gl: renderer.getContext()
-    });
-  }
-
-  psys.compute();
-}
 
 function createSpots(count) {
   return [...Array(count)].map(() => ({
