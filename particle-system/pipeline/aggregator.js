@@ -67,7 +67,7 @@ export function aggregateParticlesIntoL0(ctx) {
   }
 
   // Draw particles as points using gl_VertexID
-  console.log('Plan M draw: aggregateParticlesIntoL0');
+  // console.log('Plan M draw: aggregateParticlesIntoL0');
   ctx.checkFBO('aggregate L0');
   ctx.checkGl('aggregate L0 (before draw)');
   gl.bindVertexArray(ctx.particleVAO);

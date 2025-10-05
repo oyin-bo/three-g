@@ -6,6 +6,16 @@
  * Uses isotropic 3D treatment of X/Y/Z axes with Z-slice stacking for 2D texture mapping.
  */
 
+// Shader sources
+import fsQuadVert from './shaders/fullscreen.vert.js';
+import reductionFrag from './shaders/reduction.frag.js';
+import aggregationVert from './shaders/aggregation.vert.js';
+import aggregationFrag from './shaders/aggregation.frag.js';
+import traversalFrag from './shaders/traversal.frag.js';
+import velIntegrateFrag from './shaders/vel_integrate.frag.js';
+import posIntegrateFrag from './shaders/pos_integrate.frag.js';
+
+// Pipeline utilities
 import { unbindAllTextures as dbgUnbindAllTextures, checkGl as dbgCheckGl, checkFBO as dbgCheckFBO } from './utils/debug.js';
 import { aggregateParticlesIntoL0 as aggregateL0 } from './pipeline/aggregator.js';
 import { runReductionPass as pyramidReduce } from './pipeline/pyramid.js';
@@ -92,6 +102,16 @@ export class ParticleSystem {
       this.createTextures();
       this.createGeometry();
       this.initializeParticles();
+      
+      // Restore GL state for THREE.js compatibility
+      const gl = this.gl;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.bindVertexArray(null);
+      gl.useProgram(null);
+      gl.disable(gl.BLEND);
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.SCISSOR_TEST);
       
       this.isInitialized = true;
       console.log('BarnesHutSystem initialized successfully');
@@ -393,6 +413,16 @@ export class ParticleSystem {
     pipelineIntegratePhysics(this);
     
     this.frameCount++;
+    
+    // Restore GL state for THREE.js after physics compute
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindVertexArray(null);
+    gl.useProgram(null);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.SCISSOR_TEST);
   }
 
   buildQuadtree() {
