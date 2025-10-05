@@ -1,20 +1,21 @@
 {
   "name": "three-g",
-  "version": "1.0.3",
-  "description": "THREE.js galaxy primitives.",
+  "version": "2.0.0-beta.0",
+  "description": "THREE.js galaxy primitives with GPU Barnes-Hut physics",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "npx esbuild --serve=8302 --servedir=."
   },
   "repository": "https://github.com/mihailik/three-g",
-  "keywords": ["three", "boilerplate", "mihailik", "galaxy", "atlas"],
+  "keywords": ["three", "galaxy", "particles", "barnes-hut", "n-body", "physics"],
   "author": "Oleg Mihailik",
   "license": "MIT",
-  "devDependencies": {
-    "three": "*"
+  "peerDependencies": {
+    "three": ">=0.152.0"
   },
-  "overrides": {
-    "three": "$three"
+  "devDependencies": {
+    "three": "*",
+    "three-pop": "*"
   }
 }

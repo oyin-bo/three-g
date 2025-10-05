@@ -1,36 +1,89 @@
-THREE-g &mdash; galaxy primitives for playing with THREE.js
-=======================================
+# THREE-g — Galaxy Primitives for THREE.js
 
-Generates a mesh of light spots in 3D space, extremely efficiently.
+GPU-accelerated particle rendering and Barnes-Hut N-body physics for THREE.js.
 
-```JavaScript
+## Features
 
-const m = massSpotMesh({
-  spots: [...Array(4000)].map(() => ({
-  x: Math.sqrt(Math.random()) * Math.sign(Math.random() - 0.5),
-  y: Math.sqrt(Math.random()) * Math.sign(Math.random() - 0.5),
-  z: Math.sqrt(Math.random()) * Math.sign(Math.random() - 0.5),
-  mass: Math.random() * 0.01,
-  rgb: new THREE.Color().setHSL(-Math.sqrt(Math.sqrt(Math.random())) + 1, 1, 0.3).getHex()
-  }))
+- **massSpotMesh**: Efficient particle rendering with glow effects
+- **barnesHutSystem**: GPU-based O(N log N) gravitational physics
+- Scales to 200,000+ particles at 10-30 FPS
+- Zero CPU involvement: all computation on GPU
+
+## Quick Start
+
+```javascript
+import * as THREE from 'three';
+import { createScene } from 'three-pop';
+import { massSpotMesh, barnesHutSystem } from 'three-g';
+
+const { scene, renderer } = createScene();
+
+// Create physics system
+const physics = barnesHutSystem({
+  gl: renderer.getContext(),
+  particleCount: 50000
 });
 
+// Create rendering
+const mesh = massSpotMesh({
+  textureMode: true,
+  particleCount: physics.options.particleCount,
+  textures: {
+    position: physics.getPositionTexture(),
+    color: physics.getColorTexture(),
+    size: [512, 512]
+  },
+  fog: { start: 15, gray: 40 }
+});
+
+scene.add(mesh);
+
+// Animation loop
+function animate() {
+  physics.compute();
+  mesh.updateTextures(physics.getPositionTexture());
+}
 ```
 
-[Live demo: **https://raw.githack.com/mihailik/three-g/refs/heads/main/index.html**](https://raw.githack.com/mihailik/three-g/refs/heads/main/index.html)
+## API
 
-<a href="https://raw.githack.com/mihailik/three-g/refs/heads/main/index.html">
+### barnesHutSystem(options)
 
-<img alt="Live demo of rotating green cube" src="https://raw.githubusercontent.com/mihailik/three-g/refs/heads/main/demog.gif">
+Creates GPU Barnes-Hut N-body simulation.
 
-</a>
+**Options**:
+- `gl`: WebGL2 context (required)
+- `particleCount`: Number of particles (default: 200000)
+- `theta`: Barnes-Hut approximation threshold (default: 0.5)
+- `gravityStrength`: Force multiplier (default: 0.0003)
+- `worldBounds`: Simulation bounds
 
-Mesh parameters
--------------------
+**Returns**: System object with methods:
+- `compute()`: Step simulation forward
+- `getPositionTexture()`: Get current positions (GPU texture)
+- `getColorTexture()`: Get particle colors (GPU texture)
+- `getTextureSize()`: Get texture dimensions
 
-* **spots** particles that may have coordinates, colour and mass
-* **get** if metrics of the spots are stored elsewhere, you can provide them via this callback
+### massSpotMesh(options)
 
-License
--------
-MIT &nbsp; [ <img alt="Oleg Mihailik's face" src="https://avatars.githubusercontent.com/u/4041967" width="20" style="border-radius: 1em; margin-bottom: -0.3em"> Oleg Mihailik](https://github.com/mihailik)
+Creates particle rendering mesh.
+
+**Texture Mode** (GPU-resident data):
+```javascript
+massSpotMesh({
+  textureMode: true,
+  particleCount: 50000,
+  textures: { position, color, size }
+})
+```
+
+**Array Mode** (CPU data):
+```javascript
+massSpotMesh({
+  spots: [{ x, y, z, mass, rgb }, ...]
+})
+```
+
+## License
+
+MIT © Oleg Mihailik
