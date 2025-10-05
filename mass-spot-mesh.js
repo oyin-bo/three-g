@@ -242,31 +242,31 @@ function createTextureBasedMesh({ particleCount, positionTexture, colorTexture, 
     blending: AdditiveBlending,
     vertexShader: (glsl?.definitions || '') + /* glsl */`
       precision highp float;
-      
+
       uniform sampler2D u_positionTexture;
       uniform sampler2D u_colorTexture;
       uniform vec2 u_texSize;
-      
+
       varying float vDiameter;
       varying float vFogDist;
       varying vec4 vColor;
-      
+
       ivec2 indexToTexCoord(int index, vec2 texSize) {
         int w = int(texSize.x);
         return ivec2(index % w, index / w);
       }
-      
+
       void main() {
         ivec2 texCoord = indexToTexCoord(gl_InstanceID, u_texSize);
         vec4 posData = texelFetch(u_positionTexture, texCoord, 0);
         vec4 colorData = texelFetch(u_colorTexture, texCoord, 0);
-        
+
         vec3 offset = posData.xyz;
         float diameter = posData.w * 0.015;  // mass to size
-        
+
         vDiameter = diameter;
         gl_Position = projectionMatrix * (modelViewMatrix * vec4(offset, 1.0));
-        
+
         vec4 viewPosition = modelViewMatrix * vec4(offset, 1.0);
         float distanceToCamera = length(viewPosition.xyz);
         float pointScaleFactor = 1600.0;

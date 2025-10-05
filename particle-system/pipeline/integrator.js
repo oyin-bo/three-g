@@ -62,6 +62,14 @@ export function integratePhysics(ctx) {
   ctx.unbindAllTextures();
   ctx.checkGl('posIntegrate');
   ctx.positionTextures.swap();
+  
+  // DEBUG: Log position after integration
+  if (ctx.frameCount < 5) {
+    const px = new Float32Array(4);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, px);
+    console.log(`Frame ${ctx.frameCount}: P0 position: [${px[0].toFixed(5)}, ${px[1].toFixed(5)}, ${px[2].toFixed(5)}]`);
+  }
+  
   // Unbind FBO
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }

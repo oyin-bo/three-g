@@ -8,10 +8,15 @@ import { particleSystem } from './particle-system/index.js';
 // 1. Setup Scene using three-pop (matching texture-mode.js)
 const outcome = createScene({
   renderer: { antialias: true },
-  camera: { fov: 40, near: 0.0001 }
+  camera: { fov: 40, near: 0.0001 },
+  controls: { autoRotate: false }  // Disable auto-rotation
 });
 
 const { scene, camera, container, renderer } = outcome;
+
+// Expose to window for debugging
+window.outcome = outcome;
+window.scene = scene;
 
 // Debug cube to verify scene rendering
 scene.add(new THREE.Mesh(
@@ -30,7 +35,7 @@ document.body.appendChild(container);
 const gl = renderer.getContext();
 const particleCount = 50000;
 
-console.log('Initializing Barnes-Hut system with', particleCount, 'particles...');
+console.log('TEST: Initializing physics but NOT calling compute...');
 
 const physics = particleSystem({
   gl: gl,
@@ -46,8 +51,10 @@ const physics = particleSystem({
   dt: 10 / 60
 });
 
-// 3. Create particle mesh using raw WebGLTexture (will be wrapped internally)
+// Get texture info
 const textureSize = physics.getTextureSize();
+
+// 3. Create particle mesh using raw WebGLTexture (will be wrapped internally)
 const mesh = massSpotMesh({
   textureMode: true,
   particleCount: particleCount,
@@ -58,25 +65,29 @@ const mesh = massSpotMesh({
   }
 });
 
+// Update texture references before each render (after physics.compute() has run)
+mesh.onBeforeRender = () => {
+  // After swap(), getCurrentTexture() points to the JUST-WRITTEN buffer with new positions
+  const newPosTexture = physics.getPositionTexture();
+  const newColorTexture = physics.getColorTexture();
+  
+  // CRITICAL: Recreate ExternalTexture wrappers each frame
+  // Simply setting .image doesn't trigger proper rebinding
+  mesh.material.uniforms.u_positionTexture.value = new THREE.ExternalTexture(newPosTexture);
+  mesh.material.uniforms.u_colorTexture.value = new THREE.ExternalTexture(newColorTexture);
+};
+
 scene.add(mesh);
+window.mesh = mesh;  // Expose for debugging
+window.physics = physics;  // Expose for debugging
 console.log('Particle mesh created with', particleCount, 'particles');
 
 // 4. Set up animation callback for physics compute
 outcome.animate = () => {
-  // TEST: Comment out physics compute to see if cube centers
-  // physics.compute();
-  
-  // Update texture reference after ping-pong swap
-  // const newPosTexture = physics.getPositionTexture();
-  // const posUniform = mesh.material.uniforms.u_positionTexture;
-  
-  // Check if texture changed (ping-pong swap)
-  // if (posUniform.value && posUniform.value.image !== newPosTexture) {
-  //   // Texture swapped - update the ExternalTexture's image reference
-  //   posUniform.value.image = newPosTexture;
-  //   posUniform.value.needsUpdate = true;
-  // }
+  // Compute physics (swaps ping-pong buffers)
+  // Texture refs will be updated in mesh.onBeforeRender() before next render
+  physics.compute();
 };
 
-console.log('Animation callback set up - PHYSICS COMPUTE DISABLED FOR TEST');
+console.log('Animation callback set up - PHYSICS COMPUTE ENABLED');
 
