@@ -69,6 +69,17 @@ void main() {
   gl_Position = vec4(clip, 0.0, 1.0);
   gl_PointSize = 1.0;
 
+  // DEBUG: Force output to show ALL particles
+  // if (index == 0) {
+  //   // First particle: RED at bottom-left
+  //   gl_Position = vec4(-0.9, -0.9, 0.0, 1.0);
+  //   v_particleData = vec4(1.0, 0.0, 0.0, 5.0);  // Red, mass=5
+  // } else if (index == 1) {
+  //   // Second particle: GREEN at top-right
+  //   gl_Position = vec4(0.9, 0.9, 0.0, 1.0);
+  //   v_particleData = vec4(0.0, 1.0, 0.0, 5.0);  // Green, mass=5
+  // }
+
   // Weighted sum: store 3D weighted position and mass
   v_particleData = vec4(pos.xyz * mass, mass);
 }`;

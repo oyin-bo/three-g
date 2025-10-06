@@ -116,13 +116,6 @@ export class ParticleSystem {
       this.isInitialized = true;
       console.log('BarnesHutSystem initialized successfully');
       
-      // Save THREE.js's original GL state for restoration after each physics step
-      this.savedGLState = {
-        clearColor: gl.getParameter(gl.COLOR_CLEAR_VALUE),
-        depthMask: gl.getParameter(gl.DEPTH_WRITEMASK),
-        colorMask: gl.getParameter(gl.COLOR_WRITEMASK)
-      };
-      
     } catch (error) {
       console.error('BarnesHutSystem initialization failed:', error);
       this.dispose();
@@ -417,37 +410,15 @@ export class ParticleSystem {
   step() {
     if (!this.isInitialized) return;
     
-    // Save THREE.js's current GL program
-    const gl = this.gl;
-    const savedProgram = gl.getParameter(gl.CURRENT_PROGRAM);
-    
     if ((this.frameCount % 10) === 0) {
       pipelineUpdateBounds(this, 256);
     }
     this.buildQuadtree();
+    this.clearForceTexture();
     pipelineCalculateForces(this);
     pipelineIntegratePhysics(this);
     
     this.frameCount++;
-    
-    // Restore GL state for THREE.js after physics compute
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.activeTexture(gl.TEXTURE0);  // CRITICAL: Reset active texture unit
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    gl.bindVertexArray(null);
-    gl.disable(gl.BLEND);
-    gl.disable(gl.DEPTH_TEST);
-    gl.disable(gl.SCISSOR_TEST);
-    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);  // CRITICAL: Reset viewport
-    
-    // CRITICAL: Restore THREE.js's program (don't leave our physics program active)
-    gl.useProgram(savedProgram);
-    
-    // CRITICAL: Restore THREE.js's clear color (physics uses transparent black)
-    if (this.savedGLState) {
-      const cc = this.savedGLState.clearColor;
-      gl.clearColor(cc[0], cc[1], cc[2], cc[3]);
-    }
   }
 
   buildQuadtree() {

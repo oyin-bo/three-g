@@ -21,7 +21,7 @@ window.scene = scene;
 // Debug cube to verify scene rendering
 scene.add(new THREE.Mesh(
   new THREE.BoxGeometry(1, 1, 1),
-  new THREE.MeshBasicMaterial({ color: 0x00ff80, wireframe: true, visible: false })  // Hidden by default
+  new THREE.MeshBasicMaterial({ color: 0x00ff80, wireframe: true, visible: true })  // Visible to verify rendering
 ));
 
 container.style.cssText =
@@ -33,7 +33,7 @@ document.body.appendChild(container);
 
 // 2. Initialize Barnes-Hut GPU Physics
 const gl = renderer.getContext();
-const particleCount = 50000;
+const particleCount = 50000;  // Increased 10x from 50000
 
 console.log('TEST: Initializing physics but NOT calling compute...');
 
@@ -45,10 +45,10 @@ const physics = particleSystem({
     max: [4, 4, 2]
   },
   theta: 0.5,
-  gravityStrength: 0.0003,
+  gravityStrength: 0.000006,  // Increased from 0.0003
   softening: 0.2,
-  initialSpeed: 0.05,
-  dt: 1 / 60  // Reduced from 10/60 to 1/60 for slower motion
+  initialSpeed: 0.000005,
+  dt: 10 / 60  // Increased 10x from 1/60 for faster motion
 });
 
 // Get texture info
@@ -92,6 +92,9 @@ outcome.animate = () => {
   }
   
   physics.compute();
+  
+  // Restore THREE.js WebGL state after physics compute
+  renderer.resetState();
   
   // Just swap which wrapper we use - no recreation, no copying
   const currentIndex = physics.getCurrentIndex();

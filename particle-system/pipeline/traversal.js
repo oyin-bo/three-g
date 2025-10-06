@@ -81,13 +81,6 @@ export function calculateForces(ctx) {
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   gl.bindVertexArray(null);
 
-  // Debug: read back one force value
-  // if (ctx.frameCount < 3) {
-  //   const px = new Float32Array(4);
-  //   gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, px);
-  //   console.log(`Frame ${ctx.frameCount}: Force on P0: [${px[0].toFixed(5)}, ${px[1].toFixed(5)}, ${px[2].toFixed(5)}]`);
-  // }
-
   // Unbind textures
   ctx.unbindAllTextures();
   ctx.checkGl('calculateForces');
