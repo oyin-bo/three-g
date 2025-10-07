@@ -1,3 +1,5 @@
+// @ts-check
+
 import {
   AdditiveBlending,
   BackSide,
@@ -15,21 +17,17 @@ import {
  * Create particle rendering mesh
  * 
  * @param {{
- *   // Array mode (CPU data)
- *   spots?: Array<{ x?: number, y?: number, z?: number, mass?: number, rgb?: number }>,
- *   get?: (spot: any, coords: any) => void,
- *   
- *   // Texture mode (GPU data)
- *   textureMode?: boolean,
+ *   spots?: // Array mode (CPU data)
+ *    { x?: number, y?: number, z?: number, mass?: number, rgb?: number }[],
+ *   get?: (spot: any, coords: { x?: number, y?: number, z?: number, mass?: number, rgb?: number }) => void,
+ *   textureMode?: boolean, // Texture mode (GPU data)
  *   particleCount?: number,
  *   textures?: {
- *     position: WebGLTexture | THREE.Texture,  // RGBA32F: xyz=position, w=mass
- *     color?: WebGLTexture | THREE.Texture,    // RGBA: particle color
+ *     position: WebGLTexture | Texture,  // RGBA32F: xyz=position, w=mass
+ *     color?: WebGLTexture | Texture,    // RGBA: particle color
  *     size: [number, number]                   // Texture dimensions [width, height]
  *   },
- *   
- *   // Common options
- *   fog?: number | { start?: number, gray?: number },
+ *   fog?: number | { start?: number, gray?: number }, // Common options
  *   glsl?: { definitions?: string, vertex?: string }
  * }} options
  */
@@ -55,6 +53,12 @@ export function massSpotMesh({ spots, textureMode, particleCount, textures, get,
   return createArrayBasedMesh({ spots, get, fog, glsl });
 }
 
+/**
+ * @param {Pick<
+ *  Parameters<typeof massSpotMesh>[0],
+ *  'get' | 'fog' | 'glsl'
+ * > & { spots: any[] }} _
+ */
 function createArrayBasedMesh({ spots, get, fog, glsl }) {
   const dummy = {
     index: 0,
@@ -177,6 +181,9 @@ function createArrayBasedMesh({ spots, get, fog, glsl }) {
     }
   }
 
+  /**
+   * @param {any[]} newSpots
+   */
   function updateSpots(newSpots) {
     spots = newSpots;
     if (newSpots.length > geometry.instanceCount || newSpots.length < geometry.instanceCount / 2) {
@@ -206,6 +213,14 @@ function createArrayBasedMesh({ spots, get, fog, glsl }) {
 /**
  * Internal: Create texture-based particle mesh (GPU data flow)
  * Accepts raw WebGLTexture objects for zero-copy GPU pipeline
+ * @param {{
+ *  particleCount: number,
+ *  positionTexture: WebGLTexture | Texture,
+ *  colorTexture?: WebGLTexture | Texture,
+ *  textureSize: [number, number],
+ *  fog?: number | { start?: number, gray?: number },
+ *  glsl?: { definitions?: string, vertex?: string }
+ * }} _
  */
 function createTextureBasedMesh({ particleCount, positionTexture, colorTexture, textureSize, fog, glsl }) {
   const dummyPositions = new Float32Array([0, 0, 0]);
@@ -223,10 +238,14 @@ function createTextureBasedMesh({ particleCount, positionTexture, colorTexture, 
   }
   
   // Wrap raw WebGLTexture in THREE.ExternalTexture
+  /**
+   * Wraps a raw WebGLTexture or THREE.Texture for use in the shader.
+   * @param {WebGLTexture | Texture} tex
+   */
   const wrapTexture = (tex) => {
     if (!tex) return null;
     // If it's already a THREE.Texture, use it
-    if (tex.isTexture) return tex;
+    if (/** @type {Texture} */ (tex).isTexture) return tex;
     // Wrap raw WebGLTexture in ExternalTexture for zero-copy GPU pipeline
     return new ExternalTexture(tex);
   };
@@ -316,12 +335,20 @@ function createTextureBasedMesh({ particleCount, positionTexture, colorTexture, 
   
   const mesh = new Points(geometry, material);
   
-  mesh.updateTextures = function(newPositionTexture, newColorTexture) {
+  mesh.updateTextures = updateTextures;
+  
+  return mesh;
+
+  /**
+   * Updates the position and color textures.
+   * @param {WebGLTexture | Texture} newPositionTexture 
+   * @param {WebGLTexture | Texture} newColorTexture 
+   */
+  function updateTextures(newPositionTexture, newColorTexture) {
     material.uniforms.u_positionTexture.value = wrapTexture(newPositionTexture);
     if (newColorTexture) {
       material.uniforms.u_colorTexture.value = wrapTexture(newColorTexture);
     }
-  };
-  
-  return mesh;
+  }
+
 }
