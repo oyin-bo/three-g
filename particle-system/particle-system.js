@@ -1,3 +1,5 @@
+// @ts-check
+
 /**
  * Plan M: "The Menace" — GPU-side Dynamic Octree
  * 
@@ -24,6 +26,24 @@ import { integratePhysics as pipelineIntegratePhysics } from './pipeline/integra
 import { updateWorldBoundsFromTexture as pipelineUpdateBounds } from './pipeline/bounds.js';
 
 export class ParticleSystem {
+
+  /**
+   * ParticleSystem constructor
+   * @param {WebGL2RenderingContext} gl - WebGL2 rendering context
+   * @param {{
+   *   particleData: { positions: Float32Array, velocities?: Float32Array|null, colors?: Uint8Array|null },
+   *   particleCount?: number,
+   *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
+   *   theta?: number,
+   *   dt?: number,
+   *   gravityStrength?: number,
+   *   softening?: number,
+   *   damping?: number,
+   *   maxSpeed?: number,
+   *   maxAccel?: number,
+   *   debugSkipQuadtree?: boolean
+   * }} options
+   */
   constructor(gl, options) {
     // ONLY dependency: WebGL2 context (reuses existing from THREE.WebGLRenderer)
     this.gl = gl;
@@ -95,11 +115,8 @@ export class ParticleSystem {
     dbgCheckFBO(this.gl, tag);
   }
 
-  async init() {
-    if (!this.gl) {
-      throw new Error('WebGL2 context not available');
-    }
-    
+  init() {
+    let finished = false;
     try {
       this.checkWebGL2Support();
       this.calculateTextureDimensions();
@@ -119,11 +136,10 @@ export class ParticleSystem {
       gl.disable(gl.SCISSOR_TEST);
       
       this.isInitialized = true;
-      
-    } catch (error) {
-      console.error('BarnesHutSystem initialization failed:', error);
-      this.dispose();
-      throw error;
+      finished = true;
+    } finally {
+      if (!finished)
+        this.dispose();
     }
   }
 
@@ -440,9 +456,7 @@ export class ParticleSystem {
     return { width: this.textureWidth, height: this.textureHeight };
   }
 
-  dispose() {
-    if (!this.gl) return;
-    
+  dispose() {    
     const gl = this.gl;
     
     this.levelTextures.forEach(level => gl.deleteTexture(level.texture));
