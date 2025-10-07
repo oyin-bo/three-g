@@ -1,6 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
-
+<html lang="en" style="background: black; color: white;">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,7 +7,7 @@
 </head>
 
 <body>
-  <script type="importmap">
+<script type="importmap">
 {
   "imports": {
     "three": "https://threejs.org/build/three.module.js",
@@ -21,6 +20,12 @@
 }
 </script>
 <script src="demo.js" type="module"></script>
-</body>
 
+<div style="position: fixed; right: 0; bottom: 0; padding: 0.5em 1em; z-index: 100; background: transparent; backdrop-filter: blur(2px); border-top-left-radius: 1em; font-family: sans-serif; font-size: 0.9em; text-align: right;">
+  <a href="simplistic.html" style="color: rgb(104, 255, 255);">Simplistic</a>
+  &nbsp;
+  <a href="texture-mode.html" style="color: rgb(104, 255, 255)">Texture Mode</a>
+</div>
+
+</body>
 </html>
