@@ -32,23 +32,67 @@ camera.position.y = 2;
 document.body.appendChild(container);
 
 // 2. Initialize Barnes-Hut GPU Physics
-const gl = renderer.getContext();
-const particleCount = 50000;  // Increased 10x from 50000
 
-console.log('TEST: Initializing physics but NOT calling compute...');
+// Create spots (array-of-objects) in the mass-spot-mesh style
+/**
+ * Create an array of spot objects (mass-spot-mesh style)
+ * @param {number} count
+ * @param {{min:[number,number,number],max:[number,number,number]}} worldBounds
+ */
+function createSpots(count, worldBounds) {
+  const spots = new Array(count);
+  const center = [
+    (worldBounds.min[0] + worldBounds.max[0]) / 2,
+    (worldBounds.min[1] + worldBounds.max[1]) / 2,
+    (worldBounds.min[2] + worldBounds.max[2]) / 2
+  ];
+
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = Math.random() * 3 + Math.random() * 1;
+    const height = (Math.random() - 0.5) * 2;
+
+    spots[i] = {
+      x: center[0] + Math.cos(angle) * radius,
+      y: center[1] + Math.sin(angle) * radius,
+      z: center[2] + height,
+      mass: 0.5 + Math.random() * 1.5
+    };
+  }
+
+  return spots;
+}
+
+// renderer.getContext() may return WebGLRenderingContext or WebGL2RenderingContext;
+// we use WebGL2 APIs. Cast for ts-check.
+const gl = /** @type {WebGL2RenderingContext} */ (renderer.getContext());
+const particleCount = 50000;
+const worldBounds = {
+  min: /** @type {[number,number,number]} */ ([-4, -4, 0]),
+  max: /** @type {[number,number,number]} */ ([4, 4, 2])
+};
+
+// Build spots array and pass to particleSystem using the array-of-spots API
+const spots = createSpots(particleCount, worldBounds);
 
 const physics = particleSystem({
   gl: gl,
-  particleCount: particleCount,
-  worldBounds: {
-    min: [-4, -4, 0],
-    max: [4, 4, 2]
+  particles: spots,
+  get: (spot, out) => {
+    // map rgb similarly to the original color gradient
+    const vx = Number(out.x || 0);
+    const vy = Number(out.y || 0);
+    const vz = Number(out.z || 0);
+    const x = (vx - worldBounds.min[0]) / (worldBounds.max[0] - worldBounds.min[0]);
+    const y = (vy - worldBounds.min[1]) / (worldBounds.max[1] - worldBounds.min[1]);
+    const z = (vz - worldBounds.min[2]) / (worldBounds.max[2] - worldBounds.min[2]);
+    out.rgb = ((Math.floor(x * 255) & 0xff) << 16) | ((Math.floor(y * 255) & 0xff) << 8) | (Math.floor(z * 255) & 0xff);
   },
+  worldBounds: worldBounds,
   theta: 0.5,
-  gravityStrength: 0.000006,  // Increased from 0.0003
+  gravityStrength: 0.000006,
   softening: 0.2,
-  initialSpeed: 0.000005,
-  dt: 10 / 60  // Increased 10x from 1/60 for faster motion
+  dt: 10 / 60
 });
 
 // Get texture info
@@ -66,11 +110,12 @@ const mesh = massSpotMesh({
 });
 
 scene.add(mesh);
-window.mesh = mesh;  // Expose for debugging
-window.physics = physics;  // Expose for debugging
-console.log('Particle mesh created with', particleCount, 'particles');
+// Expose for debugging (cast to any to satisfy ts-check)
+/** @type {any} */ (window).mesh = mesh;
+/** @type {any} */ (window).physics = physics;
 
 // 4. Create TWO ExternalTexture wrappers for ping-pong buffers (after first render)
+/** @type {Array<THREE.ExternalTexture>|null} */
 let positionTextureWrappers = null;
 let isInitialized = false;
 
@@ -87,7 +132,6 @@ outcome.animate = () => {
     mesh.material.uniforms.u_colorTexture.value = colorTexture;
     
     isInitialized = true;
-    console.log('Texture wrappers initialized after first render');
     return;  // Skip physics compute on first frame
   }
   
@@ -98,10 +142,10 @@ outcome.animate = () => {
   
   // Just swap which wrapper we use - no recreation, no copying
   const currentIndex = physics.getCurrentIndex();
-  const wrapper = positionTextureWrappers[currentIndex];
-  mesh.material.uniforms.u_positionTexture.value = wrapper;
-  wrapper.needsUpdate = true;  // Tell THREE.js the GPU texture has new data
+  if (positionTextureWrappers) {
+    const wrapper = positionTextureWrappers[currentIndex];
+    mesh.material.uniforms.u_positionTexture.value = wrapper;
+    wrapper.needsUpdate = true;  // Tell THREE.js the GPU texture has new data
+  }
 };
-
-console.log('Animation callback set up - PHYSICS COMPUTE ENABLED');
 

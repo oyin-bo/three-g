@@ -25,7 +25,6 @@ export function runReductionPass(ctx, sourceLevel, targetLevel) {
   gl.uniform1f(u_slicesPerRow, ctx.levelTextures[targetLevel].slicesPerRow);
   
   // Render full-screen quad
-  // console.log(`Plan M draw: reduction ${sourceLevel}->${targetLevel}`);
   ctx.checkFBO(`reduction ${sourceLevel}->${targetLevel}`);
   gl.bindVertexArray(ctx.quadVAO);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);

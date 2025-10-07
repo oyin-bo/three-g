@@ -1,9 +1,6 @@
 // Velocity and position integration passes
 export function integratePhysics(ctx) {
   const gl = ctx.gl;
-
-  const posIndexBefore = ctx.positionTextures.currentIndex;
-  const velIndexBefore = ctx.velocityTextures.currentIndex;
   
   // CRITICAL: Ensure GL state allows writes (THREE.js may have disabled them!)
   gl.disable(gl.DEPTH_TEST);  // No depth buffer in our FBOs
@@ -53,11 +50,6 @@ export function integratePhysics(ctx) {
   
   gl.bindFramebuffer(gl.FRAMEBUFFER, targetFB);
   
-  if (ctx.frameCount < 2) {
-    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    console.log(`Frame ${ctx.frameCount} pos integrate: writing to index ${1 - ctx.positionTextures.currentIndex}, FBO status: ${status === gl.FRAMEBUFFER_COMPLETE ? 'COMPLETE' : 'INCOMPLETE'}`);
-  }
-  
   gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
   gl.viewport(0, 0, ctx.textureWidth, ctx.textureHeight);
   gl.disable(gl.SCISSOR_TEST);
@@ -82,13 +74,6 @@ export function integratePhysics(ctx) {
   ctx.unbindAllTextures();
   ctx.checkGl('posIntegrate');
   ctx.positionTextures.swap();
-  
-  const posIndexAfter = ctx.positionTextures.currentIndex;
-  const velIndexAfter = ctx.velocityTextures.currentIndex;
-  
-  if (ctx.frameCount < 3) {
-    console.log(`Frame ${ctx.frameCount}: pos ${posIndexBefore}→${posIndexAfter}, vel ${velIndexBefore}→${velIndexAfter}`);
-  }
   
   // Unbind FBO
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);

@@ -1,37 +1,82 @@
+// @ts-check
+
 import { ParticleSystem } from './particle-system.js';
 
 /**
  * Create a GPU-accelerated Barnes-Hut N-body simulation
  * 
  * @param {{
- *   gl: WebGL2RenderingContext,          // REQUIRED: from renderer.getContext()
- *   particleCount?: number,               // Default: 200000
- *   worldBounds?: { 
+ *   gl: WebGL2RenderingContext,
+ *   particles: any[],
+ *   get?: (spot: any, out: {
+ *    x?: number, y?: number, z?: number,
+ *    vx?: number, vy?: number, vz?: number,
+ *    mass?: number,
+ *    rgb?: number }) => void,
+ *   worldBounds: {
  *     min: [number, number, number], 
  *     max: [number, number, number] 
  *   },
  *   theta?: number,                       // Barnes-Hut threshold, default: 0.5
  *   gravityStrength?: number,             // Force multiplier, default: 0.0003
- *   initialSpeed?: number,                // Initial velocity, default: 0.05
- *   dt?: number,                          // Timestep, default: 10/60
+ *   dt?: number,                          // Timestep, default: 1/60
  *   softening?: number                    // Softening length, default: 0.2
  * }} options
- * 
- * @returns {{
- *   compute: () => void,
- *   getPositionTexture: () => WebGLTexture,
- *   getColorTexture: () => WebGLTexture,
- *   getTextureSize: () => { width: number, height: number },
- *   options: object,
- *   dispose: () => void
- * }}
  */
 export function particleSystem(options) {
   if (!options.gl) {
-    throw new Error('Barnes/Hut system requires WebGL2 context (options.gl)');
+    throw new Error('particleSystem requires WebGL2 context (options.gl)');
   }
   
-  const system = new ParticleSystem(options.gl, options);
+  if (!Array.isArray(options.particles)) {
+    throw new Error('particleSystem requires options.particles to be an Array of spot objects');
+  }
+
+  // Compute particle count from positions array (RGBA = 4 components per particle)
+  const particleCount = options.particles.length;
+
+  let positionsBuf = new Float32Array(particleCount * 4);
+  let velocitiesBuf = new Float32Array(particleCount * 4);
+  let colorsBuf = new Uint8Array(particleCount * 4);
+
+  // Pack spots into tightly-packed typed arrays using mass-spot-mesh style
+  // (single dummy/out object, optional get(mapper), y/z swap)
+  populateBuffers(options.particles, options.get);
+  
+  if (!options.worldBounds) {
+    throw new Error('particleSystem requires options.worldBounds');
+  }
+  
+  // Calculate texture dimensions
+  const textureWidth = Math.ceil(Math.sqrt(particleCount));
+  const textureHeight = Math.ceil(particleCount / textureWidth);
+  const actualTextureSize = textureWidth * textureHeight;
+  
+  // Pad particle data to texture size if needed
+  const paddedPositions = new Float32Array(actualTextureSize * 4);
+  paddedPositions.set(positionsBuf);
+
+  let paddedVelocities = null;
+  if (velocitiesBuf) {
+    paddedVelocities = new Float32Array(actualTextureSize * 4);
+    paddedVelocities.set(velocitiesBuf);
+  }
+
+  let paddedColors = null;
+  if (colorsBuf) {
+    paddedColors = new Uint8Array(actualTextureSize * 4);
+    paddedColors.set(colorsBuf);
+  }
+  
+  // Create system with particle data
+  const system = new ParticleSystem(options.gl, {
+    ...options,
+    particleData: {
+      positions: paddedPositions,
+      velocities: paddedVelocities,
+      colors: paddedColors
+    }
+  });
   
   // Initialize asynchronously (internal - user doesn't need to await)
   let initPromise = system.init().catch(error => {
@@ -42,10 +87,7 @@ export function particleSystem(options) {
   return {
     // Step simulation forward (main loop call)
     compute: () => {
-      if (!system.isInitialized) {
-        console.warn('Barnes/Hut system not yet initialized, skipping compute');
-        return;
-      }
+      if (!system.isInitialized) return;
       system.step();
     },
     
@@ -60,11 +102,63 @@ export function particleSystem(options) {
     // Access configuration
     options: system.options,
     particleCount: system.options.particleCount,
-    
+
     // Wait for initialization (if needed)
     ready: () => initPromise,
     
     // Cleanup GPU resources
     dispose: () => system.dispose()
   };
+
+  /**
+   * @param {any[]} spots
+   * @param {Parameters<typeof particleSystem>[0]['get']} get 
+   */
+  function populateBuffers(spots, get) {
+    const dummy = {
+      index: 0,
+      x: 0, y: 0, z: 0,
+      vx: 0, vy: 0, vz: 0,
+      mass: 0,
+      rgb: 0
+    };
+
+    for (let i = 0; i < spots.length; i++) {
+      const spot = spots[i] || {};
+      dummy.index = i;
+      dummy.x = spot.x || 0;
+      dummy.y = spot.y || 0;
+      dummy.z = spot.z || 0;
+      dummy.vx = spot.vx || 0;
+      dummy.vy = spot.vy || 0;
+      dummy.vz = spot.vz || 0;
+      dummy.mass = spot.mass || 0;
+      dummy.rgb = spot.rgb || 0;
+      if (typeof get === 'function') get(spot, dummy);
+
+      const b = i * 4;
+      positionsBuf[b + 0] = dummy.x;
+      positionsBuf[b + 1] = dummy.y;
+      positionsBuf[b + 2] = dummy.z;
+      positionsBuf[b + 3] = dummy.mass;
+
+      velocitiesBuf[b + 0] = dummy.vx;
+      velocitiesBuf[b + 1] = dummy.vy;
+      velocitiesBuf[b + 2] = dummy.vz;
+      velocitiesBuf[b + 3] = 0;
+
+      let rgbNum = 0;
+      if (Array.isArray(dummy.rgb)) {
+        const c = dummy.rgb;
+        rgbNum = ((c[0] & 0xff) << 16) | ((c[1] & 0xff) << 8) | (c[2] & 0xff);
+      } else {
+        rgbNum = Number(dummy.rgb) || 0;
+      }
+
+      colorsBuf[b + 0] = (rgbNum >> 16) & 0xff;
+      colorsBuf[b + 1] = (rgbNum >> 8) & 0xff;
+      colorsBuf[b + 2] = (rgbNum) & 0xff;
+      colorsBuf[b + 3] = 255;
+    }
+  }
 }

@@ -33,17 +33,24 @@ export class ParticleSystem {
       throw new Error('ParticleSystem requires WebGL2RenderingContext');
     }
     
+    // Validate and store particle data
+    if (!options.particleData) {
+      throw new Error('ParticleSystem requires particleData with positions, velocities, and colors');
+    }
+    
+    this.particleData = options.particleData;
+    const particleCount = options.particleData.positions.length / 4;
+    
     this.options = {
-      particleCount: options.particleCount || 200000,
+      particleCount: particleCount,
       worldBounds: options.worldBounds || {
         min: [-4, -4, 0],
         max: [4, 4, 2]
       },
       theta: options.theta || 0.5,
-      dt: options.dt || 10 / 60,
+      dt: options.dt || 1 / 60,
       gravityStrength: options.gravityStrength || 0.0003,
       softening: options.softening || 0.2,
-      initialSpeed: options.initialSpeed || 0.05,
       damping: options.damping || 0.0,
       maxSpeed: options.maxSpeed || 2.0,
       maxAccel: options.maxAccel || 1.0,
@@ -93,15 +100,13 @@ export class ParticleSystem {
       throw new Error('WebGL2 context not available');
     }
     
-    console.log('Initializing BarnesHutSystem...');
-    
     try {
       this.checkWebGL2Support();
       this.calculateTextureDimensions();
       this.createShaderPrograms();
       this.createTextures();
       this.createGeometry();
-      this.initializeParticles();
+      this.uploadParticleData();
       
       // Restore GL state for THREE.js compatibility
       const gl = this.gl;
@@ -114,7 +119,6 @@ export class ParticleSystem {
       gl.disable(gl.SCISSOR_TEST);
       
       this.isInitialized = true;
-      console.log('BarnesHutSystem initialized successfully');
       
     } catch (error) {
       console.error('BarnesHutSystem initialization failed:', error);
@@ -143,9 +147,6 @@ export class ParticleSystem {
       maxTextureUnits: gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS),
       maxDrawBuffers: gl.getParameter(gl.MAX_DRAW_BUFFERS),
     };
-    console.log('WebGL caps:', caps);
-
-    console.log('WebGL2 extensions check passed');
   }
 
   calculateTextureDimensions() {
@@ -165,10 +166,6 @@ export class ParticleSystem {
     this.textureWidth = Math.ceil(Math.sqrt(this.options.particleCount));
     this.textureHeight = Math.ceil(this.options.particleCount / this.textureWidth);
     this.actualTextureSize = this.textureWidth * this.textureHeight;
-    
-    console.log(`Octree: L0=${this.octreeGridSize}³ voxels (${this.L0Size}x${this.L0Size} texture), ${this.numLevels} levels`);
-    console.log(`Z-slice stacking: ${this.octreeSlicesPerRow}x${this.octreeSlicesPerRow} grid of ${this.octreeGridSize} slices`);
-    console.log(`Position texture: ${this.textureWidth}x${this.textureHeight} for ${this.options.particleCount} particles (${this.actualTextureSize} total texels)`);
   }
 
   createShaderPrograms() {
@@ -179,8 +176,6 @@ export class ParticleSystem {
     this.programs.traversal = this.createProgram(fsQuadVert, traversalFrag);
     this.programs.velIntegrate = this.createProgram(fsQuadVert, velIntegrateFrag);
     this.programs.posIntegrate = this.createProgram(fsQuadVert, posIntegrateFrag);
-    
-    console.log('Shader programs created successfully');
   }
 
   createProgram(vertexSource, fragmentSource) {
@@ -262,8 +257,6 @@ export class ParticleSystem {
     this.velocityTextures = this.createPingPongTextures(this.textureWidth, this.textureHeight);
     this.forceTexture = this.createRenderTexture(this.textureWidth, this.textureHeight);
     this.colorTexture = this.createRenderTexture(this.textureWidth, this.textureHeight, gl.RGBA8, gl.UNSIGNED_BYTE);
-    
-    console.log(`Created ${this.numLevels} octree level textures and particle textures`);
   }
 
   createPingPongTextures(width, height) {
@@ -351,54 +344,30 @@ export class ParticleSystem {
     gl.bindVertexArray(null);
   }
 
-  initializeParticles() {
-    const positions = new Float32Array(this.actualTextureSize * 4);
-    const velocities = new Float32Array(this.actualTextureSize * 4);
-    const colors = new Uint8Array(this.actualTextureSize * 4);
+  uploadParticleData() {
+    const { positions, velocities, colors } = this.particleData;
     
-    const bounds = this.options.worldBounds;
-    const center = [
-      (bounds.min[0] + bounds.max[0]) / 2,
-      (bounds.min[1] + bounds.max[1]) / 2,
-      (bounds.min[2] + bounds.max[2]) / 2
-    ];
-    const speed = this.options.initialSpeed;
-    
-    for (let i = 0; i < this.options.particleCount; i++) {
-      const base = i * 4;
-      
-      const angle = Math.random() * Math.PI * 2;
-      const radius = Math.random() * 3 + Math.random() * 1;
-      const height = (Math.random() - 0.5) * 2;
-      
-      positions[base + 0] = center[0] + Math.cos(angle) * radius;
-      positions[base + 1] = center[1] + Math.sin(angle) * radius;
-      positions[base + 2] = center[2] + height;
-      positions[base + 3] = 0.5 + Math.random() * 1.5; // mass
-      
-      velocities[base + 0] = (Math.random() - 0.5) * 2.0 * speed;
-      velocities[base + 1] = (Math.random() - 0.5) * 2.0 * speed;
-      velocities[base + 2] = (Math.random() - 0.5) * 2.0 * speed;
-      velocities[base + 3] = 0.0;
-
-      // Color gradient based on initial position (shows intermixing)
-      const x = (positions[base + 0] - bounds.min[0]) / (bounds.max[0] - bounds.min[0]);
-      const y = (positions[base + 1] - bounds.min[1]) / (bounds.max[1] - bounds.min[1]);
-      const z = (positions[base + 2] - bounds.min[2]) / (bounds.max[2] - bounds.min[2]);
-      
-      colors[base + 0] = Math.floor(x * 255); // Red varies with X
-      colors[base + 1] = Math.floor(y * 255); // Green varies with Y
-      colors[base + 2] = Math.floor(z * 255); // Blue varies with Z
-      colors[base + 3] = 255;
+    // Validate data lengths
+    const expectedLength = this.actualTextureSize * 4;
+    if (positions.length !== expectedLength) {
+      throw new Error(`Position data length mismatch: expected ${expectedLength}, got ${positions.length}`);
     }
+    if (velocities && velocities.length !== expectedLength) {
+      throw new Error(`Velocity data length mismatch: expected ${expectedLength}, got ${velocities.length}`);
+    }
+    if (colors && colors.length !== expectedLength) {
+      throw new Error(`Color data length mismatch: expected ${expectedLength}, got ${colors.length}`);
+    }
+    
+    // Use provided data or defaults
+    const velData = velocities || new Float32Array(expectedLength); // Default to zero velocity
+    const colorData = colors || new Uint8Array(expectedLength).fill(255); // Default to white
     
     this.uploadTextureData(this.positionTextures.textures[0], positions);
     this.uploadTextureData(this.positionTextures.textures[1], positions);
-    this.uploadTextureData(this.velocityTextures.textures[0], velocities);
-    this.uploadTextureData(this.velocityTextures.textures[1], velocities);
-    this.uploadTextureData(this.colorTexture.texture, colors, this.gl.RGBA, this.gl.UNSIGNED_BYTE);
-    
-    console.log(`Particle data initialized: ${this.options.particleCount} particles`);
+    this.uploadTextureData(this.velocityTextures.textures[0], velData);
+    this.uploadTextureData(this.velocityTextures.textures[1], velData);
+    this.uploadTextureData(this.colorTexture.texture, colorData, this.gl.RGBA, this.gl.UNSIGNED_BYTE);
   }
 
   uploadTextureData(texture, data, format = this.gl.RGBA, type = this.gl.FLOAT) {
@@ -502,6 +471,5 @@ export class ParticleSystem {
     if (this.particleVAO) gl.deleteVertexArray(this.particleVAO);
     
     this.isInitialized = false;
-    console.log('BarnesHutSystem disposed');
   }
 }

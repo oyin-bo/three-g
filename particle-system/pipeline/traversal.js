@@ -75,7 +75,6 @@ export function calculateForces(ctx) {
   gl.uniform1fv(gl.getUniformLocation(ctx.programs.traversal, 'u_slicesPerRow'), slicesPerRow);
 
   // Draw quad
-  // console.log('Plan M draw: calculateForces');
   ctx.checkFBO('calculateForces');
   gl.bindVertexArray(ctx.quadVAO);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);

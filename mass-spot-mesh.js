@@ -168,8 +168,8 @@ function createArrayBasedMesh({ spots, get, fog, glsl }) {
       const spot = spots[i];
       dummy.index = i;
       dummy.x = spot.x || 0;
-      dummy.y = spot.z || 0;
-      dummy.z = spot.y || 0;
+      dummy.y = spot.y || 0;
+      dummy.z = spot.z || 0;
       dummy.mass = spot.mass || 0;
       dummy.rgb = spot.rgb || 0;
       if (typeof get === 'function') get(spot, dummy);
