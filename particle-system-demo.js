@@ -105,7 +105,8 @@ const mesh = massSpotMesh({
     position: physics.getPositionTexture(),  // Raw WebGLTexture
     color: physics.getColorTexture(),         // Raw WebGLTexture  
     size: [textureSize.width, textureSize.height]
-  }
+  },
+  fog: { start: 0.3, gray: 20 }
 });
 
 scene.add(mesh);
