@@ -16,25 +16,28 @@ Remove all debugging artifacts that consume GPU/CPU cycles:
 - Commented-out debug code in shaders
 - Unused renderer.js file
 
-### B. **Replace Particle Count with Data Loading API**
-Transform from:
+### B. **Replace internal generation with client-provided particle data**
+Transform from a system that generated particles internally:
 ```javascript
-particleSystem({ gl, particleCount: 50000, ... })  // System generates particles
+// old: system generates particles internally
+particleSystem({ gl, ... })
 ```
-
-To (matching `mass-spot-mesh.js` API patterns):
+To a system that accepts particle data from the caller, aligned with the
+`mass-spot-mesh` spots/get pattern (preferred):
 ```javascript
-particleSystem({ 
-  gl, 
-  particles: {
-    positions: Float32Array,  // [x,y,z,mass, ...] Required
-    velocities: Float32Array, // [vx,vy,vz,0, ...] Optional (defaults to zero)
-    colors: Uint8Array        // [r,g,b,a, ...] Optional (defaults to white)
-  },
-  worldBounds: { min, max },  // Still required
+particleSystem({
+  gl,
+  // CPU mode: supply the spots array directly and an optional mapper
+  particles: [ { x?: number, y?: number, z?: number, mass?: number, rgb?: number }, ... ],
+  get?: (spot, out) => void, // optional mapper: fills { x,y,z,mass,rgb } from each spot
+  worldBounds: { min, max },
   ...
 })
 ```
+
+In future versions callers may even provide GPU textures directly (texture-based mode) if they
+need a zero-copy GPU pipeline; that flow is the rendering path used by
+`mass-spot-mesh` and is a separate texture-mode branch.
 
 **Key Principle**: Particle system is a **physics engine**, not a **particle generator**. Data generation moves to demo/client code.
 
@@ -48,11 +51,9 @@ particleSystem({
 ```javascript
 {
   gl: WebGL2RenderingContext,    // Required
-  particleCount?: number,         // Default: 200000 → REMOVE
   worldBounds?: { min, max },
   theta?: number,
   gravityStrength?: number,
-  initialSpeed?: number,          // → REMOVE (not physics, it's generation)
   dt?: number,
   softening?: number,
   damping?: number,
@@ -65,15 +66,14 @@ particleSystem({
 ```javascript
 {
   gl: WebGL2RenderingContext,    // Required
-  particles: {                    // NEW: Required
-    positions: Float32Array | TypedArray,  // [x,y,z,mass, x,y,z,mass, ...]
-    velocities?: Float32Array | TypedArray, // [vx,vy,vz,0, ...] Optional
-    colors?: Uint8Array | TypedArray        // [r,g,b,a, ...] Optional
-  },
+  particles?: Array<{ x?: number, y?: number, z?: number, mass?: number, rgb?: number }>,
+  get?: (spot, out) => void,     // Optional mapper function (mass-spot-mesh style)
+  // OR texture-mode (GPU):
+  // textures: { position: WebGLTexture, color?: WebGLTexture, size: [w,h] }
   worldBounds: { min, max },      // Required (no defaults)
   theta?: number,                 // Default: 0.5
   gravityStrength?: number,       // Default: 0.0003
-  dt?: number,                    // Default: 1/60 (NOT 10/60!)
+  dt?: number,                    // Default: 1/60
   softening?: number,             // Default: 0.2
   damping?: number,               // Default: 0.0
   maxSpeed?: number,              // Default: Infinity (no clamping)
@@ -82,10 +82,9 @@ particleSystem({
 ```
 
 **Derived Properties**:
-- `particleCount` computed from `particles.positions.length / 4`
 - `textureWidth`, `textureHeight` computed from particle distribution (unchanged logic)
 
-**Return Value** (unchanged):
+**Return Value**:
 ```javascript
 {
   compute(),
@@ -94,8 +93,6 @@ particleSystem({
   getCurrentIndex(),
   getColorTexture(),
   getTextureSize(),
-  options,           // Now reflects user-provided options
-  particleCount,     // Computed from data
   ready(),
   dispose()
 }
@@ -111,7 +108,7 @@ Note: "approx location" uses either a named function/section or a rough position
 
 ### A. `particle-system/index.js`
 - Where: near the top of the exported factory function (constructor / options parsing).
-- What: add validation that `options.particles` and `options.particles.positions` exist; compute `particleCount` from the positions array and pass `particleData` through to `ParticleSystem`.
+- What: add validation that CPU-mode supplies `options.particles` (an array) or texture-mode supplies valid `options.textures`; compute internal particle count from `options.particles.length` or from texture size and pass particle data through to `ParticleSystem`.
 
 ### B. `particle-system/particle-system.js`
 - Where: constructor and initialization sequence (top of class and `init()` call site).
