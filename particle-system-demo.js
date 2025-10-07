@@ -88,7 +88,6 @@ const physics = particleSystem({
     const z = (vz - worldBounds.min[2]) / (worldBounds.max[2] - worldBounds.min[2]);
     out.rgb = ((Math.floor(x * 255) & 0xff) << 16) | ((Math.floor(y * 255) & 0xff) << 8) | (Math.floor(z * 255) & 0xff);
   },
-  worldBounds: worldBounds,
   theta: 0.5,
   gravityStrength: 0.000006,
   softening: 0.2,
@@ -142,10 +141,8 @@ outcome.animate = () => {
   
   // Just swap which wrapper we use - no recreation, no copying
   const currentIndex = physics.getCurrentIndex();
-  if (positionTextureWrappers) {
-    const wrapper = positionTextureWrappers[currentIndex];
-    mesh.material.uniforms.u_positionTexture.value = wrapper;
-    wrapper.needsUpdate = true;  // Tell THREE.js the GPU texture has new data
-  }
+  const wrapper = positionTextureWrappers[currentIndex];
+  mesh.material.uniforms.u_positionTexture.value = wrapper;
+  wrapper.needsUpdate = true;  // Tell THREE.js the GPU texture has new data
 };
 

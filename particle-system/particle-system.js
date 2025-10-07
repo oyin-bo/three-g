@@ -98,6 +98,8 @@ export class ParticleSystem {
     this._disableFloatBlend = false;
     this._quadtreeDisabled = false;
     this._lastBoundsUpdateFrame = -1;
+    // Time (ms) when bounds were last updated via GPU readback
+    this._lastBoundsUpdateTime = -1;
   }
 
   // Debug helper: unbind all textures on commonly used units to avoid feedback loops
@@ -394,9 +396,17 @@ export class ParticleSystem {
 
   step() {
     if (!this.isInitialized) return;
-    
-    if ((this.frameCount % 10) === 0) {
-      pipelineUpdateBounds(this, 256);
+    // Update world bounds from texture infrequently (every 10 seconds) to avoid GPU-CPU stalls.
+    const now = performance.now ? performance.now() : Date.now();
+    const updateIntervalMs = 10000; // 10 seconds
+    if (this._lastBoundsUpdateTime < 0 || (now - this._lastBoundsUpdateTime) >= updateIntervalMs) {
+      try {
+        pipelineUpdateBounds(this, 16);
+      } catch (e) {
+        // Swallow errors here to avoid breaking the simulation loop; leave previous bounds in place
+        console.warn('updateWorldBoundsFromTexture failed:', e);
+      }
+      this._lastBoundsUpdateTime = now;
     }
     this.buildQuadtree();
     this.clearForceTexture();

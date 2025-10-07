@@ -1,5 +1,5 @@
 // Approximate min/max XY from current position texture via sparse GPU readback
-export function updateWorldBoundsFromTexture(ctx, sampleCount = 256) {
+export function updateWorldBoundsFromTexture(ctx, sampleCount = 16) {
   const gl = ctx.gl;
   if (!gl || !ctx.positionTextures) return;
 
@@ -8,23 +8,42 @@ export function updateWorldBoundsFromTexture(ctx, sampleCount = 256) {
   const fbo = fbos[idx];
   if (!fbo) return;
 
+  // Bind the current position FBO once
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  // Some drivers require readBuffer to be set explicitly
   gl.readBuffer(gl.COLOR_ATTACHMENT0);
 
   let minX = Infinity, minY = Infinity;
   let maxX = -Infinity, maxY = -Infinity;
-  const px = new Float32Array(4);
 
-  // Low-discrepancy traversal over the texture
+  // Coarse row-based sampling to reduce the number of blocking readPixels calls.
+  // Instead of calling readPixels per texel (~N calls), read a full row few times and sample
+  // within the returned row buffer. This reduces driver round-trips dramatically.
   const w = ctx.textureWidth;
   const h = ctx.textureHeight;
-  const step = Math.max(1, Math.floor(Math.sqrt((w * h) / sampleCount)));
+
+  // Number of rows to sample: roughly sqrt(sampleCount)
+  const rows = Math.max(1, Math.floor(Math.sqrt(sampleCount)));
+  const stepY = Math.max(1, Math.floor(h / rows));
+
+  // Pre-allocate a row buffer to read one full row at a time (RGBA floats)
+  const rowBuf = new Float32Array(w * 4);
   let count = 0;
-  for (let y = 0; y < h && count < sampleCount; y += step) {
-    for (let x = 0; x < w && count < sampleCount; x += step) {
-      gl.readPixels(x, y, 1, 1, gl.RGBA, gl.FLOAT, px);
-      if (px[3] > 0.0) { // mass filter
-        const X = px[0], Y = px[1];
+
+  for (let r = 0, y = 0; r < rows && y < h; r++, y += stepY) {
+    // Read entire row once
+    gl.readPixels(0, y, w, 1, gl.RGBA, gl.FLOAT, rowBuf);
+
+    // Sample across the row at intervals to reach ~sampleCount total samples
+    const samplesPerRow = Math.max(1, Math.floor(sampleCount / rows));
+    const stepX = Math.max(1, Math.floor(w / samplesPerRow));
+
+    for (let x = 0; x < w && count < sampleCount; x += stepX) {
+      const i = x * 4;
+      const a = rowBuf[i + 3];
+      if (a > 0.0) { // mass filter
+        const X = rowBuf[i + 0];
+        const Y = rowBuf[i + 1];
         if (X < minX) minX = X;
         if (Y < minY) minY = Y;
         if (X > maxX) maxX = X;
@@ -34,6 +53,7 @@ export function updateWorldBoundsFromTexture(ctx, sampleCount = 256) {
     }
   }
 
+  // Unbind FBO
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
   if (count > 0 && isFinite(minX) && isFinite(minY) && isFinite(maxX) && isFinite(maxY)) {
