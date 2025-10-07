@@ -16,10 +16,15 @@ import { ParticleSystem } from './particle-system.js';
  *   theta?: number, // Barnes-Hut threshold, default: 0.5
  *   gravityStrength?: number, // Force multiplier, default: 0.0003
  *   dt?: number, // Timestep, default: 1/60
- *   softening?: number // Softening length, default: 0.2
+ *   softening?: number, // Softening length, default: 0.2
+ *   damping?: number, // Velocity damping, default: 0.0
+ *   maxSpeed?: number, // Maximum velocity, default: 2.0
+ *   maxAccel?: number, // Maximum acceleration, default: 1.0
+ *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
+ *   debugSkipQuadtree?: boolean // Debug option to skip quadtree traversal, default: false
  * }} options
  */
-export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2 }) {
+export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2, damping = 0.0, maxSpeed = 2.0, maxAccel = 1.0, worldBounds, debugSkipQuadtree = false }) {
   // Compute particle count from positions array (RGBA = 4 components per particle)
   const particleCount = particles.length;
 
@@ -57,7 +62,17 @@ export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrengt
       positions: paddedPositions,
       velocities: paddedVelocities,
       colors: paddedColors
-    }
+    },
+    // Pass through all configuration parameters
+    theta,
+    gravityStrength,
+    dt,
+    softening,
+    damping,
+    maxSpeed,
+    maxAccel,
+    worldBounds,
+    debugSkipQuadtree
   });
   
   // Initialize asynchronously (internal - user doesn't need to await)

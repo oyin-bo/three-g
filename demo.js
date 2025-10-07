@@ -134,6 +134,11 @@ function recreatePhysics() {
   // Blend between the three colors based on position
   const finalColor = new THREE.Color();
 
+  let gravityStrength = Math.random();
+  gravityStrength = gravityStrength * 0.001;
+  gravityStrength = gravityStrength * gravityStrength;
+  gravityStrength += 0.00000005;
+
   let physics = particleSystem({
     gl,
     particles,
@@ -162,7 +167,7 @@ function recreatePhysics() {
         (Math.floor(z * 255) & 0xff);
     },
     theta: 0.5,
-    gravityStrength: 0.6,
+    gravityStrength,
     softening: 0.2,
     dt: 10 / 60
   });

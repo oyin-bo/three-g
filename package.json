@@ -1,6 +1,6 @@
 {
   "name": "three-g",
-  "version": "2.0.0-beta.1",
+  "version": "2.0.0",
   "description": "THREE.js galaxy primitives with GPU Barnes-Hut physics",
   "main": "index.js",
   "type": "module",
