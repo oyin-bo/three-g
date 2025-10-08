@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Particle System GPU Profiling</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Courier New', monospace;
+      background: #000;
+      color: #0f0;
+      overflow: hidden;
+    }
+    #container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+    #stats {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 15px;
+      border: 1px solid #0f0;
+      font-size: 12px;
+      line-height: 1.6;
+      z-index: 100;
+      max-width: 500px;
+    }
+    #stats h3 {
+      margin: 0 0 10px 0;
+      color: #0ff;
+      font-size: 14px;
+    }
+    .stage {
+      display: flex;
+      justify-content: space-between;
+      margin: 2px 0;
+    }
+    .stage-name {
+      flex: 1;
+    }
+    .stage-time {
+      width: 80px;
+      text-align: right;
+    }
+    .stage-percent {
+      width: 60px;
+      text-align: right;
+      color: #ff0;
+    }
+    .bar {
+      height: 4px;
+      background: #0f0;
+      margin-top: 2px;
+      transition: width 0.3s;
+    }
+    .warning {
+      color: #f80;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #444;
+    }
+    .total {
+      font-weight: bold;
+      color: #ff0;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #444;
+    }
+  </style>
+</head>
+<body>
+  <div id="container"></div>
+  <div id="stats">
+    <h3>⚡ GPU Performance Profile</h3>
+    <div id="profiler-output">Initializing...</div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { threePop } from './three-pop/index.js';
+    import { particleSystem } from './particle-system/index.js';
+    import { massSpotMesh } from './mass-spot-mesh.js';
+
+    // Initialize THREE.js scene
+    const outcome = threePop({
+      domElement: document.getElementById('container'),
+      camera: {
+        fov: 60,
+        position: [0, 0, 8]
+      },
+      controls: {
+        enableDamping: true,
+        dampingFactor: 0.05,
+        autoRotate: true,
+        autoRotateSpeed: 0.5
+      }
+    });
+
+    const { scene, renderer, camera } = outcome;
+
+    // Enable profiling!
+    const particleCount = 50000;
+    const physics = particleSystem({
+      gl: renderer.getContext(),
+      particleCount: particleCount,
+      theta: 0.5,
+      gravityStrength: 0.000006,
+      dt: 10/60,
+      enableProfiling: true  // <-- THE KEY!
+    });
+
+    await physics.ready();
+
+    const textureSize = physics.getTextureSize();
+    const mesh = massSpotMesh({
+      textureMode: true,
+      particleCount: particleCount,
+      textures: {
+        position: physics.getPositionTexture(),
+        color: physics.getColorTexture(),
+        size: [textureSize.width, textureSize.height]
+      },
+      fog: { color: 0x000000, near: 0.6, far: 12 }
+    });
+
+    scene.add(mesh);
+
+    // Create ExternalTexture wrappers after first render
+    let posWrappers = null;
+    let frameCount = 0;
+
+    outcome.animate = () => {
+      frameCount++;
+
+      // Lazy init ExternalTexture after first frame
+      if (!posWrappers) {
+        const textures = physics.getPositionTextures();
+        posWrappers = [
+          new THREE.ExternalTexture(textures[0]),
+          new THREE.ExternalTexture(textures[1])
+        ];
+      }
+
+      // Run physics step
+      physics.compute();
+
+      // Restore THREE.js GL state
+      renderer.resetState();
+
+      // Swap to current ping-pong buffer
+      const currentIdx = physics.getCurrentIndex();
+      const wrapper = posWrappers[currentIdx];
+      mesh.material.uniforms.u_positionTexture.value = wrapper;
+      wrapper.needsUpdate = true;
+
+      // Update profiling display
+      if (frameCount > 60 && frameCount % 10 === 0) {
+        updateProfilingDisplay();
+      }
+    };
+
+    function updateProfilingDisplay() {
+      const profiler = physics.profiler;
+      
+      // Debug logging
+      console.log('Profiler status:', {
+        exists: !!profiler,
+        enabled: profiler?.enabled,
+        results: profiler?.getAll(),
+        totalTime: profiler?.getTotalTime()
+      });
+      
+      if (!profiler || !profiler.enabled) {
+        document.getElementById('profiler-output').innerHTML = 
+          '<div class="warning">⚠️ GPU profiling not available (EXT_disjoint_timer_query_webgl2 extension not supported)</div>';
+        return;
+      }
+
+      const results = profiler.getAll();
+      const totalTime = profiler.getTotalTime();
+
+      if (totalTime === 0) {
+        document.getElementById('profiler-output').innerHTML = 
+          '<div>Waiting for GPU timing data... (frame ' + frameCount + ')</div>' +
+          '<div style="font-size: 10px; color: #888;">Profiler enabled: ' + profiler.enabled + '</div>' +
+          '<div style="font-size: 10px; color: #888;">Pending queries: ' + (profiler.pendingQueries?.length || 0) + '</div>';
+        return;
+      }
+
+      // Sort by time descending
+      const stages = Object.entries(results)
+        .filter(([name]) => name !== 'total_frame')
+        .sort((a, b) => b[1] - a[1]);
+
+      let html = '';
+
+      // Show each stage
+      for (const [name, time] of stages) {
+        const percent = (time / totalTime * 100);
+        const barWidth = Math.min(100, percent);
+        
+        html += `
+          <div class="stage">
+            <div class="stage-name">${name.replace(/_/g, ' ')}</div>
+            <div class="stage-time">${time.toFixed(2)}ms</div>
+            <div class="stage-percent">${percent.toFixed(1)}%</div>
+          </div>
+          <div class="bar" style="width: ${barWidth}%"></div>
+        `;
+      }
+
+      // Total
+      const fps = totalTime > 0 ? (1000 / totalTime).toFixed(1) : '0';
+      html += `
+        <div class="total">
+          <div class="stage">
+            <div class="stage-name">TOTAL GPU TIME</div>
+            <div class="stage-time">${totalTime.toFixed(2)}ms</div>
+            <div class="stage-percent">${fps} FPS</div>
+          </div>
+        </div>
+      `;
+
+      // Identify bottleneck
+      if (stages.length > 0) {
+        const bottleneck = stages[0];
+        const bottleneckPercent = (bottleneck[1] / totalTime * 100).toFixed(1);
+        html += `
+          <div class="warning">
+            🎯 <strong>Bottleneck:</strong> ${bottleneck[0].replace(/_/g, ' ')} (${bottleneckPercent}% of frame time)
+          </div>
+        `;
+      }
+
+      document.getElementById('profiler-output').innerHTML = html;
+    }
+
+    // Initial display
+    setTimeout(updateProfilingDisplay, 1000);
+  </script>
+</body>
+</html>
