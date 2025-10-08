@@ -21,10 +21,11 @@ import { ParticleSystem } from './particle-system.js';
  *   maxSpeed?: number, // Maximum velocity, default: 2.0
  *   maxAccel?: number, // Maximum acceleration, default: 1.0
  *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
- *   debugSkipQuadtree?: boolean // Debug option to skip quadtree traversal, default: false
+ *   debugSkipQuadtree?: boolean, // Debug option to skip quadtree traversal, default: false
+ *   enableProfiling?: boolean // Enable GPU profiling with EXT_disjoint_timer_query_webgl2, default: false
  * }} options
  */
-export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2, damping = 0.0, maxSpeed = 2.0, maxAccel = 1.0, worldBounds, debugSkipQuadtree = false }) {
+export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2, damping = 0.0, maxSpeed = 2.0, maxAccel = 1.0, worldBounds, debugSkipQuadtree = false, enableProfiling = false }) {
   // Compute particle count from positions array (RGBA = 4 components per particle)
   const particleCount = particles.length;
 
@@ -72,13 +73,35 @@ export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrengt
     maxSpeed,
     maxAccel,
     worldBounds,
-    debugSkipQuadtree
+    debugSkipQuadtree,
+    enableProfiling
   });
   
   // Initialize asynchronously (internal - user doesn't need to await)
   system.init();
   
   return {
+    // Async initialization (wait for system to be ready)
+    ready: async () => {
+      // System is initialized synchronously in init(), but we provide this
+      // for compatibility with async initialization patterns
+      return new Promise((resolve) => {
+        if (system.isInitialized) {
+          resolve();
+        } else {
+          // Poll for initialization (should be immediate)
+          const checkInit = () => {
+            if (system.isInitialized) {
+              resolve();
+            } else {
+              setTimeout(checkInit, 10);
+            }
+          };
+          checkInit();
+        }
+      });
+    },
+    
     // Step simulation forward (main loop call)
     compute: () => {
       if (!system.isInitialized) return;
@@ -96,6 +119,9 @@ export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrengt
     // Access configuration
     options: system.options,
     particleCount: system.options.particleCount,
+    
+    // Access profiler (may be null if profiling disabled)
+    profiler: system.profiler,
 
     // Cleanup GPU resources
     dispose: () => system.dispose()

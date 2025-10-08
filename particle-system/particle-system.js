@@ -24,6 +24,7 @@ import { runReductionPass as pyramidReduce } from './pipeline/pyramid.js';
 import { calculateForces as pipelineCalculateForces } from './pipeline/traversal.js';
 import { integratePhysics as pipelineIntegratePhysics } from './pipeline/integrator.js';
 import { updateWorldBoundsFromTexture as pipelineUpdateBounds } from './pipeline/bounds.js';
+import { GPUProfiler } from './utils/gpu-profiler.js';
 
 export class ParticleSystem {
 
@@ -41,7 +42,8 @@ export class ParticleSystem {
    *   damping?: number,
    *   maxSpeed?: number,
    *   maxAccel?: number,
-   *   debugSkipQuadtree?: boolean
+   *   debugSkipQuadtree?: boolean,
+   *   enableProfiling?: boolean
    * }} options
    */
   constructor(gl, options) {
@@ -75,6 +77,7 @@ export class ParticleSystem {
       maxSpeed: options.maxSpeed || 2.0,
       maxAccel: options.maxAccel || 1.0,
       debugSkipQuadtree: options.debugSkipQuadtree || false,
+      enableProfiling: options.enableProfiling || false,
     };
     
     // Internal state
@@ -100,6 +103,12 @@ export class ParticleSystem {
     this._lastBoundsUpdateFrame = -1;
     // Time (ms) when bounds were last updated via GPU readback
     this._lastBoundsUpdateTime = -1;
+    
+    // GPU Profiler (created only if enabled)
+    this.profiler = null;
+    if (this.options.enableProfiling) {
+      this.profiler = new GPUProfiler(gl);
+    }
   }
 
   // Debug helper: unbind all textures on commonly used units to avoid feedback loops
@@ -396,6 +405,12 @@ export class ParticleSystem {
 
   step() {
     if (!this.isInitialized) return;
+    
+    // Update profiler (collect completed query results)
+    if (this.profiler) {
+      this.profiler.update();
+    }
+    
     // Update world bounds from texture infrequently (every 10 seconds) to avoid GPU-CPU stalls.
     const now = performance.now ? performance.now() : Date.now();
     const updateIntervalMs = 10000; // 10 seconds
@@ -408,10 +423,19 @@ export class ParticleSystem {
       }
       this._lastBoundsUpdateTime = now;
     }
+    
     this.buildQuadtree();
     this.clearForceTexture();
+    
+    // Profile force calculation
+    if (this.profiler) this.profiler.begin('traversal');
     pipelineCalculateForces(this);
+    if (this.profiler) this.profiler.end();
+    
+    // Profile integration (velocity + position)
+    if (this.profiler) this.profiler.begin('integration');
     pipelineIntegratePhysics(this);
+    if (this.profiler) this.profiler.end();
     
     this.frameCount++;
   }
@@ -427,11 +451,17 @@ export class ParticleSystem {
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
     
+    // Profile aggregation
+    if (this.profiler) this.profiler.begin('aggregation');
     aggregateL0(this);
+    if (this.profiler) this.profiler.end();
     
+    // Profile pyramid reduction
+    if (this.profiler) this.profiler.begin('pyramid_reduction');
     for (let level = 0; level < this.numLevels - 1; level++) {
       pyramidReduce(this, level, level + 1);
     }
+    if (this.profiler) this.profiler.end();
   }
 
   clearForceTexture() {
@@ -493,6 +523,12 @@ export class ParticleSystem {
     
     if (this.quadVAO) gl.deleteVertexArray(this.quadVAO);
     if (this.particleVAO) gl.deleteVertexArray(this.particleVAO);
+    
+    // Clean up profiler
+    if (this.profiler) {
+      this.profiler.dispose();
+      this.profiler = null;
+    }
     
     this.isInitialized = false;
   }
