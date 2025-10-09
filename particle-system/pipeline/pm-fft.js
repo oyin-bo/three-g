@@ -207,10 +207,65 @@ export function forwardFFT(psys) {
 /**
  * Inverse FFT: spectrum → real grid
  * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {WebGLTexture} inputSpectrum - Input complex spectrum
+ * @param {WebGLTexture} outputReal - Output real-valued texture
  */
-export function inverseFFT(psys) {
+export function inverseFFTToReal(psys, inputSpectrum, outputReal) {
+  const gl = psys.gl;
+  const textureSize = psys.pmGrid.size;
+  
+  // First, copy input spectrum to working spectrum texture
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, gl.createFramebuffer());
+  gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, inputSpectrum, 0);
+  gl.bindTexture(gl.TEXTURE_2D, psys.pmSpectrum.texture);
+  gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, textureSize, textureSize);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+  
+  // Perform inverse FFT
   perform3DFFT(psys, true);
   
-  // Extract real part and write back to mass grid
-  // (Implementation depends on next stage requirements)
+  // Extract real part from complex result and write to output
+  const extractRealSrc = `#version 300 es
+    precision highp float;
+    in vec2 v_uv;
+    out vec4 outColor;
+    uniform sampler2D u_complexTexture;
+    
+    void main() {
+      vec2 complex = texture(u_complexTexture, v_uv).rg;
+      float realPart = complex.r; // Extract real component
+      outColor = vec4(realPart, 0.0, 0.0, realPart); // Store in R and A
+    }
+  `;
+  
+  if (!psys._extractRealProgram) {
+    psys._extractRealProgram = psys.createProgram(
+      `#version 300 es
+       in vec2 a_position;
+       out vec2 v_uv;
+       void main() {
+         v_uv = a_position * 0.5 + 0.5;
+         gl_Position = vec4(a_position, 0.0, 1.0);
+       }`,
+      extractRealSrc
+    );
+  }
+  
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outputReal, 0);
+  
+  gl.viewport(0, 0, textureSize, textureSize);
+  gl.useProgram(psys._extractRealProgram);
+  
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, psys.pmSpectrum.texture);
+  gl.uniform1i(gl.getUniformLocation(psys._extractRealProgram, 'u_complexTexture'), 0);
+  
+  gl.bindVertexArray(psys.quadVAO);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindVertexArray(null);
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
 }

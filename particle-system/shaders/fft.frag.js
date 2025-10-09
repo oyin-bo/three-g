@@ -116,7 +116,8 @@ void main() {
     result = complexSub(currentComplex, complexMul(w, partnerComplex));
   }
   
-  // Normalize if inverse FFT and final stage
+  // Normalize if inverse FFT and final stage of each axis
+  // For 3D FFT, we normalize by N once per axis (total N³)
   if (u_inverse == 1 && u_stage == int(log2(u_gridSize)) - 1) {
     result /= u_gridSize;
   }
