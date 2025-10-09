@@ -22,10 +22,11 @@ import { ParticleSystem } from './particle-system.js';
  *   maxAccel?: number, // Maximum acceleration, default: 1.0
  *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
  *   debugSkipQuadtree?: boolean, // Debug option to skip quadtree traversal, default: false
- *   enableProfiling?: boolean // Enable GPU profiling with EXT_disjoint_timer_query_webgl2, default: false
+ *   enableProfiling?: boolean, // Enable GPU profiling with EXT_disjoint_timer_query_webgl2, default: false
+ *   planA?: boolean // Enable Plan A (PM/FFT) debug mode, default: false
  * }} options
  */
-export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2, damping = 0.0, maxSpeed = 2.0, maxAccel = 1.0, worldBounds, debugSkipQuadtree = false, enableProfiling = false }) {
+export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2, damping = 0.0, maxSpeed = 2.0, maxAccel = 1.0, worldBounds, debugSkipQuadtree = false, enableProfiling = false, planA = false }) {
   // Compute particle count from positions array (RGBA = 4 components per particle)
   const particleCount = particles.length;
 
@@ -74,7 +75,8 @@ export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrengt
     maxAccel,
     worldBounds,
     debugSkipQuadtree,
-    enableProfiling
+    enableProfiling,
+    planA
   });
   
   // Initialize asynchronously (internal - user doesn't need to await)

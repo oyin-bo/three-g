@@ -43,7 +43,8 @@ export class ParticleSystem {
    *   maxSpeed?: number,
    *   maxAccel?: number,
    *   debugSkipQuadtree?: boolean,
-   *   enableProfiling?: boolean
+   *   enableProfiling?: boolean,
+   *   planA?: boolean
    * }} options
    */
   constructor(gl, options) {
@@ -78,6 +79,7 @@ export class ParticleSystem {
       maxAccel: options.maxAccel || 1.0,
       debugSkipQuadtree: options.debugSkipQuadtree || false,
       enableProfiling: options.enableProfiling || false,
+      planA: options.planA || false,
     };
     
     // Internal state
@@ -109,6 +111,9 @@ export class ParticleSystem {
     if (this.options.enableProfiling) {
       this.profiler = new GPUProfiler(gl);
     }
+    
+    // PM Debug state (for Plan A debugging)
+    this._pmDebugState = null;
   }
 
   // Debug helper: unbind all textures on commonly used units to avoid feedback loops
@@ -411,6 +416,15 @@ export class ParticleSystem {
       this.profiler.update();
     }
     
+    // Check if PM debug is running in single-stage mode
+    if (this._pmDebugState?.config?.enabled && this._pmDebugState.config.singleStageRun) {
+      // Run exactly one stage in isolation, skip normal pipeline
+      const { pmDebugRunSingle } = require('./pm-debug/index.js');
+      const { stage, source, sink } = this._pmDebugState.config.singleStageRun;
+      pmDebugRunSingle(this, stage, source, sink);
+      return;
+    }
+    
     // Update world bounds from texture infrequently (every 10 seconds) to avoid GPU-CPU stalls.
     const now = performance.now ? performance.now() : Date.now();
     const updateIntervalMs = 10000; // 10 seconds
@@ -424,7 +438,8 @@ export class ParticleSystem {
       this._lastBoundsUpdateTime = now;
     }
     
-    this.buildQuadtree();
+    // Run normal pipeline with optional debug hooks
+    this.buildQuadtreeWithDebug();
     this.clearForceTexture();
     
     // Profile force calculation
@@ -436,6 +451,33 @@ export class ParticleSystem {
     pipelineIntegratePhysics(this);
     
     this.frameCount++;
+  }
+  
+  buildQuadtreeWithDebug() {
+    // Check for debug hooks before/after deposit stage
+    if (this._pmDebugState?.config?.enabled) {
+      const { pmDebugBeforeStage, pmDebugAfterStage } = require('./pm-debug/index.js');
+      
+      // Before hook for pm_deposit
+      const sourceBefore = pmDebugBeforeStage(this, 'pm_deposit');
+      if (sourceBefore && sourceBefore.kind !== 'live') {
+        // Override with synthetic or snapshot source
+        // (will be handled by buildQuadtree itself)
+      }
+      
+      // Build quadtree normally
+      this.buildQuadtree();
+      
+      // After hook for pm_deposit
+      const sinkAfter = pmDebugAfterStage(this, 'pm_deposit');
+      if (sinkAfter && sinkAfter.kind !== 'noop') {
+        // Apply sink (snapshot, overlay, metrics, etc.)
+        // This will be handled by the pm-debug module
+      }
+    } else {
+      // Build quadtree normally without debug hooks
+      this.buildQuadtree();
+    }
   }
 
   buildQuadtree() {
