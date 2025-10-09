@@ -283,7 +283,7 @@ function recreatePhysicsAndMesh() {
         ((Math.floor(y * 255) & 0xff) << 8) |
         (Math.floor(z * 255) & 0xff);
     },
-    theta: 0.5,
+    theta: 0.65,  // Optimized for performance (was 0.5)
     gravityStrength,
     softening: 0.2,
     dt: 10 / 60,

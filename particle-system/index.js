@@ -13,7 +13,7 @@ import { ParticleSystem } from './particle-system.js';
  *    vx?: number, vy?: number, vz?: number,
  *    mass?: number,
  *    rgb?: number }) => void,
- *   theta?: number, // Barnes-Hut threshold, default: 0.5
+ *   theta?: number, // Barnes-Hut threshold, default: 0.65 (higher = faster, lower = more accurate)
  *   gravityStrength?: number, // Force multiplier, default: 0.0003
  *   dt?: number, // Timestep, default: 1/60
  *   softening?: number, // Softening length, default: 0.2
@@ -26,7 +26,7 @@ import { ParticleSystem } from './particle-system.js';
  *   planC?: boolean // Enable Plan C (MRT quadrupoles + debug staging), default: false
  * }} options
  */
-export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2, damping = 0.0, maxSpeed = 2.0, maxAccel = 1.0, worldBounds, debugSkipQuadtree = false, enableProfiling = false, planC = false }) {
+export function particleSystem({ gl, particles, get, theta = 0.65, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2, damping = 0.0, maxSpeed = 2.0, maxAccel = 1.0, worldBounds, debugSkipQuadtree = false, enableProfiling = false, planC = false }) {
   // Compute particle count from positions array (RGBA = 4 components per particle)
   const particleCount = particles.length;
 

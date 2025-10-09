@@ -229,16 +229,12 @@ void main() {
     norm = clamp(norm, vec3(0.0), vec3(1.0 - (1.0 / gridSize)));
     ivec3 myL0Voxel = ivec3(floor(norm * gridSize));
     
-    // Sample 5×5×5 neighborhood at L0 for smooth near-field
-    const int R0 = 2;
+    // Sample 3×3×3 neighborhood at L0 (optimized for performance)
+    const int R0 = 1;
     for (int dz = -R0; dz <= R0; dz++) {
       for (int dy = -R0; dy <= R0; dy++) {
         for (int dx = -R0; dx <= R0; dx++) {
           if (dx == 0 && dy == 0 && dz == 0) { continue; }
-          
-          // Skip far corners for isotropy
-          int manhattan = abs(dx) + abs(dy) + abs(dz);
-          if (manhattan > 4) { continue; }
           
           ivec3 neighborVoxel = myL0Voxel + ivec3(dx, dy, dz);
           if (neighborVoxel.x < 0 || neighborVoxel.y < 0 || neighborVoxel.z < 0 ||
