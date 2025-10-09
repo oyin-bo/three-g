@@ -14,6 +14,7 @@ import reductionFrag from './shaders/reduction.frag.js';
 import aggregationVert from './shaders/aggregation.vert.js';
 import aggregationFrag from './shaders/aggregation.frag.js';
 import traversalFrag from './shaders/traversal.frag.js';
+import traversalQuadrupoleFrag from './shaders/traversal-quadrupole.frag.js';
 import velIntegrateFrag from './shaders/vel_integrate.frag.js';
 import posIntegrateFrag from './shaders/pos_integrate.frag.js';
 
@@ -26,6 +27,16 @@ import { integratePhysics as pipelineIntegratePhysics } from './pipeline/integra
 
 import { updateWorldBoundsFromTexture as pipelineUpdateBounds } from './pipeline/bounds.js';
 import { GPUProfiler } from './utils/gpu-profiler.js';
+
+// Debug staging modules (Plan C)
+import {
+  runAggregationOnly,
+  runReductionOnly,
+  runTraversalOnly,
+  runIntegratorOnly,
+  runFullPipeline_Record,
+  runFullPipeline_Replay
+} from './pipeline/debug/router.js';
 
 export class ParticleSystem {
 
@@ -211,6 +222,17 @@ export class ParticleSystem {
     this.programs.traversal = this.createProgram(fsQuadVert, traversalFrag);
     this.programs.velIntegrate = this.createProgram(fsQuadVert, velIntegrateFrag);
     this.programs.posIntegrate = this.createProgram(fsQuadVert, posIntegrateFrag);
+    
+    // Compile quadrupole traversal shader if Plan C enabled
+    if (this.options.planC) {
+      try {
+        this.programs.traversalQuadrupole = this.createProgram(fsQuadVert, traversalQuadrupoleFrag);
+        console.log('[ParticleSystem] Quadrupole traversal shader compiled successfully');
+      } catch (e) {
+        console.warn('[ParticleSystem] Failed to compile quadrupole shader, falling back to monopole:', e);
+        this.programs.traversalQuadrupole = null;
+      }
+    }
   }
 
   createProgram(vertexSource, fragmentSource) {
@@ -463,18 +485,163 @@ export class ParticleSystem {
       this._lastBoundsUpdateTime = now;
     }
     
-    this.buildQuadtree();
-    this.clearForceTexture();
+    // Use KDK integrator if Plan C enabled and useKDK flag is set
+    const useKDK = this.options.planC && this.debugFlags.useKDK;
     
-    // Profile force calculation
-    if (this.profiler) this.profiler.begin('traversal');
-    pipelineCalculateForces(this);
-    if (this.profiler) this.profiler.end();
-    
-    // Profile integration (split into velocity + position for granularity)
-    pipelineIntegratePhysics(this);
+    if (useKDK) {
+      this.step_KDK();
+    } else {
+      // Standard Euler integration
+      this.buildQuadtree();
+      this.clearForceTexture();
+      
+      // Profile force calculation
+      if (this.profiler) this.profiler.begin('traversal');
+      pipelineCalculateForces(this);
+      if (this.profiler) this.profiler.end();
+      
+      // Profile integration (split into velocity + position for granularity)
+      pipelineIntegratePhysics(this);
+    }
     
     this.frameCount++;
+  }
+
+  /**
+   * KDK (Kick-Drift-Kick) symplectic integrator (Plan C)
+   * Provides better energy conservation than Euler
+   */
+  step_KDK() {
+    // 1) First half-kick using previous frame's forces
+    if (this.profiler) this.profiler.begin('kick_1');
+    this.kick(0.5, this.forceTexture);
+    if (this.profiler) this.profiler.end();
+    
+    // 2) Drift positions with full timestep
+    if (this.profiler) this.profiler.begin('drift');
+    this.drift(1.0);
+    if (this.profiler) this.profiler.end();
+    
+    // 3) Rebuild quadtree at new positions and compute current forces
+    this.buildQuadtree();
+    
+    if (this.profiler) this.profiler.begin('traversal');
+    // Store new forces in forceTexturePrev (will become "current" after swap)
+    this.clearForceTexture(this.forceTexturePrev);
+    this.accumulateForces(this.forceTexturePrev);
+    if (this.profiler) this.profiler.end();
+    
+    // 4) Second half-kick using newly computed forces
+    if (this.profiler) this.profiler.begin('kick_2');
+    this.kick(0.5, this.forceTexturePrev);
+    if (this.profiler) this.profiler.end();
+    
+    // 5) Swap force textures (current becomes previous for next frame)
+    const temp = this.forceTexture;
+    this.forceTexture = this.forceTexturePrev;
+    this.forceTexturePrev = temp;
+  }
+
+  /**
+   * Kick: update velocities from forces
+   * @param {number} dtScale - Fraction of timestep (0.5 for half-kick)
+   * @param {object} forceTex - Force texture to use
+   */
+  kick(dtScale, forceTex) {
+    const gl = this.gl;
+    gl.useProgram(this.programs.velIntegrate);
+    this.unbindAllTextures();
+    
+    // Bind target framebuffer (ping-pong)
+    const targetFBO = this.velocityTextures.getTargetFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO);
+    gl.viewport(0, 0, this.textureWidth, this.textureHeight);
+    
+    // Bind current velocity
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.velocityTextures.getCurrentTexture());
+    gl.uniform1i(gl.getUniformLocation(this.programs.velIntegrate, 'u_velocity'), 0);
+    
+    // Bind force texture
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, forceTex.texture);
+    gl.uniform1i(gl.getUniformLocation(this.programs.velIntegrate, 'u_force'), 1);
+    
+    // Bind current position (for mass)
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.positionTextures.getCurrentTexture());
+    gl.uniform1i(gl.getUniformLocation(this.programs.velIntegrate, 'u_position'), 2);
+    
+    // Uniforms (scaled dt)
+    const effectiveDt = this.options.dt * dtScale;
+    gl.uniform1f(gl.getUniformLocation(this.programs.velIntegrate, 'u_dt'), effectiveDt);
+    gl.uniform1f(gl.getUniformLocation(this.programs.velIntegrate, 'u_damping'), this.options.damping);
+    gl.uniform1f(gl.getUniformLocation(this.programs.velIntegrate, 'u_maxSpeed'), this.options.maxSpeed);
+    
+    // Draw
+    gl.bindVertexArray(this.quadVAO);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+    
+    // Swap velocity buffers
+    this.velocityTextures.swap();
+    
+    this.unbindAllTextures();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  /**
+   * Drift: update positions from velocities
+   * @param {number} dtScale - Fraction of timestep (usually 1.0)
+   */
+  drift(dtScale) {
+    const gl = this.gl;
+    gl.useProgram(this.programs.posIntegrate);
+    this.unbindAllTextures();
+    
+    // Bind target framebuffer (ping-pong)
+    const targetFBO = this.positionTextures.getTargetFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO);
+    gl.viewport(0, 0, this.textureWidth, this.textureHeight);
+    
+    // Bind current position
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.positionTextures.getCurrentTexture());
+    gl.uniform1i(gl.getUniformLocation(this.programs.posIntegrate, 'u_position'), 0);
+    
+    // Bind current velocity
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.velocityTextures.getCurrentTexture());
+    gl.uniform1i(gl.getUniformLocation(this.programs.posIntegrate, 'u_velocity'), 1);
+    
+    // Uniforms (scaled dt)
+    const effectiveDt = this.options.dt * dtScale;
+    gl.uniform1f(gl.getUniformLocation(this.programs.posIntegrate, 'u_dt'), effectiveDt);
+    
+    // Draw
+    gl.bindVertexArray(this.quadVAO);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+    
+    // Swap position buffers
+    this.positionTextures.swap();
+    
+    this.unbindAllTextures();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  /**
+   * Accumulate forces into specified texture
+   * @param {object} forceTex - Target force texture
+   */
+  accumulateForces(forceTex) {
+    // Temporarily swap forceTexture to accumulate into target
+    const originalForce = this.forceTexture;
+    this.forceTexture = forceTex;
+    
+    pipelineCalculateForces(this);
+    
+    this.forceTexture = originalForce;
   }
 
   buildQuadtree() {
@@ -505,10 +672,15 @@ export class ParticleSystem {
     if (this.profiler) this.profiler.end();
   }
 
-  clearForceTexture() {
+  /**
+   * Clear force texture
+   * @param {object} forceTex - Optional force texture to clear (defaults to this.forceTexture)
+   */
+  clearForceTexture(forceTex = null) {
+    const target = forceTex || this.forceTexture;
     const gl = this.gl;
     this.unbindAllTextures();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.forceTexture.framebuffer);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
     gl.viewport(0, 0, this.textureWidth, this.textureHeight);
     gl.clearColor(0, 0, 0, 0);
@@ -578,37 +750,46 @@ export class ParticleSystem {
   step_Debug() {
     if (!this.isInitialized) return;
     
+    // Update profiler if enabled
+    if (this.profiler) {
+      this.profiler.update();
+    }
+    
     switch (this.debugMode) {
       case 'FullPipeline':
         this.step();
         break;
+        
       case 'AggregateOnly':
-        // TODO: Implement DebugRouter.runAggregationHarness(this)
-        console.warn('AggregateOnly mode not yet implemented');
+        runAggregationOnly(this);
         break;
+        
       case 'ReduceOnly':
-        // TODO: Implement DebugRouter.runReductionHarness(this)
-        console.warn('ReduceOnly mode not yet implemented');
+        runReductionOnly(this);
         break;
+        
       case 'TraverseOnly':
-        // TODO: Implement DebugRouter.runTraversalHarness(this)
-        console.warn('TraverseOnly mode not yet implemented');
+        runTraversalOnly(this);
         break;
+        
       case 'IntegrateOnly':
-        // TODO: Implement DebugRouter.runIntegratorHarness(this)
-        console.warn('IntegrateOnly mode not yet implemented');
+        runIntegratorOnly(this);
         break;
+        
       case 'Record':
-        // TODO: Implement DebugRouter.runFullPipeline_Record(this)
-        console.warn('Record mode not yet implemented');
+        runFullPipeline_Record(this);
         break;
+        
       case 'Replay':
-        // TODO: Implement DebugRouter.runFullPipeline_Replay(this)
-        console.warn('Replay mode not yet implemented');
+        runFullPipeline_Replay(this);
         break;
+        
       default:
+        console.warn(`[ParticleSystem] Unknown debug mode: ${this.debugMode}, falling back to FullPipeline`);
         this.step();
     }
+    
+    this.frameCount++;
   }
 
   dispose() {    

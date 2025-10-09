@@ -136,6 +136,12 @@ export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrengt
     setDebugMode: (mode) => system.setDebugMode(mode),
     setDebugFlags: (flags) => system.setDebugFlags(flags),
     step_Debug: () => system.step_Debug(),
+    
+    // Direct access to debug utilities (advanced usage)
+    _debug: () => {
+      // Lazy-load debug modules only when accessed
+      return import('./pipeline/debug/index.js');
+    },
 
     // Cleanup GPU resources
     dispose: () => system.dispose()

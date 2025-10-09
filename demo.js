@@ -30,6 +30,7 @@ document.body.appendChild(container);
 // 2. Get UI elements
 const countInput = /** @type {HTMLInputElement} */ (document.getElementById('count-input'));
 const profilingCheckbox = /** @type {HTMLInputElement} */ (document.getElementById('profiling-checkbox'));
+const plancCheckbox = /** @type {HTMLInputElement} */ (document.getElementById('planc-checkbox'));
 const profilerOutput = /** @type {HTMLDivElement} */ (document.getElementById('profiler-output'));
 
 // 3. Initialize state
@@ -42,6 +43,7 @@ const worldBounds = /** @type {const} */({
 });
 
 let profilingEnabled = false;
+let plancEnabled = false;
 let frameCount = 0;
 let lastProfileUpdate = 0;
 
@@ -95,6 +97,42 @@ recreateAll();
 /** @type {any} */ (window).m = m;
 /** @type {any} */ (window).physics = physics;
 
+// 8. DevTools helpers for Plan C debugging
+/** @type {any} */ (window).planC = (enabled) => {
+  plancEnabled = enabled;
+  plancCheckbox.checked = enabled;
+  console.log('[Demo] Plan C toggled via DevTools:', enabled ? 'ON' : 'OFF');
+  recreateAll();
+};
+
+// Debug utilities shortcut
+/** @type {any} */ (window).dbg = {
+  mode: (m) => physics && physics.setDebugMode(m),
+  flags: (f) => physics && physics.setDebugFlags(f),
+  step: () => physics && physics.step_Debug(),
+  _utils: null
+};
+
+// Lazy-load debug utils
+Object.defineProperty(/** @type {any} */ (window).dbg, 'utils', {
+  get() {
+    if (!this._utils && physics) {
+      physics._debug().then(u => {
+        this._utils = u;
+        console.log('[Debug] Utilities loaded. Available functions:', Object.keys(u));
+      });
+    }
+    return this._utils;
+  }
+});
+
+console.log('[Demo] DevTools helpers available:');
+console.log('  window.planC(true/false) - Toggle Plan C');
+console.log('  window.dbg.mode(mode) - Set debug mode');
+console.log('  window.dbg.flags({...}) - Set debug flags');
+console.log('  window.dbg.step() - Execute debug step');
+console.log('  window.dbg.utils - Lazy-load debug utilities');
+
 // 5. Count input handler
 /** @type {*} */
 let inputTimeout;
@@ -113,6 +151,13 @@ countInput.oninput = () => {
 profilingCheckbox.onchange = () => {
   profilingEnabled = profilingCheckbox.checked;
   profilerOutput.classList.toggle('visible', profilingEnabled);
+  recreateAll();
+};
+
+// 7. Plan C checkbox handler
+plancCheckbox.onchange = () => {
+  plancEnabled = plancCheckbox.checked;
+  console.log('[Demo] Plan C', plancEnabled ? 'enabled' : 'disabled');
   recreateAll();
 };
 
@@ -242,7 +287,8 @@ function recreatePhysicsAndMesh() {
     gravityStrength,
     softening: 0.2,
     dt: 10 / 60,
-    enableProfiling: profilingEnabled
+    enableProfiling: profilingEnabled,
+    planC: plancEnabled
   });
 
   const textureSize = physics.getTextureSize();

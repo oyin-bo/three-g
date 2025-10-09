@@ -29,7 +29,8 @@ html, body {
   font-family: monospace;
 }
 
-#profiling-toggle {
+#profiling-toggle,
+#planc-toggle {
   display: flex;
   justify-content: end;
   gap: 0.5em;
@@ -39,7 +40,17 @@ html, body {
   cursor: pointer;
 }
 
-#profiling-checkbox {
+#planc-toggle {
+  color: #9fffc8;
+}
+
+#planc-toggle:has(#planc-checkbox:checked) {
+  color: #4fc3f7;
+  font-weight: bold;
+}
+
+#profiling-checkbox,
+#planc-checkbox {
   cursor: pointer;
 }
 

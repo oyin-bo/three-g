@@ -1,7 +1,12 @@
 // Barnes–Hut traversal to compute force texture
 export function calculateForces(ctx) {
   const gl = ctx.gl;
-  gl.useProgram(ctx.programs.traversal);
+  
+  // Use quadrupole shader if Plan C enabled, otherwise use standard monopole shader
+  const useQuadrupoles = ctx.options.planC && ctx.programs.traversalQuadrupole;
+  const program = useQuadrupoles ? ctx.programs.traversalQuadrupole : ctx.programs.traversal;
+  
+  gl.useProgram(program);
   // Avoid feedback
   ctx.unbindAllTextures();
 
@@ -15,31 +20,55 @@ export function calculateForces(ctx) {
   // Bind particle positions
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, ctx.positionTextures.getCurrentTexture());
-  gl.uniform1i(gl.getUniformLocation(ctx.programs.traversal, 'u_particlePositions'), 0);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_particlePositions'), 0);
 
-  // Bind quadtree levels
-  for (let i = 0; i < Math.min(8, ctx.numLevels); i++) {
-    gl.activeTexture(gl.TEXTURE1 + i);
-    gl.bindTexture(gl.TEXTURE_2D, ctx.levelTextures[i].texture);
-    const loc = gl.getUniformLocation(ctx.programs.traversal, `u_quadtreeLevel${i}`);
-    if (loc) gl.uniform1i(loc, 1 + i);
+  if (useQuadrupoles) {
+    // Bind A0, A1, A2 attachments for all levels (Plan C)
+    for (let i = 0; i < Math.min(8, ctx.numLevels); i++) {
+      // A0 attachments
+      gl.activeTexture(gl.TEXTURE1 + i * 3);
+      gl.bindTexture(gl.TEXTURE_2D, ctx.levelTargets[i].a0);
+      gl.uniform1i(gl.getUniformLocation(program, `u_level${i}_A0`), 1 + i * 3);
+      
+      // A1 attachments
+      gl.activeTexture(gl.TEXTURE1 + i * 3 + 1);
+      gl.bindTexture(gl.TEXTURE_2D, ctx.levelTargets[i].a1);
+      gl.uniform1i(gl.getUniformLocation(program, `u_level${i}_A1`), 1 + i * 3 + 1);
+      
+      // A2 attachments
+      gl.activeTexture(gl.TEXTURE1 + i * 3 + 2);
+      gl.bindTexture(gl.TEXTURE_2D, ctx.levelTargets[i].a2);
+      gl.uniform1i(gl.getUniformLocation(program, `u_level${i}_A2`), 1 + i * 3 + 2);
+    }
+    
+    // Enable/disable quadrupole evaluation (for A/B testing)
+    const enableQuadrupoles = ctx.debugFlags.enableQuadrupoles !== false;
+    gl.uniform1i(gl.getUniformLocation(program, 'u_enableQuadrupoles'), enableQuadrupoles ? 1 : 0);
+  } else {
+    // Bind monopole-only levels (standard)
+    for (let i = 0; i < Math.min(8, ctx.numLevels); i++) {
+      gl.activeTexture(gl.TEXTURE1 + i);
+      gl.bindTexture(gl.TEXTURE_2D, ctx.levelTextures[i].texture);
+      const loc = gl.getUniformLocation(program, `u_quadtreeLevel${i}`);
+      if (loc) gl.uniform1i(loc, 1 + i);
+    }
   }
 
-  // Uniforms
-  gl.uniform1f(gl.getUniformLocation(ctx.programs.traversal, 'u_theta'), ctx.options.theta);
-  gl.uniform1i(gl.getUniformLocation(ctx.programs.traversal, 'u_numLevels'), ctx.numLevels);
-  gl.uniform2f(gl.getUniformLocation(ctx.programs.traversal, 'u_texSize'), ctx.textureWidth, ctx.textureHeight);
-  gl.uniform1i(gl.getUniformLocation(ctx.programs.traversal, 'u_particleCount'), ctx.options.particleCount);
-  gl.uniform3f(gl.getUniformLocation(ctx.programs.traversal, 'u_worldMin'), 
+  // Uniforms (use active program, not ctx.programs.traversal)
+  gl.uniform1f(gl.getUniformLocation(program, 'u_theta'), ctx.options.theta);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_numLevels'), ctx.numLevels);
+  gl.uniform2f(gl.getUniformLocation(program, 'u_texSize'), ctx.textureWidth, ctx.textureHeight);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_particleCount'), ctx.options.particleCount);
+  gl.uniform3f(gl.getUniformLocation(program, 'u_worldMin'), 
     ctx.options.worldBounds.min[0], 
     ctx.options.worldBounds.min[1],
     ctx.options.worldBounds.min[2]);
-  gl.uniform3f(gl.getUniformLocation(ctx.programs.traversal, 'u_worldMax'), 
+  gl.uniform3f(gl.getUniformLocation(program, 'u_worldMax'), 
     ctx.options.worldBounds.max[0], 
     ctx.options.worldBounds.max[1],
     ctx.options.worldBounds.max[2]);
-  gl.uniform1f(gl.getUniformLocation(ctx.programs.traversal, 'u_softening'), ctx.options.softening);
-  gl.uniform1f(gl.getUniformLocation(ctx.programs.traversal, 'u_G'), ctx.options.gravityStrength);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_softening'), ctx.options.softening);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_G'), ctx.options.gravityStrength);
 
   // Cell sizes, grid sizes, and slices per row per level
   const cellSizes = new Float32Array(8);
@@ -70,9 +99,9 @@ export function calculateForces(ctx) {
     cellSize *= 2.0;
   }
   
-  gl.uniform1fv(gl.getUniformLocation(ctx.programs.traversal, 'u_cellSizes'), cellSizes);
-  gl.uniform1fv(gl.getUniformLocation(ctx.programs.traversal, 'u_gridSizes'), gridSizes);
-  gl.uniform1fv(gl.getUniformLocation(ctx.programs.traversal, 'u_slicesPerRow'), slicesPerRow);
+  gl.uniform1fv(gl.getUniformLocation(program, 'u_cellSizes'), cellSizes);
+  gl.uniform1fv(gl.getUniformLocation(program, 'u_gridSizes'), gridSizes);
+  gl.uniform1fv(gl.getUniformLocation(program, 'u_slicesPerRow'), slicesPerRow);
 
   // Draw quad
   ctx.checkFBO('calculateForces');
