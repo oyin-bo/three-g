@@ -256,7 +256,7 @@ function recreatePhysicsAndMesh() {
   let gravityStrength = Math.random();
   gravityStrength = gravityStrength * 0.0001;
   gravityStrength = gravityStrength * gravityStrength;
-  gravityStrength += 0.00000005;
+  gravityStrength += 0.000005;
 
   const physics = particleSystem({
     gl,

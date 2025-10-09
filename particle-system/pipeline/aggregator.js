@@ -73,6 +73,33 @@ export function aggregateParticlesIntoL0(ctx) {
   ctx.checkGl('aggregate L0 (after draw)');
 
   gl.disable(gl.BLEND);
+  
+  // For Plan C: copy L0 MRT attachments to texture array layer 0
+  // This ensures the reduction shader can read from the texture arrays
+  if (ctx.options.planC && ctx.levelTextureArrayA0) {
+    const size = ctx.levelTargets[0].size;
+    
+    // Copy COLOR_ATTACHMENT0 -> levelTextureArrayA0 layer 0
+    // copyTexSubImage3D(target, level, xoffset, yoffset, zoffset(layer), x, y, width, height)
+    gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, ctx.levelTextureArrayA0);
+    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, 0, 0, 0, size, size);
+    
+    // Copy COLOR_ATTACHMENT1 -> levelTextureArrayA1 layer 0
+    gl.readBuffer(gl.COLOR_ATTACHMENT1);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, ctx.levelTextureArrayA1);
+    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, 0, 0, 0, size, size);
+    
+    // Copy COLOR_ATTACHMENT2 -> levelTextureArrayA2 layer 0
+    gl.readBuffer(gl.COLOR_ATTACHMENT2);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, ctx.levelTextureArrayA2);
+    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, 0, 0, 0, size, size);
+    
+    // Reset read buffer
+    gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+  }
+  
   ctx.unbindAllTextures();
   const err = ctx.checkGl('aggregateParticlesIntoL0');
   if (err !== gl.NO_ERROR) {

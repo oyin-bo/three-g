@@ -142,6 +142,9 @@ export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrengt
       // Lazy-load debug modules only when accessed
       return import('./pipeline/debug/index.js');
     },
+    
+    // Direct access to internal ParticleSystem instance (for validators/harnesses)
+    _system: system,
 
     // Cleanup GPU resources
     dispose: () => system.dispose()

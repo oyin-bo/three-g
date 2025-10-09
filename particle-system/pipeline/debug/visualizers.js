@@ -250,12 +250,49 @@ function applyColorScheme(t, scheme) {
 /**
  * Log texture statistics to console
  * @param {ParticleSystem} ctx - Particle system context
- * @param {WebGLTexture} texture - Texture to analyze
- * @param {number} width - Texture width
- * @param {number} height - Texture height
- * @param {string} name - Texture name for logging
+ * @param {WebGLTexture|string} textureOrName - Texture to analyze or name (e.g., 'L0', 'force', 'positions')
+ * @param {number} width - Texture width (optional if using name)
+ * @param {number} height - Texture height (optional if using name)
+ * @param {string} name - Texture name for logging (optional)
+ * @returns {object} Statistics object with min, max, mean per channel
  */
-export function logTextureStats(ctx, texture, width, height, name = 'texture') {
+export function logTextureStats(ctx, textureOrName, width, height, name) {
+  let texture, texWidth, texHeight, texName;
+  
+  // Handle string identifiers
+  if (typeof textureOrName === 'string') {
+    texName = textureOrName;
+    
+    if (textureOrName.startsWith('L')) {
+      // Level texture (e.g., 'L0', 'L1')
+      const levelIndex = parseInt(textureOrName.substring(1));
+      const level = ctx.levelTargets[levelIndex];
+      texture = level.a0;
+      texWidth = level.size;
+      texHeight = level.size;
+    } else if (textureOrName === 'force') {
+      texture = ctx.forceTexture.texture;
+      texWidth = ctx.textureWidth;
+      texHeight = ctx.textureHeight;
+    } else if (textureOrName === 'positions') {
+      texture = ctx.positionTextures.getCurrentTexture();
+      texWidth = ctx.textureWidth;
+      texHeight = ctx.textureHeight;
+    } else if (textureOrName === 'velocities') {
+      texture = ctx.velocityTextures.getCurrentTexture();
+      texWidth = ctx.textureWidth;
+      texHeight = ctx.textureHeight;
+    } else {
+      throw new Error(`Unknown texture name: ${textureOrName}`);
+    }
+  } else {
+    // Direct texture object
+    texture = textureOrName;
+    texWidth = width;
+    texHeight = height;
+    texName = name || 'texture';
+  }
+  
   const gl = ctx.gl;
   
   // Read texture data
@@ -264,8 +301,8 @@ export function logTextureStats(ctx, texture, width, height, name = 'texture') {
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
   gl.readBuffer(gl.COLOR_ATTACHMENT0);
   
-  const data = new Float32Array(width * height * 4);
-  gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, data);
+  const data = new Float32Array(texWidth * texHeight * 4);
+  gl.readPixels(0, 0, texWidth, texHeight, gl.RGBA, gl.FLOAT, data);
   
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
@@ -275,12 +312,13 @@ export function logTextureStats(ctx, texture, width, height, name = 'texture') {
     r: { min: Infinity, max: -Infinity, sum: 0, count: 0 },
     g: { min: Infinity, max: -Infinity, sum: 0, count: 0 },
     b: { min: Infinity, max: -Infinity, sum: 0, count: 0 },
-    a: { min: Infinity, max: -Infinity, sum: 0, count: 0 }
+    a: { min: Infinity, max: -Infinity, sum: 0, count: 0 },
+    mean: 0  // Overall mean for compatibility
   };
   
   const channels = ['r', 'g', 'b', 'a'];
   
-  for (let i = 0; i < width * height; i++) {
+  for (let i = 0; i < texWidth * texHeight; i++) {
     for (let c = 0; c < 4; c++) {
       const value = data[i * 4 + c];
       const ch = channels[c];
@@ -294,9 +332,21 @@ export function logTextureStats(ctx, texture, width, height, name = 'texture') {
     }
   }
   
-  console.log(`[Visualizer] Statistics for ${name}:`);
+  // Compute means
+  let totalSum = 0;
+  let totalCount = 0;
   for (const ch of channels) {
     const mean = stats[ch].count > 0 ? stats[ch].sum / stats[ch].count : 0;
-    console.log(`  ${ch.toUpperCase()}: min=${stats[ch].min.toFixed(6)}, max=${stats[ch].max.toFixed(6)}, mean=${mean.toFixed(6)}`);
+    stats[ch].mean = mean;
+    totalSum += stats[ch].sum;
+    totalCount += stats[ch].count;
   }
+  stats.mean = totalCount > 0 ? totalSum / totalCount : 0;
+  
+  console.log(`[Visualizer] Statistics for ${texName}:`);
+  for (const ch of channels) {
+    console.log(`  ${ch.toUpperCase()}: min=${stats[ch].min.toFixed(6)}, max=${stats[ch].max.toFixed(6)}, mean=${stats[ch].mean.toFixed(6)}`);
+  }
+  
+  return stats;
 }

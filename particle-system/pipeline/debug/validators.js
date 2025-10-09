@@ -60,14 +60,52 @@ export function assertMassConservation(ctx, levelIndex, expectedMass, tolerance 
 /**
  * Check for NaN or Inf values in texture
  * @param {ParticleSystem} ctx - Particle system context
- * @param {WebGLTexture} texture - Texture to check
- * @param {number} width - Texture width
- * @param {number} height - Texture height
- * @param {string} name - Texture name for logging
+ * @param {WebGLTexture|string} textureOrName - Texture to check or name (e.g., 'L0', 'force', 'positions')
+ * @param {number} width - Texture width (optional if using name)
+ * @param {number} height - Texture height (optional if using name)
+ * @param {string} name - Texture name for logging (optional)
  * @returns {object} Validation result
  */
-export function assertNoNaNs(ctx, texture, width, height, name = 'texture') {
-  console.log(`[Validator] Checking for NaN/Inf in ${name}`);
+export function assertNoNaNs(ctx, textureOrName, width, height, name) {
+  let texture, texWidth, texHeight, texName;
+  
+  // Handle string identifiers
+  if (typeof textureOrName === 'string') {
+    texName = textureOrName;
+    
+    if (textureOrName.startsWith('L')) {
+      // Level texture (e.g., 'L0', 'L1')
+      const levelIndex = parseInt(textureOrName.substring(1));
+      const level = ctx.levelTargets[levelIndex];
+      texture = level.a0;
+      texWidth = level.size;
+      texHeight = level.size;
+    } else if (textureOrName === 'force') {
+      texture = ctx.forceTexture.texture;
+      texWidth = ctx.textureWidth;
+      texHeight = ctx.textureHeight;
+    } else if (textureOrName === 'positions') {
+      texture = ctx.positionTextures.getCurrentTexture();
+      texWidth = ctx.textureWidth;
+      texHeight = ctx.textureHeight;
+    } else if (textureOrName === 'velocities') {
+      texture = ctx.velocityTextures.getCurrentTexture();
+      texWidth = ctx.textureWidth;
+      texHeight = ctx.textureHeight;
+    } else {
+      throw new Error(`Unknown texture name: ${textureOrName}`);
+    }
+  } else {
+    // Direct texture object
+    texture = textureOrName;
+    texWidth = width;
+    texHeight = height;
+    texName = name || 'texture';
+  }
+  
+  console.log(`[Validator] Checking for NaN/Inf in ${texName}`);
+  
+  console.log(`[Validator] Checking for NaN/Inf in ${texName}`);
   
   const gl = ctx.gl;
   
@@ -77,8 +115,8 @@ export function assertNoNaNs(ctx, texture, width, height, name = 'texture') {
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
   gl.readBuffer(gl.COLOR_ATTACHMENT0);
   
-  const data = new Float32Array(width * height * 4);
-  gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, data);
+  const data = new Float32Array(texWidth * texHeight * 4);
+  gl.readPixels(0, 0, texWidth, texHeight, gl.RGBA, gl.FLOAT, data);
   
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
@@ -96,16 +134,17 @@ export function assertNoNaNs(ctx, texture, width, height, name = 'texture') {
   
   const result = {
     passed,
-    name,
+    name: texName,
     nanCount,
     infCount,
-    totalValues: data.length
+    totalValues: data.length,
+    message: passed ? `No NaN/Inf found in ${texName}` : `Invalid values in ${texName}: ${nanCount} NaNs, ${infCount} Infs`
   };
   
   if (passed) {
-    console.log(`[Validator] ✓ No NaN/Inf found in ${name}`);
+    console.log(`[Validator] ✓ ${result.message}`);
   } else {
-    console.error(`[Validator] ✗ Invalid values in ${name}: ${nanCount} NaNs, ${infCount} Infs`);
+    console.error(`[Validator] ✗ ${result.message}`);
   }
   
   return result;
