@@ -299,3 +299,245 @@ export function computeMassAndCOM(ctx) {
   
   return { totalMass, com };
 }
+
+/**
+ * Compute mean velocity across all particles
+ * @param {ParticleSystem} ctx - Particle system context
+ * @returns {Array} Mean velocity [vx, vy, vz]
+ */
+export function computeMeanVelocity(ctx) {
+  const gl = ctx.gl;
+  const width = ctx.textureWidth;
+  const height = ctx.textureHeight;
+  
+  // Read velocity texture
+  const velTex = ctx.velocityTextures.getCurrentTexture();
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, velTex, 0);
+  gl.readBuffer(gl.COLOR_ATTACHMENT0);
+  
+  const velData = new Float32Array(width * height * 4);
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, velData);
+  
+  // Read position texture for mass
+  const posTex = ctx.positionTextures.getCurrentTexture();
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, posTex, 0);
+  
+  const posData = new Float32Array(width * height * 4);
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, posData);
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  
+  let totalMass = 0;
+  let totalMomentum = [0, 0, 0];
+  
+  for (let i = 0; i < width * height; i++) {
+    const idx = i * 4;
+    const mass = posData[idx + 3];
+    
+    if (mass > 0) {
+      totalMass += mass;
+      totalMomentum[0] += mass * velData[idx + 0];
+      totalMomentum[1] += mass * velData[idx + 1];
+      totalMomentum[2] += mass * velData[idx + 2];
+    }
+  }
+  
+  const meanVel = [0, 0, 0];
+  if (totalMass > 0) {
+    meanVel[0] = totalMomentum[0] / totalMass;
+    meanVel[1] = totalMomentum[1] / totalMass;
+    meanVel[2] = totalMomentum[2] / totalMass;
+  }
+  
+  return meanVel;
+}
+
+/**
+ * Apply COM velocity clamp (subtract mean velocity from all particles)
+ * Pins the center-of-mass frame to prevent spurious drift
+ * @param {ParticleSystem} ctx - Particle system context
+ * @returns {object} Result with mean velocity that was removed
+ */
+export function applyCOMClamp(ctx) {
+  console.log('[Validator] Applying COM velocity clamp');
+  
+  const gl = ctx.gl;
+  const width = ctx.textureWidth;
+  const height = ctx.textureHeight;
+  
+  // Compute mean velocity
+  const meanVel = computeMeanVelocity(ctx);
+  const meanSpeed = Math.sqrt(meanVel[0]**2 + meanVel[1]**2 + meanVel[2]**2);
+  
+  console.log(`[Validator] Mean velocity: [${meanVel.map(v => v.toFixed(6)).join(', ')}], magnitude: ${meanSpeed.toFixed(6)}`);
+  
+  if (meanSpeed < 1e-10) {
+    console.log('[Validator] Mean velocity negligible, skipping clamp');
+    return { meanVel, applied: false };
+  }
+  
+  // Read current velocity texture
+  const velTex = ctx.velocityTextures.getCurrentTexture();
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, velTex, 0);
+  gl.readBuffer(gl.COLOR_ATTACHMENT0);
+  
+  const velData = new Float32Array(width * height * 4);
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, velData);
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  
+  // Subtract mean velocity
+  for (let i = 0; i < width * height; i++) {
+    const idx = i * 4;
+    velData[idx + 0] -= meanVel[0];
+    velData[idx + 1] -= meanVel[1];
+    velData[idx + 2] -= meanVel[2];
+  }
+  
+  // Write back to target velocity texture
+  const targetFBO = ctx.velocityTextures.getTargetFramebuffer();
+  const targetTex = ctx.velocityTextures.getTargetTexture();
+  
+  gl.bindTexture(gl.TEXTURE_2D, targetTex);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.FLOAT, velData);
+  
+  // Swap buffers
+  ctx.velocityTextures.swap();
+  
+  console.log(`[Validator] ✓ COM clamp applied, removed drift of ${meanSpeed.toFixed(6)}`);
+  
+  return { meanVel, applied: true, driftRemoved: meanSpeed };
+}
+
+/**
+ * Forward-reverse time-reversibility test for symplectic integrator
+ * Runs KDK forward N steps, flips velocities, runs backward N steps
+ * Measures position error to verify KDK is properly symplectic
+ * 
+ * @param {ParticleSystem} ctx - Particle system context
+ * @param {number} steps - Number of steps to run each direction
+ * @returns {object} Test result with RMSE error
+ */
+export function forwardReverseTest(ctx, steps = 100) {
+  console.log(`[Validator] Starting forward-reverse test (${steps} steps each direction)`);
+  
+  if (!ctx.options.planC || !ctx.debugFlags.useKDK) {
+    console.warn('[Validator] Forward-reverse test requires Plan C with KDK enabled');
+    return { error: 'KDK not enabled', passed: false };
+  }
+  
+  const gl = ctx.gl;
+  const width = ctx.textureWidth;
+  const height = ctx.textureHeight;
+  
+  // Save initial positions
+  const posTex = ctx.positionTextures.getCurrentTexture();
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, posTex, 0);
+  gl.readBuffer(gl.COLOR_ATTACHMENT0);
+  
+  const initialPos = new Float32Array(width * height * 4);
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, initialPos);
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  
+  console.log('[Validator] Running forward integration...');
+  
+  // Run forward
+  for (let i = 0; i < steps; i++) {
+    ctx.step();
+  }
+  
+  console.log('[Validator] Flipping velocities...');
+  
+  // Flip velocities
+  const velTex = ctx.velocityTextures.getCurrentTexture();
+  const velFBO = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, velFBO);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, velTex, 0);
+  gl.readBuffer(gl.COLOR_ATTACHMENT0);
+  
+  const velData = new Float32Array(width * height * 4);
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, velData);
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(velFBO);
+  
+  // Negate velocities
+  for (let i = 0; i < velData.length; i += 4) {
+    velData[i + 0] = -velData[i + 0];
+    velData[i + 1] = -velData[i + 1];
+    velData[i + 2] = -velData[i + 2];
+  }
+  
+  // Write back
+  const targetTex = ctx.velocityTextures.getTargetTexture();
+  gl.bindTexture(gl.TEXTURE_2D, targetTex);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.FLOAT, velData);
+  ctx.velocityTextures.swap();
+  
+  console.log('[Validator] Running reverse integration...');
+  
+  // Run backward
+  for (let i = 0; i < steps; i++) {
+    ctx.step();
+  }
+  
+  // Read final positions
+  const finalPosTex = ctx.positionTextures.getCurrentTexture();
+  const finalFBO = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, finalFBO);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, finalPosTex, 0);
+  gl.readBuffer(gl.COLOR_ATTACHMENT0);
+  
+  const finalPos = new Float32Array(width * height * 4);
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, finalPos);
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(finalFBO);
+  
+  // Compute RMSE
+  let sumSquaredError = 0;
+  let particleCount = 0;
+  
+  for (let i = 0; i < width * height; i++) {
+    const idx = i * 4;
+    const mass = initialPos[idx + 3];
+    
+    if (mass > 0) {
+      const dx = finalPos[idx + 0] - initialPos[idx + 0];
+      const dy = finalPos[idx + 1] - initialPos[idx + 1];
+      const dz = finalPos[idx + 2] - initialPos[idx + 2];
+      
+      sumSquaredError += dx * dx + dy * dy + dz * dz;
+      particleCount++;
+    }
+  }
+  
+  const rmse = Math.sqrt(sumSquaredError / particleCount);
+  const passed = rmse < 1e-6; // Very tight tolerance for symplectic integrator
+  
+  const result = {
+    passed,
+    rmse,
+    steps,
+    particleCount,
+    threshold: 1e-6
+  };
+  
+  if (passed) {
+    console.log(`[Validator] ✓ Forward-reverse test PASSED: RMSE=${rmse.toExponential(4)} (excellent time-reversibility)`);
+  } else {
+    console.warn(`[Validator] ✗ Forward-reverse test FAILED: RMSE=${rmse.toExponential(4)} exceeds threshold=${result.threshold.toExponential(4)}`);
+  }
+  
+  return result;
+}

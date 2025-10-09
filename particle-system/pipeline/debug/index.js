@@ -38,7 +38,10 @@ export {
   assertNoNaNs,
   assertMomentumReasonable,
   compareTexturesRMSE,
-  computeMassAndCOM
+  computeMassAndCOM,
+  computeMeanVelocity,
+  applyCOMClamp,
+  forwardReverseTest
 } from './validators.js';
 
 export {
