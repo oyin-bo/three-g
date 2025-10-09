@@ -176,6 +176,17 @@ export class ParticleSystem {
     this.pmGrid = createPMGrid(gl, gridSize);
     this.pmGridFramebuffer = createPMGridFramebuffer(gl, this.pmGrid.texture);
     
+    // Initialize PM module loading state
+    this._pmModulesLoaded = false;
+    this._pmModules = null;
+    
+    // Preload PM modules asynchronously
+    import('./pipeline/pm-pipeline.js').then(({ preloadPMModules }) => {
+      return preloadPMModules(this);
+    }).catch(err => {
+      console.error('[PM Pipeline] Failed to preload modules:', err);
+    });
+    
     console.log('[PM Pipeline] Initialized with', gridSize, '³ grid');
   }
 
@@ -458,14 +469,29 @@ export class ParticleSystem {
       this._lastBoundsUpdateTime = now;
     }
     
-    // Run normal pipeline with optional debug hooks
-    this.buildQuadtreeWithDebug();
-    this.clearForceTexture();
-    
-    // Profile force calculation
-    if (this.profiler) this.profiler.begin('traversal');
-    pipelineCalculateForces(this);
-    if (this.profiler) this.profiler.end();
+    // Choose force computation method based on Plan A setting
+    if (this.options.planA) {
+      // Plan A: Use PM/FFT gravitational force computation
+      if (!this._pmModulesLoaded) {
+        console.warn('[PM Pipeline] Modules not loaded, falling back to octree method');
+        this.buildQuadtreeWithDebug();
+        this.clearForceTexture();
+        if (this.profiler) this.profiler.begin('traversal');
+        pipelineCalculateForces(this);
+        if (this.profiler) this.profiler.end();
+      } else {
+        // Run PM/FFT pipeline
+        const { computePMForcesSync } = require('./pipeline/pm-pipeline.js');
+        computePMForcesSync(this);
+      }
+    } else {
+      // Original: Use octree + Barnes-Hut traversal
+      this.buildQuadtreeWithDebug();
+      this.clearForceTexture();
+      if (this.profiler) this.profiler.begin('traversal');
+      pipelineCalculateForces(this);
+      if (this.profiler) this.profiler.end();
+    }
     
     // Profile integration (split into velocity + position for granularity)
     pipelineIntegratePhysics(this);
