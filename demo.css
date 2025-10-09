@@ -1,0 +1,143 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: sans-serif;
+}
+
+#controls-panel {
+  position: absolute;
+  top: 0.5em;
+  right: 1em;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(2px);
+  border-radius: 0.5em;
+  padding: 0.5em 1em;
+  z-index: 100;
+}
+
+#count-input {
+  background: transparent;
+  color: #5ec15e;
+  font-size: 200%;
+  text-align: right;
+  border: none;
+  outline: none;
+  width: 8em;
+  font-family: monospace;
+}
+
+#profiling-toggle {
+  display: flex;
+  justify-content: end;
+  gap: 0.5em;
+  margin-top: 0.5em;
+  font-size: 0.9em;
+  color: #aaa;
+  cursor: pointer;
+}
+
+#profiling-checkbox {
+  cursor: pointer;
+}
+
+#profiler-output {
+  margin-top: 1em;
+  font-family: monospace;
+  font-size: 90%;
+  display: none;
+}
+
+#profiler-output.visible {
+  display: block;
+}
+
+.warning {
+  color: #ff6b6b;
+  padding: 0.5em;
+  border: 1px solid #ff6b6b;
+  border-radius: 0.3em;
+}
+
+.metric-row {
+  margin: 0.3em 0;
+  position: relative;
+  min-height: 18px;
+}
+
+.metric-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  opacity: 0.3;
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.metric-label {
+  position: relative;
+  padding: 2px 5px;
+  font-size: 11px;
+  z-index: 1;
+}
+
+.section-header {
+  margin: 0.8em 0 0.3em 0;
+  font-weight: normal;
+}
+
+.physics-bar {
+  background: #4fc3f7;
+}
+
+.rendering-bar {
+  background: #ff6b6b;
+}
+
+.bottom-left-panel {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  padding: 0.5em 1em;
+  z-index: 100;
+  background: transparent;
+  backdrop-filter: blur(2px);
+  border-top-right-radius: 1em;
+  font-family: sans-serif;
+  font-size: 0.9em;
+  text-align: right;
+}
+
+.bottom-right-panel {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  padding: 0.5em 1em;
+  z-index: 100;
+  background: transparent;
+  backdrop-filter: blur(2px);
+  border-top-left-radius: 1em;
+  font-family: sans-serif;
+  font-size: 0.9em;
+  text-align: right;
+}
+
+.bottom-left-panel a {
+  color: silver;
+  text-decoration: none;
+}
+
+.bottom-right-panel a {
+  color: rgb(104, 255, 255);
+  text-decoration: none;
+}
+
+.author-badge {
+  opacity: 0.7;
+  font-size: 77%;
+  padding-right: 0.2em;
+}

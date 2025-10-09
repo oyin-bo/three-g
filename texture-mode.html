@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Texture Mode: three-g ⧸𝗻𝗽𝗺</title>
+  <link rel="stylesheet" href="demo.css">
 </head>
 
 <body>
@@ -19,19 +20,33 @@
   }
 }
 </script>
-<script src="texture-mode.js" type="module"></script>
 
-<div
-  style="position: fixed; left: 0; bottom: 0; padding: 0.5em 1em; z-index: 100; background: transparent; backdrop-filter: blur(2px); border-top-right-radius: 1em; font-family: sans-serif; font-size: 0.9em; text-align: right;">
-  <a href="https://bsky.app/profile/oyin.bo" style="color: silver; text-decoration: none;"><span style="opacity: 0.7; font-size: 77%; padding-right: 0.2em;">ⓐ</span>oyin.bo</a>
+<!-- Controls Panel -->
+<div id="controls-panel">
+  <input type="text" id="count-input" value="500,000">
+  <label id="profiling-toggle">
+    <span>GPU Profile</span>
+    <input type="checkbox" id="profiling-checkbox">
+  </label>
+  
+  <!-- Profiler Output Panel -->
+  <div id="profiler-output">
+    Initializing profiler...
+  </div>
 </div>
 
+<script src="texture-mode.js" type="module"></script>
 
-<div
-  style="position: fixed; right: 0; bottom: 0; padding: 0.5em 1em; z-index: 100; background: transparent; backdrop-filter: blur(2px); border-top-left-radius: 1em; font-family: sans-serif; font-size: 0.9em; text-align: right;">
-  <a href="./" style="color: rgb(104, 255, 255);">Gravity</a>
+<div class="bottom-left-panel">
+  <a href="https://bsky.app/profile/oyin.bo">
+    <span class="author-badge">ⓐ</span>oyin.bo
+  </a>
+</div>
+
+<div class="bottom-right-panel">
+  <a href="./">Gravity</a>
   &nbsp;
-  <a href="simplistic.html" style="color: rgb(104, 255, 255)">Simplistic</a>
+  <a href="simplistic.html">Simplistic</a>
 </div>
 
 </body>

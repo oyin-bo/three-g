@@ -5,97 +5,55 @@ import { createScene } from 'three-pop';
 import { massSpotMesh } from './mass-spot-mesh.js';
 import { particleSystem } from './particle-system/index.js';
 
-// 1. Setup Scene using three-pop (matching texture-mode.js)
+// 1. Setup Scene
 const outcome = createScene({
   renderer: { antialias: true },
   camera: { fov: 40, near: 0.0001 },
-  controls: { autoRotate: false }  // Disable auto-rotation
+  controls: { autoRotate: false }
 });
 
 const { scene, camera, container, renderer } = outcome;
 
-// for debugging
 /** @type {*} */(window).outcome = outcome;
 /** @type {*} */(window).scene = scene;
 
-// Debug cube to verify scene rendering
 scene.add(new THREE.Mesh(
   new THREE.BoxGeometry(1, 1, 1),
-  new THREE.MeshBasicMaterial({ color: 0x00ff80, wireframe: true, visible: true })  // Visible to verify rendering
+  new THREE.MeshBasicMaterial({ color: 0x00ff80, wireframe: true, visible: true })
 ));
 
-container.style.cssText =
-  'position: absolute; top: 0; left: 0; inset: 0;';
-
-camera.position.y = 2;
+container.style.cssText = 'position: absolute; top: 0; left: 0; inset: 0;';
+camera.position.y = 1.1;
 
 document.body.appendChild(container);
 
-// 2. Initialize Barnes-Hut GPU Physics
+// 2. Get UI elements
+const countInput = /** @type {HTMLInputElement} */ (document.getElementById('count-input'));
+const profilingCheckbox = /** @type {HTMLInputElement} */ (document.getElementById('profiling-checkbox'));
+const profilerOutput = /** @type {HTMLDivElement} */ (document.getElementById('profiler-output'));
 
-// renderer.getContext() may return WebGLRenderingContext or WebGL2RenderingContext;
-// we use WebGL2 APIs. Cast for ts-check.
+// 3. Initialize state
 const gl = /** @type {WebGL2RenderingContext} */ (renderer.getContext());
 
-// Build spots array and pass to particleSystem using the array-of-spots API
-let particleCount = 50000;
+let particleCount = 500000;
 const worldBounds = /** @type {const} */({
-  min: [-4, -4, -2],
-  max: [4, 4, 2]
+  min: [-2, -0.1, -2],
+  max: [2, 0.1, 2]
 });
 
-const input = document.createElement('input');
-input.style.cssText = 'position: absolute; top: 0.5em; right: 1em; background: transparent; color: #5ec15e; font-size: 200%; text-align: right; backdrop-filter: blur(2px);';
-input.value = particleCount.toLocaleString();
-document.body.appendChild(input);
+let profilingEnabled = false;
+let frameCount = 0;
+let lastProfileUpdate = 0;
 
-let { physics, particles } = recreatePhysics();
-
-/** @type {*} */
-let inputTimeout;
-input.oninput = () => {
-  clearTimeout(inputTimeout);
-  inputTimeout = setTimeout(() => {
-    const count = parseInt(input.value.replace(/,|\./g, ''));
-    if (Number.isFinite(count) && count > 0) {
-      physics.dispose();
-      isInitialized = false;
-      particleCount = count;
-
-      [{ physics, particles }] = [recreatePhysics()];
-    }
-  }, 600);
-};
-
-// Get texture info
-const textureSize = physics.getTextureSize();
-
-// 3. Create particle mesh using raw WebGLTexture (will be wrapped internally)
-const mesh = massSpotMesh({
-  textureMode: true,
-  particleCount: particleCount,
-  textures: {
-    position: physics.getPositionTexture(),  // Raw WebGLTexture
-    color: physics.getColorTexture(),         // Raw WebGLTexture  
-    size: [textureSize.width, textureSize.height]
-  },
-  fog: { start: 0.3, gray: 20 }
-});
-
-scene.add(mesh);
-
-// for debugging
-/** @type {any} */ (window).mesh = mesh;
-/** @type {any} */ (window).physics = physics;
-
-// 4. Create TWO ExternalTexture wrappers for ping-pong buffers (after first render)
-/** @type {THREE.ExternalTexture[]} */
-let positionTextureWrappers = [];
+/** @type {any} */
+let physics;
+/** @type {any} */
+let m;
+let positionTextureWrappers = /** @type {THREE.ExternalTexture[]} */([]);
 let isInitialized = false;
 
-// Set up animation callback - swap between the two ExternalTexture wrappers
+// 4. Animation loop - MUST be set BEFORE recreateAll()
 outcome.animate = () => {
-  // Initialize wrappers AFTER first render so shaders compile properly
   if (!isInitialized) {
     const positionTextures = physics.getPositionTextures();
     const positionTexture0 = new THREE.ExternalTexture(positionTextures[0]);
@@ -103,47 +61,162 @@ outcome.animate = () => {
     positionTextureWrappers = [positionTexture0, positionTexture1];
 
     const colorTexture = new THREE.ExternalTexture(physics.getColorTexture());
-    mesh.material.uniforms.u_colorTexture.value = colorTexture;
+    m.mesh.material.uniforms.u_colorTexture.value = colorTexture;
 
     isInitialized = true;
-    return;  // Skip physics compute on first frame
+    return;
   }
   
   physics.compute();
-  
-  // Restore THREE.js WebGL state after physics compute
   renderer.resetState();
   
-  // swap which wrapper we use - no recreation, no copying
   const currentIndex = physics.getCurrentIndex();
-  mesh.material.uniforms.u_positionTexture.value = positionTextureWrappers[currentIndex];
+  m.mesh.material.uniforms.u_positionTexture.value = positionTextureWrappers[currentIndex];
+  positionTextureWrappers[currentIndex].needsUpdate = true;
+  
+  if (profilingEnabled) {
+    // We can't nest GPU timer queries, so we only measure rendering_total
+    // The particle_draw and wireframe_cube are already measured inside via their onBeforeRender callbacks
+    renderer.render(scene, camera);
+    
+    frameCount++;
+    const now = performance.now();
+    if (frameCount > 60 && now - lastProfileUpdate > 5000) {
+      updateProfilingDisplay();
+      lastProfileUpdate = now;
+    }
+  } else {
+    renderer.render(scene, camera);
+  }
 };
 
+recreateAll();
 
-function recreatePhysics() {
-  let particles = createSpots(
-    particleCount,
-    worldBounds);
+/** @type {any} */ (window).m = m;
+/** @type {any} */ (window).physics = physics;
 
-  // Use THREE.js Color to create vibrant hue transitions
-  const color1 = new THREE.Color().setHSL(0.0, 1.0, 0.6); // Red
-  const color2 = new THREE.Color().setHSL(0.33, 1.0, 0.6); // Green
-  const color3 = new THREE.Color().setHSL(0.66, 1.0, 0.6); // Blue
+// 5. Count input handler
+/** @type {*} */
+let inputTimeout;
+countInput.oninput = () => {
+  clearTimeout(inputTimeout);
+  inputTimeout = setTimeout(() => {
+    const count = parseInt(countInput.value.replace(/,|\.|\s/g, ''));
+    if (Number.isFinite(count) && count > 0) {
+      particleCount = count;
+      recreateAll();
+    }
+  }, 600);
+};
 
+// 6. Profiling checkbox handler
+profilingCheckbox.onchange = () => {
+  profilingEnabled = profilingCheckbox.checked;
+  profilerOutput.classList.toggle('visible', profilingEnabled);
+  recreateAll();
+};
 
-  // Blend between the three colors based on position
+function updateProfilingDisplay() {
+  const physicsStats = physics.stats();
+  const meshStats = m.stats();
+  
+  if (!physicsStats || !meshStats) {
+    profilerOutput.innerHTML = 
+      '<div class="warning">⚠️ GPU profiling not available (EXT_disjoint_timer_query_webgl2 extension not supported)</div>';
+    return;
+  }
+
+  // Combine physics and rendering stats
+  const results = { ...physicsStats, ...meshStats };
+  const totalTime = Object.values(results).reduce((sum, val) => sum + (val || 0), 0);
+
+  if (totalTime === 0) {
+    profilerOutput.innerHTML = 
+      '<div>Waiting for GPU timing data... (frame ' + frameCount + ')</div>';
+    return;
+  }
+
+  const physicsStages = ['octree_clear', 'aggregation', 'pyramid_reduction', 'traversal', 'vel_integrate', 'pos_integrate'];
+  
+  const physicsTime = physicsStages.reduce((sum, name) => sum + (results[name] || 0), 0);
+  const particleDrawTime = results['particle_draw'] || 0;
+  
+  const renderingTime = particleDrawTime;
+  const grandTotal = physicsTime + renderingTime;
+  
+  const physicsPercent = (physicsTime / grandTotal * 100).toFixed(1);
+  const renderingPercent = (renderingTime / grandTotal * 100).toFixed(1);
+
+  let html = '<div style="font-weight: bold;">GPU Performance Profile</div>';
+  html += '<div class="metric-row">';
+  html += '<div class="metric-label">Total: ' + grandTotal.toFixed(2) + ' ms/frame (' + (1000 / grandTotal).toFixed(1) + ' FPS)</div>';
+  html += '</div>';
+  
+  html += '<div class="section-header" style="color: #4fc3f7;">Physics (' + physicsPercent + '%): ' + physicsTime.toFixed(2) + ' ms</div>';
+  physicsStages.forEach(name => {
+    const time = results[name] || 0;
+    if (time > 0) {
+      const width = (time / grandTotal * 100);
+      html += '<div class="metric-row">';
+      html += '<div class="metric-bar physics-bar" style="width: ' + width + '%;"></div>';
+      html += '<div class="metric-label">' + name + ': ' + time.toFixed(2) + ' ms</div>';
+      html += '</div>';
+    }
+  });
+  
+  html += '<div class="section-header" style="color: #9fffc8;">Rendering (' + renderingPercent + '%): ' + renderingTime.toFixed(2) + ' ms</div>';
+  
+  if (particleDrawTime > 0) {
+    const width = (particleDrawTime / grandTotal * 100);
+    html += '<div class="metric-row">';
+    html += '<div class="metric-bar rendering-bar" style="width: ' + width + '%;"></div>';
+    html += '<div class="metric-label">particle_draw: ' + particleDrawTime.toFixed(2) + ' ms</div>';
+    html += '</div>';
+  }
+  
+  if (physicsTime > renderingTime * 2) {
+    html += '<div class="metric-row" style="color: #ffa726; margin-top: 0.8em;">⚠️ Physics is the bottleneck</div>';
+  } else if (renderingTime > physicsTime * 2) {
+    html += '<div class="metric-row" style="color: #ffa726; margin-top: 0.8em;">⚠️ Rendering is the bottleneck</div>';
+  }
+
+  profilerOutput.innerHTML = html;
+}
+
+function recreateAll() {
+  if (physics) physics.dispose();
+  if (m && m.mesh) scene.remove(m.mesh);
+  
+  isInitialized = false;
+  frameCount = 0;
+  lastProfileUpdate = 0;
+  positionTextureWrappers = [];
+  
+  const result = recreatePhysicsAndMesh();
+  physics = result.physics;
+  m = result.m;
+  
+  /** @type {any} */ (window).m = m;
+  /** @type {any} */ (window).physics = physics;
+}
+
+function recreatePhysicsAndMesh() {
+  const particles = createParticles(particleCount, worldBounds);
+
+  const color1 = new THREE.Color().setHSL(0.0, 1.0, 0.6);
+  const color2 = new THREE.Color().setHSL(0.33, 1.0, 0.6);
+  const color3 = new THREE.Color().setHSL(0.66, 1.0, 0.6);
   const finalColor = new THREE.Color();
 
   let gravityStrength = Math.random();
-  gravityStrength = gravityStrength * 0.001;
+  gravityStrength = gravityStrength * 0.0001;
   gravityStrength = gravityStrength * gravityStrength;
   gravityStrength += 0.00000005;
 
-  let physics = particleSystem({
+  const physics = particleSystem({
     gl,
     particles,
     get: (spot, out) => {
-      // map rgb similarly to the original color gradient
       const vx = Number(out.x || 0);
       const vy = Number(out.y || 0);
       const vz = Number(out.z || 0);
@@ -155,7 +228,6 @@ function recreatePhysics() {
       finalColor.g = color1.g * x + color2.g * y + color3.g * z;
       finalColor.b = color1.b * x + color2.b * y + color3.b * z;
 
-      // Normalize to maintain saturation
       const factor = 1 / (x + y + z || 1);
       finalColor.r *= factor;
       finalColor.g *= factor;
@@ -169,9 +241,28 @@ function recreatePhysics() {
     theta: 0.5,
     gravityStrength,
     softening: 0.2,
-    dt: 10 / 60
+    dt: 10 / 60,
+    enableProfiling: profilingEnabled
   });
-  return { physics, particles };
+
+  const textureSize = physics.getTextureSize();
+  
+  const m = massSpotMesh({
+    textureMode: true,
+    particleCount: particleCount,
+    textures: {
+      position: physics.getPositionTexture(),
+      color: physics.getColorTexture(),
+      size: [textureSize.width, textureSize.height]
+    },
+    fog: { start: 0.3, gray: 50 },
+    enableProfiling: profilingEnabled,
+    gl
+  });
+
+  scene.add(m.mesh);
+  
+  return { physics, m };
 }
 
 /**
@@ -179,7 +270,7 @@ function recreatePhysics() {
  * @param {number} count
  * @param {{min:readonly [number,number,number],max: readonly [number,number,number]}} worldBounds
  */
-function createSpots(count, worldBounds) {
+function createParticles(count, worldBounds) {
   const spots = new Array(count);
   const center = [
     (worldBounds.min[0] + worldBounds.max[0]) / 2,
@@ -187,16 +278,27 @@ function createSpots(count, worldBounds) {
     (worldBounds.min[2] + worldBounds.max[2]) / 2
   ];
 
+  // Calculate disc dimensions from worldBounds
+  const radiusX = (worldBounds.max[0] - worldBounds.min[0]) / 2;
+  const radiusZ = (worldBounds.max[2] - worldBounds.min[2]) / 2;
+  const heightRange = worldBounds.max[1] - worldBounds.min[1];
+
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const radius = Math.random() * 3 + Math.random() * 1;
-    const height = (Math.random() - 0.5) * 2;
+    // For density proportional to r^2 (empty center, dense edges):
+    // PDF: p(r) ∝ r^2, so CDF ∝ r^3
+    // Inverse CDF: r = u^(1/3) where u is uniform [0,1]
+    const radiusFactor = Math.pow(Math.random(), 1/7);
+    const height = (Math.random() - 0.5) * heightRange;
+    let mass = Math.random();
+    mass = 1 - Math.pow(mass, 1/20);
+    mass = 0.01 + mass * 0.4;
 
     spots[i] = {
-      x: center[0] + Math.cos(angle) * radius,
-      y: center[1] + Math.sin(angle) * radius,
-      z: center[2] + height,
-      mass: 0.5 + Math.random() * 1.5
+      x: center[0] + Math.cos(angle) * radiusFactor * radiusX,
+      y: center[1] + height,
+      z: center[2] + Math.sin(angle) * radiusFactor * radiusZ,
+      mass
     };
   }
 
