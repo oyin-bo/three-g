@@ -28,8 +28,20 @@ export function generateGridImpulse(psys, centerVoxel, mass, targetTexture) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, targetTexture, 0);
   
-  const size = psys.L0Size || 512;
-  gl.viewport(0, 0, size, size);
+  const gridSize = psys.pmGrid?.gridSize || 64;
+  const slicesPerRow = psys.pmGrid?.slicesPerRow || 8;
+  const textureSize = psys.pmGrid?.size || 512;
+  
+  gl.viewport(0, 0, textureSize, textureSize);
+  
+  // Set GL state for clean rendering
+  gl.disable(gl.BLEND);
+  gl.disable(gl.DEPTH_TEST);
+  gl.disable(gl.STENCIL_TEST);
+  gl.disable(gl.CULL_FACE);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.colorMask(true, true, true, true);
+  
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   
@@ -42,13 +54,15 @@ export function generateGridImpulse(psys, centerVoxel, mass, targetTexture) {
   gl.uniform3f(gl.getUniformLocation(program, 'u_centerVoxel'), 
     centerVoxel[0], centerVoxel[1], centerVoxel[2]);
   gl.uniform1f(gl.getUniformLocation(program, 'u_mass'), mass);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), psys.octreeGridSize || 64);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), psys.octreeSlicesPerRow || 8);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), gridSize);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), slicesPerRow);
   
   // Draw fullscreen quad
   gl.bindVertexArray(psys.quadVAO);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   gl.bindVertexArray(null);
+  
+  gl.finish(); // Ensure draw completes
   
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
@@ -71,8 +85,11 @@ export function generateTwoPointMasses(psys, a, b, ma, mb, targetTexture) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, targetTexture, 0);
   
-  const size = psys.L0Size || 512;
-  gl.viewport(0, 0, size, size);
+  const gridSize = psys.pmGrid?.gridSize || 64;
+  const slicesPerRow = psys.pmGrid?.slicesPerRow || 8;
+  const textureSize = psys.pmGrid?.size || 512;
+  
+  gl.viewport(0, 0, textureSize, textureSize);
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   
@@ -84,8 +101,8 @@ export function generateTwoPointMasses(psys, a, b, ma, mb, targetTexture) {
   gl.uniform3f(gl.getUniformLocation(program, 'u_pointB'), b[0], b[1], b[2]);
   gl.uniform1f(gl.getUniformLocation(program, 'u_massA'), ma);
   gl.uniform1f(gl.getUniformLocation(program, 'u_massB'), mb);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), psys.octreeGridSize || 64);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), psys.octreeSlicesPerRow || 8);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), gridSize);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), slicesPerRow);
   
   gl.bindVertexArray(psys.quadVAO);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -111,8 +128,11 @@ export function generatePlaneWaveDensity(psys, k, amplitude, targetTexture) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, targetTexture, 0);
   
-  const size = psys.L0Size || 512;
-  gl.viewport(0, 0, size, size);
+  const gridSize = psys.pmGrid?.gridSize || 64;
+  const slicesPerRow = psys.pmGrid?.slicesPerRow || 8;
+  const textureSize = psys.pmGrid?.size || 512;
+  
+  gl.viewport(0, 0, textureSize, textureSize);
   
   const program = getOrCreateSyntheticProgram(psys);
   gl.useProgram(program);
@@ -120,8 +140,8 @@ export function generatePlaneWaveDensity(psys, k, amplitude, targetTexture) {
   gl.uniform1i(gl.getUniformLocation(program, 'u_synthType'), 2); // plane wave
   gl.uniform3f(gl.getUniformLocation(program, 'u_waveVector'), k[0], k[1], k[2]);
   gl.uniform1f(gl.getUniformLocation(program, 'u_amplitude'), amplitude);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), psys.octreeGridSize || 64);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), psys.octreeSlicesPerRow || 8);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), gridSize);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), slicesPerRow);
   
   gl.bindVertexArray(psys.quadVAO);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -226,29 +246,29 @@ function getOrCreateSyntheticProgram(psys) {
       ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
       
       if (u_synthType == 0) {
-        // Grid impulse
+        // Grid impulse (mass in ALPHA channel to match PM deposit)
         ivec3 center = ivec3(u_centerVoxel);
         if (voxel == center) {
-          outColor = vec4(u_mass, 0.0, 0.0, 0.0);
+          outColor = vec4(0.0, 0.0, 0.0, u_mass);
         } else {
           outColor = vec4(0.0);
         }
       } 
       else if (u_synthType == 1) {
-        // Two point masses
+        // Two point masses (mass in ALPHA channel)
         ivec3 a = ivec3(u_pointA);
         ivec3 b = ivec3(u_pointB);
         float mass = 0.0;
         if (voxel == a) mass += u_massA;
         if (voxel == b) mass += u_massB;
-        outColor = vec4(mass, 0.0, 0.0, 0.0);
+        outColor = vec4(0.0, 0.0, 0.0, mass);
       }
       else if (u_synthType == 2) {
-        // Plane wave density
+        // Plane wave density (mass in ALPHA channel)
         vec3 pos = vec3(voxel) / u_gridSize;
         float phase = 2.0 * PI * dot(u_waveVector, pos);
         float density = u_amplitude * cos(phase);
-        outColor = vec4(density, 0.0, 0.0, 0.0);
+        outColor = vec4(0.0, 0.0, 0.0, density);
       }
       else if (u_synthType == 3) {
         // Spectrum delta (single k-mode)

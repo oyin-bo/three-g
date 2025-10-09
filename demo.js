@@ -30,6 +30,7 @@ document.body.appendChild(container);
 // 2. Get UI elements
 const countInput = /** @type {HTMLInputElement} */ (document.getElementById('count-input'));
 const profilingCheckbox = /** @type {HTMLInputElement} */ (document.getElementById('profiling-checkbox'));
+const planaCheckbox = /** @type {HTMLInputElement} */ (document.getElementById('plana-checkbox'));
 const profilerOutput = /** @type {HTMLDivElement} */ (document.getElementById('profiler-output'));
 
 // 3. Initialize state
@@ -42,6 +43,7 @@ const worldBounds = /** @type {const} */({
 });
 
 let profilingEnabled = false;
+let planAEnabled = false;
 let frameCount = 0;
 let lastProfileUpdate = 0;
 
@@ -95,6 +97,18 @@ recreateAll();
 /** @type {any} */ (window).m = m;
 /** @type {any} */ (window).physics = physics;
 
+// DevTools hook for Plan A control
+/** @type {any} */ (window).planA = (enabled) => {
+  if (typeof enabled === 'boolean') {
+    planAEnabled = enabled;
+    planaCheckbox.checked = enabled;
+    console.log('[Demo] Plan A ' + (enabled ? 'enabled' : 'disabled') + ' via DevTools');
+    recreateAll();
+  } else {
+    return planAEnabled;
+  }
+};
+
 // 5. Count input handler
 /** @type {*} */
 let inputTimeout;
@@ -113,6 +127,13 @@ countInput.oninput = () => {
 profilingCheckbox.onchange = () => {
   profilingEnabled = profilingCheckbox.checked;
   profilerOutput.classList.toggle('visible', profilingEnabled);
+  recreateAll();
+};
+
+// 7. Plan A checkbox handler
+planaCheckbox.onchange = () => {
+  planAEnabled = planaCheckbox.checked;
+  console.log('[Demo] Plan A ' + (planAEnabled ? 'enabled' : 'disabled'));
   recreateAll();
 };
 
@@ -242,7 +263,8 @@ function recreatePhysicsAndMesh() {
     gravityStrength,
     softening: 0.2,
     dt: 10 / 60,
-    enableProfiling: profilingEnabled
+    enableProfiling: profilingEnabled,
+    planA: planAEnabled
   });
 
   const textureSize = physics.getTextureSize();

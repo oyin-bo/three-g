@@ -18,17 +18,15 @@ import velIntegrateFrag from './shaders/vel_integrate.frag.js';
 import posIntegrateFrag from './shaders/pos_integrate.frag.js';
 
 // Pipeline utilities
-import { unbindAllTextures as dbgUnbindAllTextures, checkGl as dbgCheckGl, checkFBO as dbgCheckFBO } from './utils/debug.js';
-import { aggregateParticlesIntoL0 as aggregateL0 } from './pipeline/aggregator.js';
-import { runReductionPass as pyramidReduce } from './pipeline/pyramid.js';
-import { calculateForces as pipelineCalculateForces } from './pipeline/traversal.js';
-import { integratePhysics as pipelineIntegratePhysics } from './pipeline/integrator.js';
-import { updateWorldBoundsFromTexture as pipelineUpdateBounds } from './pipeline/bounds.js';
+import { unbindAllTextures, checkGl, checkFBO } from './utils/debug.js';
+import { aggregateL0, pyramidReduce, pipelineUpdateBounds, pipelineCalculateForces, pipelineIntegratePhysics } from './pipeline/index.js';
 import { GPUProfiler } from './utils/gpu-profiler.js';
+import { createPMGrid, createPMGridFramebuffer } from './pm-grid.js';
 
 export class ParticleSystem {
 
   /**
+{{ ... }}
    * ParticleSystem constructor
    * @param {WebGL2RenderingContext} gl - WebGL2 rendering context
    * @param {{
@@ -106,6 +104,12 @@ export class ParticleSystem {
     // Time (ms) when bounds were last updated via GPU readback
     this._lastBoundsUpdateTime = -1;
     
+    // PM/FFT resources (Plan A)
+    this.pmGrid = null;
+    this.pmGridFramebuffer = null;
+    this.pmDepositProgram = null;
+    this.particleCount = options.particleCount;
+    
     // GPU Profiler (created only if enabled)
     this.profiler = null;
     if (this.options.enableProfiling) {
@@ -118,17 +122,17 @@ export class ParticleSystem {
 
   // Debug helper: unbind all textures on commonly used units to avoid feedback loops
   unbindAllTextures() {
-    dbgUnbindAllTextures(this.gl);
+    unbindAllTextures(this.gl);
   }
 
   // Debug helper: log gl errors with a tag
   checkGl(tag) {
-    return dbgCheckGl(this.gl, tag);
+    return checkGl(this.gl, tag);
   }
 
   // Debug helper: check FBO completeness and tag
   checkFBO(tag) {
-    dbgCheckFBO(this.gl, tag);
+    checkFBO(this.gl, tag);
   }
 
   init() {
@@ -140,6 +144,11 @@ export class ParticleSystem {
       this.createTextures();
       this.createGeometry();
       this.uploadParticleData();
+      
+      // Initialize PM/FFT pipeline if Plan A is enabled
+      if (this.options.planA) {
+        this.initPMPipeline();
+      }
       
       // Restore GL state for THREE.js compatibility
       const gl = this.gl;
@@ -157,6 +166,17 @@ export class ParticleSystem {
       if (!finished)
         this.dispose();
     }
+  }
+
+  initPMPipeline() {
+    const gl = this.gl;
+    
+    // Create PM grid (64³ grid by default)
+    const gridSize = 64;
+    this.pmGrid = createPMGrid(gl, gridSize);
+    this.pmGridFramebuffer = createPMGridFramebuffer(gl, this.pmGrid.texture);
+    
+    console.log('[PM Pipeline] Initialized with', gridSize, '³ grid');
   }
 
   checkWebGL2Support() {

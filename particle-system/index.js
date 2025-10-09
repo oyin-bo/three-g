@@ -122,6 +122,15 @@ export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrengt
     options: system.options,
     particleCount: system.options.particleCount,
     
+    // PM/FFT grid access (Plan A)
+    pmGrid: system.pmGrid,
+    pmGridFramebuffer: system.pmGridFramebuffer,
+    pmDepositProgram: system.pmDepositProgram,
+    gl: gl, // Expose GL context for debugging/testing
+    
+    // Internal system access for advanced usage
+    _system: system, // Expose full system for PM-debug and advanced features
+    
     // Get profiling statistics (if profiling enabled)
     stats: () => {
       if (!system.profiler || !system.profiler.enabled) return null;
