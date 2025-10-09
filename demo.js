@@ -256,7 +256,7 @@ function recreatePhysicsAndMesh() {
   let gravityStrength = Math.random();
   gravityStrength = gravityStrength * 0.0001;
   gravityStrength = gravityStrength * gravityStrength;
-  gravityStrength += 0.000005;
+  gravityStrength += 0.0000005;
 
   const physics = particleSystem({
     gl,
@@ -295,7 +295,7 @@ function recreatePhysicsAndMesh() {
   
   const m = massSpotMesh({
     textureMode: true,
-    particleCount: particleCount,
+    particleCount,
     textures: {
       position: physics.getPositionTexture(),
       color: physics.getColorTexture(),
@@ -338,7 +338,7 @@ function createParticles(count, worldBounds) {
     const height = (Math.random() - 0.5) * heightRange;
     let mass = Math.random();
     mass = 1 - Math.pow(mass, 1/20);
-    mass = 0.01 + mass * 0.4;
+    mass = 0.01 + mass * 10;
 
     spots[i] = {
       x: center[0] + Math.cos(angle) * radiusFactor * radiusX,
