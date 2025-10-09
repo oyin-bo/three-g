@@ -13,6 +13,8 @@ import {
   ExternalTexture
 } from 'three';
 
+import { GPUProfiler } from './particle-system/utils/gpu-profiler.js';
+
 /**
  * Create particle rendering mesh
  * 
@@ -24,14 +26,16 @@ import {
  *   particleCount?: number,
  *   textures?: {
  *     position: WebGLTexture | Texture,  // RGBA32F: xyz=position, w=mass
- *     color?: WebGLTexture | Texture,    // RGBA: particle color
+ *     color: WebGLTexture | Texture,    // RGBA: particle color
  *     size: [number, number]                   // Texture dimensions [width, height]
  *   },
  *   fog?: number | { start?: number, gray?: number }, // Common options
- *   glsl?: { definitions?: string, vertex?: string }
+ *   glsl?: { definitions?: string, vertex?: string },
+ *   enableProfiling?: boolean, // Enable GPU profiling
+ *   gl?: WebGL2RenderingContext // Required if enableProfiling is true
  * }} options
  */
-export function massSpotMesh({ spots, textureMode, particleCount, textures, get, fog, glsl }) {
+export function massSpotMesh({ spots, textureMode, particleCount, textures, get, fog, glsl, enableProfiling, gl }) {
   
   // NEW: Texture mode branch (GPU-resident data)
   if (textureMode) {
@@ -45,21 +49,30 @@ export function massSpotMesh({ spots, textureMode, particleCount, textures, get,
       colorTexture: textures.color,
       textureSize: textures.size,
       fog,
-      glsl
+      glsl,
+      enableProfiling,
+      gl
     });
   }
   
   // EXISTING: Array-based mode (CPU data, unchanged)
-  return createArrayBasedMesh({ spots, get, fog, glsl });
+  return createArrayBasedMesh({
+    spots: /** @type {*} */(spots),
+    get,
+    fog,
+    glsl,
+    enableProfiling,
+    gl
+  });
 }
 
 /**
  * @param {Pick<
  *  Parameters<typeof massSpotMesh>[0],
- *  'get' | 'fog' | 'glsl'
+ *  'get' | 'fog' | 'glsl' | 'enableProfiling' | 'gl'
  * > & { spots: any[] }} _
  */
-function createArrayBasedMesh({ spots, get, fog, glsl }) {
+function createArrayBasedMesh({ spots, get, fog, glsl, enableProfiling, gl }) {
   const dummy = {
     index: 0,
     x: 0,
@@ -83,6 +96,13 @@ function createArrayBasedMesh({ spots, get, fog, glsl }) {
   geometry.setAttribute('diameter', new InstancedBufferAttribute(diameterBuf, 1));
   geometry.setAttribute('color', new InstancedBufferAttribute(colorBuf, 1));
   geometry.instanceCount = spots.length;
+
+  // GPU Profiler (created only if enabled)
+  /** @type {GPUProfiler | null} */
+  let profiler = null;
+  if (enableProfiling && gl) {
+    profiler = new GPUProfiler(gl);
+  }
 
   let fogStart = 0.6;
   let fogGray = 1.0;
@@ -160,8 +180,24 @@ function createArrayBasedMesh({ spots, get, fog, glsl }) {
   });
 
   const mesh = new Points(geometry, material);
-  mesh.updateSpots = updateSpots;
-  return mesh;
+  
+  // Add profiling support with onBeforeRender/onAfterRender
+  if (profiler) {
+    mesh.onBeforeRender = () => {
+      profiler.update();  // Auto-update profiler state each frame
+      profiler.begin('particle_draw');
+    };
+    mesh.onAfterRender = () => {
+      profiler.end();
+    };
+  }
+  
+  // Return wrapper object instead of polluting Three.js Points
+  return {
+    mesh,
+    update: updateSpots,
+    stats: getProfilingStats
+  };
 
   function populateBuffers() {
     for (let i = 0; i < spots.length; i++) {
@@ -208,6 +244,15 @@ function createArrayBasedMesh({ spots, get, fog, glsl }) {
       geometry.attributes['color'].needsUpdate = true;
     }
   }
+
+  /**
+   * Get profiling statistics
+   * @returns {{ particle_draw?: number } | null}
+   */
+  function getProfilingStats() {
+    if (!profiler || !profiler.enabled) return null;
+    return profiler.getAll();
+  }
 }
 
 /**
@@ -216,13 +261,15 @@ function createArrayBasedMesh({ spots, get, fog, glsl }) {
  * @param {{
  *  particleCount: number,
  *  positionTexture: WebGLTexture | Texture,
- *  colorTexture?: WebGLTexture | Texture,
+ *  colorTexture: WebGLTexture | Texture,
  *  textureSize: [number, number],
  *  fog?: number | { start?: number, gray?: number },
- *  glsl?: { definitions?: string, vertex?: string }
+ *  glsl?: { definitions?: string, vertex?: string },
+ *  enableProfiling?: boolean,
+ *  gl?: WebGL2RenderingContext
  * }} _
  */
-function createTextureBasedMesh({ particleCount, positionTexture, colorTexture, textureSize, fog, glsl }) {
+function createTextureBasedMesh({ particleCount, positionTexture, colorTexture, textureSize, fog, glsl, enableProfiling, gl }) {
   const dummyPositions = new Float32Array([0, 0, 0]);
   let geometry = new InstancedBufferGeometry();
   geometry.setAttribute('position', new Float32BufferAttribute(dummyPositions, 3));
@@ -335,9 +382,30 @@ function createTextureBasedMesh({ particleCount, positionTexture, colorTexture, 
   
   const mesh = new Points(geometry, material);
   
-  mesh.updateTextures = updateTextures;
+  // GPU Profiler (created only if enabled)
+  /** @type {GPUProfiler | null} */
+  let profiler = null;
+  if (enableProfiling && gl) {
+    profiler = new GPUProfiler(gl);
+  }
   
-  return mesh;
+  // Add profiling support with onBeforeRender/onAfterRender
+  if (profiler) {
+    mesh.onBeforeRender = () => {
+      profiler.update();  // Auto-update profiler state each frame
+      profiler.begin('particle_draw');
+    };
+    mesh.onAfterRender = () => {
+      profiler.end();
+    };
+  }
+  
+  // Return wrapper object instead of polluting Three.js Points
+  return {
+    mesh,
+    update: updateTextures,
+    stats: getProfilingStats
+  };
 
   /**
    * Updates the position and color textures.
@@ -349,6 +417,15 @@ function createTextureBasedMesh({ particleCount, positionTexture, colorTexture, 
     if (newColorTexture) {
       material.uniforms.u_colorTexture.value = wrapTexture(newColorTexture);
     }
+  }
+
+  /**
+   * Get profiling statistics
+   * @returns {{ particle_draw?: number } | null}
+   */
+  function getProfilingStats() {
+    if (!profiler || !profiler.enabled) return null;
+    return profiler.getAll();
   }
 
 }

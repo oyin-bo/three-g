@@ -120,8 +120,15 @@ export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrengt
     options: system.options,
     particleCount: system.options.particleCount,
     
-    // Access profiler (may be null if profiling disabled)
-    profiler: system.profiler,
+    // Get profiling statistics (if profiling enabled)
+    stats: () => {
+      if (!system.profiler || !system.profiler.enabled) return null;
+      return system.profiler.getAll();
+    },
+    
+    // Custom profiling timers (for profiling rendering, etc.)
+    beginProfile: (name) => system.beginProfile(name),
+    endProfile: () => system.endProfile(),
 
     // Cleanup GPU resources
     dispose: () => system.dispose()

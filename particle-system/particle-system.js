@@ -432,10 +432,8 @@ export class ParticleSystem {
     pipelineCalculateForces(this);
     if (this.profiler) this.profiler.end();
     
-    // Profile integration (velocity + position)
-    if (this.profiler) this.profiler.begin('integration');
+    // Profile integration (split into velocity + position for granularity)
     pipelineIntegratePhysics(this);
-    if (this.profiler) this.profiler.end();
     
     this.frameCount++;
   }
@@ -444,12 +442,15 @@ export class ParticleSystem {
     const gl = this.gl;
     this.unbindAllTextures();
 
+    // Profile octree clear (7 gl.clear() calls)
+    if (this.profiler) this.profiler.begin('octree_clear');
     for (let i = 0; i < this.numLevels; i++) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.levelFramebuffers[i]);
       gl.viewport(0, 0, this.levelTextures[i].size, this.levelTextures[i].size);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
+    if (this.profiler) this.profiler.end();
     
     // Profile aggregation
     if (this.profiler) this.profiler.begin('aggregation');
@@ -494,6 +495,25 @@ export class ParticleSystem {
   
   getTextureSize() {
     return { width: this.textureWidth, height: this.textureHeight };
+  }
+
+  /**
+   * Begin profiling a custom timer (e.g., for rendering)
+   * @param {string} name - Timer name
+   */
+  beginProfile(name) {
+    if (this.profiler) {
+      this.profiler.begin(name);
+    }
+  }
+
+  /**
+   * End profiling the current timer
+   */
+  endProfile() {
+    if (this.profiler) {
+      this.profiler.end();
+    }
   }
 
   dispose() {    

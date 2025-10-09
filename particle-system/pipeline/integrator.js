@@ -10,6 +10,7 @@ export function integratePhysics(ctx) {
   gl.disable(gl.CULL_FACE);  // No culling for fullscreen quad
 
   // 1) Update velocities using forces
+  if (ctx.profiler) ctx.profiler.begin('vel_integrate');
   gl.useProgram(ctx.programs.velIntegrate);
   ctx.unbindAllTextures();
   gl.bindFramebuffer(gl.FRAMEBUFFER, ctx.velocityTextures.getTargetFramebuffer());
@@ -40,8 +41,10 @@ export function integratePhysics(ctx) {
   ctx.unbindAllTextures();
   ctx.checkGl('velIntegrate');
   ctx.velocityTextures.swap();
+  if (ctx.profiler) ctx.profiler.end();
 
   // 2) Update positions using new velocities
+  if (ctx.profiler) ctx.profiler.begin('pos_integrate');
   gl.useProgram(ctx.programs.posIntegrate);
   ctx.unbindAllTextures();
   
@@ -74,6 +77,7 @@ export function integratePhysics(ctx) {
   ctx.unbindAllTextures();
   ctx.checkGl('posIntegrate');
   ctx.positionTextures.swap();
+  if (ctx.profiler) ctx.profiler.end();
   
   // Unbind FBO
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);

@@ -48,7 +48,7 @@ const physics = particleSystem({
 
 // Create rendering mesh (texture mode for GPU-to-GPU pipeline)
 const textureSize = physics.getTextureSize();
-const mesh = massSpotMesh({
+const { mesh } = massSpotMesh({
   textureMode: true,
   particleCount: physics.particleCount,
   textures: {
@@ -103,6 +103,7 @@ Creates GPU-accelerated Barnes-Hut N-body simulation.
 - `damping`: Velocity damping (default: 0.0)
 - `maxSpeed`: Maximum velocity clamp (default: 2.0)
 - `maxAccel`: Maximum acceleration clamp (default: 1.0)
+- `enableProfiling`: Enable GPU profiling (default: false)
 
 **Particle Object Shape**:
 ```javascript
@@ -124,6 +125,7 @@ Creates GPU-accelerated Barnes-Hut N-body simulation.
 - `getColorTexture()`: Get particle colors (WebGLTexture, RGBA)
 - `getTextureSize()`: Get texture dimensions `{ width, height }`
 - `getCurrentIndex()`: Get current ping-pong buffer index (0 or 1)
+- `stats()`: Get GPU timing stats if profiling enabled (returns object or null)
 - `dispose()`: Release GPU resources
 
 ### massSpotMesh(options)
@@ -135,16 +137,23 @@ Creates particle rendering mesh.
 massSpotMesh({
   textureMode: true,
   particleCount: 50000,
-  textures: { position, color, size }
+  textures: { position, color, size },
+gl: renderer.getContext()
 })
 ```
 
 **Array Mode** (CPU data):
 ```javascript
 massSpotMesh({
-  spots: [{ x, y, z, mass, rgb }, ...]
+  spots: [{ x, y, z, mass, rgb }, ...],
+  gl: renderer.getContext()
 })
 ```
+
+**Returns**: Mesh object with:
+- `mesh`: THREE.Points object to add to scene
+- `stats()`: Get GPU timing stats if profiling enabled (returns object or null)
+- `update(spots)`: Update particle data (array mode only)
 
 ## How the Modules Connect
 
