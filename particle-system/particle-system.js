@@ -11,6 +11,7 @@
 // Shader sources
 import fsQuadVert from './shaders/fullscreen.vert.js';
 import reductionFrag from './shaders/reduction.frag.js';
+import reductionArrayFrag from './shaders/reduction-array.frag.js';
 import aggregationVert from './shaders/aggregation.vert.js';
 import aggregationFrag from './shaders/aggregation.frag.js';
 import traversalFrag from './shaders/traversal.frag.js';
@@ -223,7 +224,7 @@ export class ParticleSystem {
     this.programs.velIntegrate = this.createProgram(fsQuadVert, velIntegrateFrag);
     this.programs.posIntegrate = this.createProgram(fsQuadVert, posIntegrateFrag);
     
-    // Compile quadrupole traversal shader if Plan C enabled
+    // Compile Plan C specific shaders if enabled
     if (this.options.planC) {
       try {
         this.programs.traversalQuadrupole = this.createProgram(fsQuadVert, traversalQuadrupoleFrag);
@@ -231,6 +232,14 @@ export class ParticleSystem {
       } catch (e) {
         console.warn('[ParticleSystem] Failed to compile quadrupole shader, falling back to monopole:', e);
         this.programs.traversalQuadrupole = null;
+      }
+      
+      try {
+        this.programs.reductionArray = this.createProgram(fsQuadVert, reductionArrayFrag);
+        console.log('[ParticleSystem] Reduction array shader compiled successfully');
+      } catch (e) {
+        console.warn('[ParticleSystem] Failed to compile reduction array shader, falling back to standard:', e);
+        this.programs.reductionArray = null;
       }
     }
   }
@@ -279,66 +288,169 @@ export class ParticleSystem {
     this.levelTargets = [];
     this.levelFramebuffers = [];
     
-    let currentSize = this.L0Size;
-    let currentGridSize = this.octreeGridSize;
-    let currentSlicesPerRow = this.octreeSlicesPerRow;
-    
-    for (let i = 0; i < this.numLevels; i++) {
-      // Create three textures per level for MRT (A0, A1, A2)
-      const a0 = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, a0);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    // For Plan C: use texture arrays instead of individual textures
+    // This reduces texture unit usage from 24 (8 levels × 3 attachments) to 3
+    if (this.options.planC) {
+      // Create 3 texture arrays (A0, A1, A2), each with 8 layers for 8 levels
+      const maxSize = this.L0Size; // Use L0 size for all layers
       
-      const a1 = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, a1);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      // Create A0 array (monopole moments: Σ(m·x), Σ(m·y), Σ(m·z), Σm)
+      this.levelTextureArrayA0 = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA0);
+      gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA32F, maxSize, maxSize, 8, 0, gl.RGBA, gl.FLOAT, null);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       
-      const a2 = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, a2);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      // Create A1 array (second moments: Σ(m·x²), Σ(m·y²), Σ(m·z²), Σ(m·xy))
+      this.levelTextureArrayA1 = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA1);
+      gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA32F, maxSize, maxSize, 8, 0, gl.RGBA, gl.FLOAT, null);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       
-      // Create framebuffer with MRT attachments
-      const framebuffer = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, a0, 0);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, a1, 0);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, a2, 0);
-      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+      // Create A2 array (second moments: Σ(m·xz), Σ(m·yz), 0, 0)
+      this.levelTextureArrayA2 = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA2);
+      gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA32F, maxSize, maxSize, 8, 0, gl.RGBA, gl.FLOAT, null);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       
-      this.levelTargets.push({
-        a0,
-        a1,
-        a2,
-        size: currentSize,
-        gridSize: currentGridSize,
-        slicesPerRow: currentSlicesPerRow
-      });
-      this.levelFramebuffers.push(framebuffer);
+      // Create per-level 2D render textures (one triple per level) and framebuffers.
+      // We'll render into small 2D textures to avoid feedback loops, then copy each
+      // rendered color attachment into the corresponding layer of the large texture arrays
+      // using copyTexSubImage3D. This preserves the low texture-unit footprint while
+      // avoiding sampling from a texture that's currently bound to the draw framebuffer.
+      let currentSize = this.L0Size;
+      let currentGridSize = this.octreeGridSize;
+      let currentSlicesPerRow = this.octreeSlicesPerRow;
+
+      for (let i = 0; i < this.numLevels; i++) {
+        // Create three 2D render textures (A0,A1,A2) per level
+        const a0 = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, a0);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+        const a1 = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, a1);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+        const a2 = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, a2);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+        // Create framebuffer with MRT attachments bound to the 2D textures
+        const framebuffer = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, a0, 0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, a1, 0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, a2, 0);
+        gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+
+        this.levelTargets.push({
+          a0,
+          a1,
+          a2,
+          layer: i,
+          size: currentSize,
+          gridSize: currentGridSize,
+          slicesPerRow: currentSlicesPerRow
+        });
+        this.levelFramebuffers.push(framebuffer);
+
+        currentGridSize = Math.max(1, Math.floor(currentGridSize / 2));
+        currentSlicesPerRow = Math.max(1, Math.floor(currentSlicesPerRow / 2));
+        currentSize = currentGridSize * currentSlicesPerRow;
+      }
+
+      // Backward compatibility: levelTextures points to per-level A0 attachments
+      this.levelTextures = this.levelTargets.map(level => ({
+        texture: level.a0,
+        size: level.size,
+        gridSize: level.gridSize,
+        slicesPerRow: level.slicesPerRow,
+        layer: level.layer
+      }));
+    } else {
+      // Original non-Plan-C path: individual textures per level
+      let currentSize = this.L0Size;
+      let currentGridSize = this.octreeGridSize;
+      let currentSlicesPerRow = this.octreeSlicesPerRow;
       
-      currentGridSize = Math.max(1, Math.floor(currentGridSize / 2));
-      currentSlicesPerRow = Math.max(1, Math.floor(currentSlicesPerRow / 2));
-      currentSize = currentGridSize * currentSlicesPerRow;
+      for (let i = 0; i < this.numLevels; i++) {
+        // Create three textures per level for MRT (A0, A1, A2)
+        const a0 = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, a0);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        
+        const a1 = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, a1);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        
+        const a2 = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, a2);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        
+        // Create framebuffer with MRT attachments
+        const framebuffer = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, a0, 0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, a1, 0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, a2, 0);
+        gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+        
+        this.levelTargets.push({
+          a0,
+          a1,
+          a2,
+          size: currentSize,
+          gridSize: currentGridSize,
+          slicesPerRow: currentSlicesPerRow
+        });
+        this.levelFramebuffers.push(framebuffer);
+        
+        currentGridSize = Math.max(1, Math.floor(currentGridSize / 2));
+        currentSlicesPerRow = Math.max(1, Math.floor(currentSlicesPerRow / 2));
+        currentSize = currentGridSize * currentSlicesPerRow;
+      }
+      
+      // Backward compatibility: levelTextures points to A0 attachment
+      this.levelTextures = this.levelTargets.map(level => ({
+        texture: level.a0,
+        size: level.size,
+        gridSize: level.gridSize,
+        slicesPerRow: level.slicesPerRow
+      }));
     }
-    
-    // Backward compatibility: levelTextures points to A0 attachment
-    this.levelTextures = this.levelTargets.map(level => ({
-      texture: level.a0,
-      size: level.size,
-      gridSize: level.gridSize,
-      slicesPerRow: level.slicesPerRow
-    }));
     
     this.positionTextures = this.createPingPongTextures(this.textureWidth, this.textureHeight);
     this.velocityTextures = this.createPingPongTextures(this.textureWidth, this.textureHeight);
@@ -796,11 +908,19 @@ export class ParticleSystem {
     const gl = this.gl;
     
     // Clean up MRT level textures (A0, A1, A2)
-    this.levelTargets.forEach(level => {
-      gl.deleteTexture(level.a0);
-      gl.deleteTexture(level.a1);
-      gl.deleteTexture(level.a2);
-    });
+    if (this.levelTextureArrayA0) {
+      // Plan C: delete texture arrays
+      gl.deleteTexture(this.levelTextureArrayA0);
+      if (this.levelTextureArrayA1) gl.deleteTexture(this.levelTextureArrayA1);
+      if (this.levelTextureArrayA2) gl.deleteTexture(this.levelTextureArrayA2);
+    } else {
+      // Non-Plan-C: delete individual textures
+      this.levelTargets.forEach(level => {
+        if (level.a0) gl.deleteTexture(level.a0);
+        if (level.a1) gl.deleteTexture(level.a1);
+        if (level.a2) gl.deleteTexture(level.a2);
+      });
+    }
     this.levelFramebuffers.forEach(fbo => gl.deleteFramebuffer(fbo));
     
     if (this.positionTextures) {

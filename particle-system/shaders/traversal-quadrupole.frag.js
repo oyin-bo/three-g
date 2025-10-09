@@ -1,40 +1,18 @@
-export default `#version 300 es
+export default /* glsl */ `#version 300 es
 precision highp float;
+precision highp sampler2DArray;
 
 // 3D isotropic octree traversal with Barnes-Hut + Quadrupoles (Plan C)
 // Implements improved MAC and quadrupole force evaluation
 
 uniform sampler2D u_particlePositions;
 
-// A0 attachments (monopole moments)
-uniform sampler2D u_level0_A0;
-uniform sampler2D u_level1_A0;
-uniform sampler2D u_level2_A0;
-uniform sampler2D u_level3_A0;
-uniform sampler2D u_level4_A0;
-uniform sampler2D u_level5_A0;
-uniform sampler2D u_level6_A0;
-uniform sampler2D u_level7_A0;
-
-// A1 attachments (second moments: x², y², z², xy)
-uniform sampler2D u_level0_A1;
-uniform sampler2D u_level1_A1;
-uniform sampler2D u_level2_A1;
-uniform sampler2D u_level3_A1;
-uniform sampler2D u_level4_A1;
-uniform sampler2D u_level5_A1;
-uniform sampler2D u_level6_A1;
-uniform sampler2D u_level7_A1;
-
-// A2 attachments (second moments: xz, yz)
-uniform sampler2D u_level0_A2;
-uniform sampler2D u_level1_A2;
-uniform sampler2D u_level2_A2;
-uniform sampler2D u_level3_A2;
-uniform sampler2D u_level4_A2;
-uniform sampler2D u_level5_A2;
-uniform sampler2D u_level6_A2;
-uniform sampler2D u_level7_A2;
+// Texture arrays for MRT pyramid (Plan C refactor to reduce texture unit usage)
+// Each array has 8 layers corresponding to pyramid levels 0-7
+// This reduces from 24 individual samplers (exceeding limit) to 3 arrays
+uniform sampler2DArray u_levelsA0;  // A0: monopole moments [Σ(m·x), Σ(m·y), Σ(m·z), Σm]
+uniform sampler2DArray u_levelsA1;  // A1: second moments [Σ(m·x²), Σ(m·y²), Σ(m·z²), Σ(m·xy)]
+uniform sampler2DArray u_levelsA2;  // A2: second moments [Σ(m·xz), Σ(m·yz), 0, 0]
 
 uniform float u_theta;
 uniform int u_numLevels;
@@ -51,43 +29,19 @@ uniform bool u_enableQuadrupoles;  // Toggle for A/B testing
 
 out vec4 fragColor;
 
-// Sample A0 from specific level
+// Sample A0 from specific level (using texture array)
 vec4 sampleLevelA0(int level, ivec2 coord) {
-  if (level == 0) { return texelFetch(u_level0_A0, coord, 0); }
-  else if (level == 1) { return texelFetch(u_level1_A0, coord, 0); }
-  else if (level == 2) { return texelFetch(u_level2_A0, coord, 0); }
-  else if (level == 3) { return texelFetch(u_level3_A0, coord, 0); }
-  else if (level == 4) { return texelFetch(u_level4_A0, coord, 0); }
-  else if (level == 5) { return texelFetch(u_level5_A0, coord, 0); }
-  else if (level == 6) { return texelFetch(u_level6_A0, coord, 0); }
-  else if (level == 7) { return texelFetch(u_level7_A0, coord, 0); }
-  else { return vec4(0.0); }
+  return texelFetch(u_levelsA0, ivec3(coord, level), 0);
 }
 
-// Sample A1 from specific level
+// Sample A1 from specific level (using texture array)
 vec4 sampleLevelA1(int level, ivec2 coord) {
-  if (level == 0) { return texelFetch(u_level0_A1, coord, 0); }
-  else if (level == 1) { return texelFetch(u_level1_A1, coord, 0); }
-  else if (level == 2) { return texelFetch(u_level2_A1, coord, 0); }
-  else if (level == 3) { return texelFetch(u_level3_A1, coord, 0); }
-  else if (level == 4) { return texelFetch(u_level4_A1, coord, 0); }
-  else if (level == 5) { return texelFetch(u_level5_A1, coord, 0); }
-  else if (level == 6) { return texelFetch(u_level6_A1, coord, 0); }
-  else if (level == 7) { return texelFetch(u_level7_A1, coord, 0); }
-  else { return vec4(0.0); }
+  return texelFetch(u_levelsA1, ivec3(coord, level), 0);
 }
 
-// Sample A2 from specific level
+// Sample A2 from specific level (using texture array)
 vec4 sampleLevelA2(int level, ivec2 coord) {
-  if (level == 0) { return texelFetch(u_level0_A2, coord, 0); }
-  else if (level == 1) { return texelFetch(u_level1_A2, coord, 0); }
-  else if (level == 2) { return texelFetch(u_level2_A2, coord, 0); }
-  else if (level == 3) { return texelFetch(u_level3_A2, coord, 0); }
-  else if (level == 4) { return texelFetch(u_level4_A2, coord, 0); }
-  else if (level == 5) { return texelFetch(u_level5_A2, coord, 0); }
-  else if (level == 6) { return texelFetch(u_level6_A2, coord, 0); }
-  else if (level == 7) { return texelFetch(u_level7_A2, coord, 0); }
-  else { return vec4(0.0); }
+  return texelFetch(u_levelsA2, ivec3(coord, level), 0);
 }
 
 // Convert 3D voxel coordinate to 2D texture coordinate

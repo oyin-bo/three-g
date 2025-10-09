@@ -23,23 +23,19 @@ export function calculateForces(ctx) {
   gl.uniform1i(gl.getUniformLocation(program, 'u_particlePositions'), 0);
 
   if (useQuadrupoles) {
-    // Bind A0, A1, A2 attachments for all levels (Plan C)
-    for (let i = 0; i < Math.min(8, ctx.numLevels); i++) {
-      // A0 attachments
-      gl.activeTexture(gl.TEXTURE1 + i * 3);
-      gl.bindTexture(gl.TEXTURE_2D, ctx.levelTargets[i].a0);
-      gl.uniform1i(gl.getUniformLocation(program, `u_level${i}_A0`), 1 + i * 3);
-      
-      // A1 attachments
-      gl.activeTexture(gl.TEXTURE1 + i * 3 + 1);
-      gl.bindTexture(gl.TEXTURE_2D, ctx.levelTargets[i].a1);
-      gl.uniform1i(gl.getUniformLocation(program, `u_level${i}_A1`), 1 + i * 3 + 1);
-      
-      // A2 attachments
-      gl.activeTexture(gl.TEXTURE1 + i * 3 + 2);
-      gl.bindTexture(gl.TEXTURE_2D, ctx.levelTargets[i].a2);
-      gl.uniform1i(gl.getUniformLocation(program, `u_level${i}_A2`), 1 + i * 3 + 2);
-    }
+    // Bind texture arrays for Plan C (3 texture arrays instead of 24 individual textures)
+    // This reduces texture unit usage from 25 (exceeds limit) to 4 (within limit)
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, ctx.levelTextureArrayA0);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_levelsA0'), 1);
+    
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, ctx.levelTextureArrayA1);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_levelsA1'), 2);
+    
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, ctx.levelTextureArrayA2);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_levelsA2'), 3);
     
     // Enable/disable quadrupole evaluation (for A/B testing)
     const enableQuadrupoles = ctx.debugFlags.enableQuadrupoles !== false;
