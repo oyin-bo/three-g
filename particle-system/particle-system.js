@@ -23,6 +23,7 @@ import { aggregateParticlesIntoL0 as aggregateL0 } from './pipeline/aggregator.j
 import { runReductionPass as pyramidReduce } from './pipeline/pyramid.js';
 import { calculateForces as pipelineCalculateForces } from './pipeline/traversal.js';
 import { integratePhysics as pipelineIntegratePhysics } from './pipeline/integrator.js';
+
 import { updateWorldBoundsFromTexture as pipelineUpdateBounds } from './pipeline/bounds.js';
 import { GPUProfiler } from './utils/gpu-profiler.js';
 
@@ -43,7 +44,8 @@ export class ParticleSystem {
    *   maxSpeed?: number,
    *   maxAccel?: number,
    *   debugSkipQuadtree?: boolean,
-   *   enableProfiling?: boolean
+   *   enableProfiling?: boolean,
+   *   planC?: boolean
    * }} options
    */
   constructor(gl, options) {
@@ -78,6 +80,7 @@ export class ParticleSystem {
       maxAccel: options.maxAccel || 1.0,
       debugSkipQuadtree: options.debugSkipQuadtree || false,
       enableProfiling: options.enableProfiling || false,
+      planC: options.planC || false
     };
     
     // Internal state
@@ -85,11 +88,12 @@ export class ParticleSystem {
     this.frameCount = 0;
     
     // GPU resources
-    this.levelTextures = [];
-    this.levelFramebuffers = [];
+    this.levelTargets = []; // Array of {a0, a1, a2, size, gridSize, slicesPerRow}
+    this.levelFramebuffers = []; // Array of framebuffers for MRT rendering
     this.positionTextures = null;
     this.velocityTextures = null;
     this.forceTexture = null;
+    this.forceTexturePrev = null; // For KDK integrator (Plan C)
     this.colorTexture = null;
     this.programs = {};
     this.quadVAO = null;
@@ -109,6 +113,10 @@ export class ParticleSystem {
     if (this.options.enableProfiling) {
       this.profiler = new GPUProfiler(gl);
     }
+    
+    // Debug state for staging (Plan C)
+    this.debugMode = 'FullPipeline';
+    this.debugFlags = {};
   }
 
   // Debug helper: unbind all textures on commonly used units to avoid feedback loops
@@ -246,7 +254,7 @@ export class ParticleSystem {
   createTextures() {
     const gl = this.gl;
     
-    this.levelTextures = [];
+    this.levelTargets = [];
     this.levelFramebuffers = [];
     
     let currentSize = this.L0Size;
@@ -254,22 +262,44 @@ export class ParticleSystem {
     let currentSlicesPerRow = this.octreeSlicesPerRow;
     
     for (let i = 0; i < this.numLevels; i++) {
-      const texture = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, texture);
+      // Create three textures per level for MRT (A0, A1, A2)
+      const a0 = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, a0);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       
+      const a1 = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, a1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      
+      const a2 = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, a2);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      
+      // Create framebuffer with MRT attachments
       const framebuffer = gl.createFramebuffer();
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, a0, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, a1, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, a2, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
       
-      this.levelTextures.push({
-        texture, 
-        size: currentSize, 
+      this.levelTargets.push({
+        a0,
+        a1,
+        a2,
+        size: currentSize,
         gridSize: currentGridSize,
         slicesPerRow: currentSlicesPerRow
       });
@@ -280,9 +310,18 @@ export class ParticleSystem {
       currentSize = currentGridSize * currentSlicesPerRow;
     }
     
+    // Backward compatibility: levelTextures points to A0 attachment
+    this.levelTextures = this.levelTargets.map(level => ({
+      texture: level.a0,
+      size: level.size,
+      gridSize: level.gridSize,
+      slicesPerRow: level.slicesPerRow
+    }));
+    
     this.positionTextures = this.createPingPongTextures(this.textureWidth, this.textureHeight);
     this.velocityTextures = this.createPingPongTextures(this.textureWidth, this.textureHeight);
     this.forceTexture = this.createRenderTexture(this.textureWidth, this.textureHeight);
+    this.forceTexturePrev = this.createRenderTexture(this.textureWidth, this.textureHeight);
     this.colorTexture = this.createRenderTexture(this.textureWidth, this.textureHeight, gl.RGBA8, gl.UNSIGNED_BYTE);
   }
 
@@ -442,11 +481,12 @@ export class ParticleSystem {
     const gl = this.gl;
     this.unbindAllTextures();
 
-    // Profile octree clear (7 gl.clear() calls)
+    // Profile octree clear (clear all MRT attachments)
     if (this.profiler) this.profiler.begin('octree_clear');
     for (let i = 0; i < this.numLevels; i++) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.levelFramebuffers[i]);
-      gl.viewport(0, 0, this.levelTextures[i].size, this.levelTextures[i].size);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+      gl.viewport(0, 0, this.levelTargets[i].size, this.levelTargets[i].size);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
@@ -516,10 +556,70 @@ export class ParticleSystem {
     }
   }
 
+  /**
+   * Set debug mode for stage isolation (Plan C)
+   * @param {string} mode - 'FullPipeline'|'AggregateOnly'|'ReduceOnly'|'TraverseOnly'|'IntegrateOnly'|'Record'|'Replay'
+   */
+  setDebugMode(mode) {
+    this.debugMode = mode;
+  }
+
+  /**
+   * Set debug flags for staging workflow (Plan C)
+   * @param {object} flags - Debug flags object
+   */
+  setDebugFlags(flags) {
+    this.debugFlags = { ...this.debugFlags, ...flags };
+  }
+
+  /**
+   * Execute step with debug routing (Plan C staging)
+   */
+  step_Debug() {
+    if (!this.isInitialized) return;
+    
+    switch (this.debugMode) {
+      case 'FullPipeline':
+        this.step();
+        break;
+      case 'AggregateOnly':
+        // TODO: Implement DebugRouter.runAggregationHarness(this)
+        console.warn('AggregateOnly mode not yet implemented');
+        break;
+      case 'ReduceOnly':
+        // TODO: Implement DebugRouter.runReductionHarness(this)
+        console.warn('ReduceOnly mode not yet implemented');
+        break;
+      case 'TraverseOnly':
+        // TODO: Implement DebugRouter.runTraversalHarness(this)
+        console.warn('TraverseOnly mode not yet implemented');
+        break;
+      case 'IntegrateOnly':
+        // TODO: Implement DebugRouter.runIntegratorHarness(this)
+        console.warn('IntegrateOnly mode not yet implemented');
+        break;
+      case 'Record':
+        // TODO: Implement DebugRouter.runFullPipeline_Record(this)
+        console.warn('Record mode not yet implemented');
+        break;
+      case 'Replay':
+        // TODO: Implement DebugRouter.runFullPipeline_Replay(this)
+        console.warn('Replay mode not yet implemented');
+        break;
+      default:
+        this.step();
+    }
+  }
+
   dispose() {    
     const gl = this.gl;
     
-    this.levelTextures.forEach(level => gl.deleteTexture(level.texture));
+    // Clean up MRT level textures (A0, A1, A2)
+    this.levelTargets.forEach(level => {
+      gl.deleteTexture(level.a0);
+      gl.deleteTexture(level.a1);
+      gl.deleteTexture(level.a2);
+    });
     this.levelFramebuffers.forEach(fbo => gl.deleteFramebuffer(fbo));
     
     if (this.positionTextures) {
@@ -533,6 +633,10 @@ export class ParticleSystem {
     if (this.forceTexture) {
       gl.deleteTexture(this.forceTexture.texture);
       gl.deleteFramebuffer(this.forceTexture.framebuffer);
+    }
+    if (this.forceTexturePrev) {
+      gl.deleteTexture(this.forceTexturePrev.texture);
+      gl.deleteFramebuffer(this.forceTexturePrev.framebuffer);
     }
     if (this.colorTexture) {
       gl.deleteTexture(this.colorTexture.texture);

@@ -11,10 +11,10 @@ export function aggregateParticlesIntoL0(ctx) {
   // Avoid feedback: ensure no textures are bound except the ones we set below
   ctx.unbindAllTextures();
 
-  // Bind L0 framebuffer and set viewport
+  // Bind L0 framebuffer and set viewport with MRT
   gl.bindFramebuffer(gl.FRAMEBUFFER, ctx.levelFramebuffers[0]);
-  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-  const L0 = ctx.levelTextures[0].size;
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+  const L0 = ctx.levelTargets[0].size;
   gl.viewport(0, 0, L0, L0);
   gl.disable(gl.SCISSOR_TEST);  // Don't use scissor
   ctx.checkFBO('aggregate L0 (after bind)');
