@@ -1,0 +1,216 @@
+// @ts-check
+
+/**
+ * PM/FFT Pipeline - FFT Transforms
+ * 
+ * Implements 3D FFT for the PM grid using separable transforms:
+ * - Forward FFT: Real space → Fourier space
+ * - Inverse FFT: Fourier space → Real space
+ */
+
+import fftFrag from '../shaders/fft.frag.js';
+import fsQuadVert from '../shaders/fullscreen.vert.js';
+
+/**
+ * Initialize FFT resources
+ * @param {import('../particle-system.js').ParticleSystem} psys
+ */
+export function initFFT(psys) {
+  const gl = psys.gl;
+  
+  // Create FFT program
+  if (!psys.pmFFTProgram) {
+    psys.pmFFTProgram = psys.createProgram(fsQuadVert, fftFrag);
+    console.log('[PM FFT] Program created');
+  }
+  
+  // Create spectrum texture (complex: RG = real, imaginary)
+  if (!psys.pmSpectrum) {
+    const gridSize = psys.pmGrid.gridSize;
+    const textureSize = psys.pmGrid.size;
+    
+    // Primary spectrum texture
+    const spectrumTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, spectrumTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, textureSize, textureSize, 0, gl.RG, gl.FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    
+    // Ping-pong texture for multi-pass FFT
+    const pingPongTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, pingPongTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, textureSize, textureSize, 0, gl.RG, gl.FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    
+    // Create framebuffers
+    const spectrumFBO = gl.createFramebuffer();
+    const pingPongFBO = gl.createFramebuffer();
+    
+    psys.pmSpectrum = {
+      texture: spectrumTex,
+      framebuffer: spectrumFBO,
+      pingPong: pingPongTex,
+      pingPongFBO: pingPongFBO,
+      gridSize: gridSize,
+      textureSize: textureSize
+    };
+    
+    console.log(`[PM FFT] Spectrum textures created (${textureSize}x${textureSize})`);
+  }
+}
+
+/**
+ * Convert real-valued mass grid to complex format (zero imaginary part)
+ * @param {import('../particle-system.js').ParticleSystem} psys
+ */
+export function convertRealToComplex(psys) {
+  const gl = psys.gl;
+  
+  // Simple copy shader: read alpha (mass), write to RG (real, 0)
+  const convertSrc = `#version 300 es
+    precision highp float;
+    in vec2 v_uv;
+    out vec4 outColor;
+    uniform sampler2D u_massGrid;
+    
+    void main() {
+      float mass = texture(u_massGrid, v_uv).a;
+      outColor = vec4(mass, 0.0, 0.0, 0.0);
+    }
+  `;
+  
+  if (!psys._realToComplexProgram) {
+    psys._realToComplexProgram = psys.createProgram(fsQuadVert, convertSrc);
+  }
+  
+  const textureSize = psys.pmGrid.size;
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, psys.pmSpectrum.framebuffer);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, psys.pmSpectrum.texture, 0);
+  
+  gl.viewport(0, 0, textureSize, textureSize);
+  gl.useProgram(psys._realToComplexProgram);
+  
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, psys.pmGrid.texture);
+  gl.uniform1i(gl.getUniformLocation(psys._realToComplexProgram, 'u_massGrid'), 0);
+  
+  gl.bindVertexArray(psys.quadVAO);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindVertexArray(null);
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+/**
+ * Perform 3D FFT (forward or inverse)
+ * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {boolean} inverse - true for inverse FFT, false for forward
+ */
+export function perform3DFFT(psys, inverse = false) {
+  const gl = psys.gl;
+  const program = psys.pmFFTProgram;
+  const gridSize = psys.pmGrid.gridSize;
+  const textureSize = psys.pmGrid.size;
+  const slicesPerRow = psys.pmGrid.slicesPerRow;
+  
+  const numStages = Math.log2(gridSize); // 6 for 64³ grid
+  
+  gl.useProgram(program);
+  gl.viewport(0, 0, textureSize, textureSize);
+  
+  // Set GL state
+  gl.disable(gl.BLEND);
+  gl.disable(gl.DEPTH_TEST);
+  gl.colorMask(true, true, true, true);
+  
+  // Set constant uniforms
+  gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), gridSize);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), slicesPerRow);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_inverse'), inverse ? 1 : 0);
+  
+  // Perform FFT along each axis
+  for (let axis = 0; axis < 3; axis++) {
+    gl.uniform1i(gl.getUniformLocation(program, 'u_axis'), axis);
+    
+    // Multiple stages per axis
+    for (let stage = 0; stage < numStages; stage++) {
+      gl.uniform1i(gl.getUniformLocation(program, 'u_stage'), stage);
+      
+      // Ping-pong between textures
+      const readFromPrimary = (stage % 2 === 0);
+      const readTex = readFromPrimary ? psys.pmSpectrum.texture : psys.pmSpectrum.pingPong;
+      const writeFBO = readFromPrimary ? psys.pmSpectrum.pingPongFBO : psys.pmSpectrum.framebuffer;
+      const writeTex = readFromPrimary ? psys.pmSpectrum.pingPong : psys.pmSpectrum.texture;
+      
+      gl.bindFramebuffer(gl.FRAMEBUFFER, writeFBO);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, writeTex, 0);
+      
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, readTex);
+      gl.uniform1i(gl.getUniformLocation(program, 'u_inputTexture'), 0);
+      
+      gl.bindVertexArray(psys.quadVAO);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.bindVertexArray(null);
+    }
+    
+    // After all stages, ensure result is in primary texture
+    if (numStages % 2 === 1) {
+      // Copy from pingPong back to primary
+      copyTexture(gl, psys.pmSpectrum.pingPong, psys.pmSpectrum.texture, textureSize);
+    }
+  }
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  
+  const direction = inverse ? 'inverse' : 'forward';
+  console.log(`[PM FFT] ${direction} 3D FFT completed (${numStages * 3} passes)`);
+}
+
+/**
+ * Copy texture (helper)
+ * @param {WebGL2RenderingContext} gl
+ * @param {WebGLTexture} src
+ * @param {WebGLTexture} dst
+ * @param {number} size
+ */
+function copyTexture(gl, src, dst, size) {
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, src, 0);
+  
+  gl.bindTexture(gl.TEXTURE_2D, dst);
+  gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, size, size);
+  
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+}
+
+/**
+ * Forward FFT: mass grid → spectrum
+ * @param {import('../particle-system.js').ParticleSystem} psys
+ */
+export function forwardFFT(psys) {
+  initFFT(psys);
+  convertRealToComplex(psys);
+  perform3DFFT(psys, false);
+}
+
+/**
+ * Inverse FFT: spectrum → real grid
+ * @param {import('../particle-system.js').ParticleSystem} psys
+ */
+export function inverseFFT(psys) {
+  perform3DFFT(psys, true);
+  
+  // Extract real part and write back to mass grid
+  // (Implementation depends on next stage requirements)
+}
