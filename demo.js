@@ -22,10 +22,8 @@ scene.add(new THREE.Mesh(
   new THREE.MeshBasicMaterial({ color: 0x00ff80, wireframe: true, visible: true })
 ));
 
-const wireframeCube = scene.children[scene.children.length - 1];
-
 container.style.cssText = 'position: absolute; top: 0; left: 0; inset: 0;';
-camera.position.y = 4;
+camera.position.y = 1.1;
 
 document.body.appendChild(container);
 
@@ -257,7 +255,7 @@ function recreatePhysicsAndMesh() {
       color: physics.getColorTexture(),
       size: [textureSize.width, textureSize.height]
     },
-    fog: { start: 0.3, gray: 20 },
+    fog: { start: 0.3, gray: 50 },
     enableProfiling: profilingEnabled,
     gl
   });
@@ -287,14 +285,20 @@ function createParticles(count, worldBounds) {
 
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const radiusFactor = Math.random() * 0.75 + Math.random() * 0.25; // Mostly concentrated in outer area
+    // For density proportional to r^2 (empty center, dense edges):
+    // PDF: p(r) ∝ r^2, so CDF ∝ r^3
+    // Inverse CDF: r = u^(1/3) where u is uniform [0,1]
+    const radiusFactor = Math.pow(Math.random(), 1/7);
     const height = (Math.random() - 0.5) * heightRange;
+    let mass = Math.random();
+    mass = 1 - Math.pow(mass, 1/20);
+    mass = 0.01 + mass * 0.4;
 
     spots[i] = {
       x: center[0] + Math.cos(angle) * radiusFactor * radiusX,
       y: center[1] + height,
       z: center[2] + Math.sin(angle) * radiusFactor * radiusZ,
-      mass: 0.5 + Math.random() * 1.5
+      mass
     };
   }
 
