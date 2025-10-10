@@ -10,14 +10,23 @@ THREE-g is a dual-module library that brings astrophysical-scale particle simula
 A high-performance particle visualization engine that transforms raw spatial data into luminous cosmic beauty. Whether fed from CPU arrays or GPU textures, it renders hundreds of thousands of glowing particles with atmospheric fog effects—all while maintaining silky-smooth frame rates.
 
 ### 2. **Particle Physics System** (`particleSystem`)
-A GPU-native Barnes-Hut N-body gravitational simulator that computes O(N log N) physics entirely on the graphics card. Both physics particle rendering share GPU avoiding memory bottlenecks.
+A GPU-native N-body gravitational simulator with three computational methods:
+
+- **Quadrupole** (default): 2nd-order Barnes-Hut tree-code with quadrupole moments and improved multipole acceptance criterion (MAC). Provides superior accuracy with better force approximations at distance.
+- **Monopole**: 1st-order Barnes-Hut tree-code using only monopole moments (center of mass). The classic approach with simpler computations.
+- **Spectral** (experimental): Particle-Mesh method with FFT-based Poisson solver. Uses spectral techniques for smooth long-range forces, currently under development.
+
+All methods compute O(N log N) physics entirely on the GPU. Both physics and particle rendering share GPU resources, avoiding memory bottlenecks.
 
 These modules can operate independently or in concert. The **mass spot mesh** is agnostic to its data source—it happily consumes static arrays, procedural generators, or dynamic GPU textures from any GPGPU simulation. The **particle system** produces GPU-resident position and color textures that plug directly into the renderer's texture mode, creating a zero-copy pipeline from physics to pixels.
 
 ## Features
 
 - **massSpotMesh**: Efficient particle rendering with glow effects
-- **particleSystem**: GPU-based O(N log N) gravitational physics using Barnes-Hut algorithm
+- **particleSystem**: GPU-based O(N log N) gravitational physics with three computational methods:
+  - **Quadrupole**: 2nd-order Barnes-Hut with improved accuracy
+  - **Monopole**: Classic 1st-order Barnes-Hut
+  - **Spectral**: FFT-based Particle-Mesh (experimental)
 - Scales to 200,000+ particles at 10-30 FPS
 - Zero CPU involvement: all computation on GPU
 
@@ -43,6 +52,7 @@ const particles = Array.from({ length: 50000 }, () => ({
 const physics = particleSystem({
   gl: renderer.getContext(),
   particles,
+  method: 'quadrupole',  // 'quadrupole' (default), 'monopole', or 'spectral'
   worldBounds: { min: [-4, -4, -2], max: [4, 4, 2] }
 });
 
@@ -94,9 +104,13 @@ Creates GPU-accelerated Barnes-Hut N-body simulation.
 **Options**:
 - `gl`: WebGL2 context (required) — reused from THREE.WebGLRenderer
 - `particles`: Array of particle objects (required) — initial state
+- `method`: Computation method (optional, default: 'quadrupole')
+  - `'quadrupole'`: 2nd-order Barnes-Hut with quadrupole moments
+  - `'monopole'`: 1st-order Barnes-Hut with monopole moments only
+  - `'spectral'`: Particle-Mesh with FFT (experimental)
 - `get`: Optional mapper function `(particle, out) => void` for custom data extraction
 - `worldBounds`: Simulation bounds `{ min: [x,y,z], max: [x,y,z] }` (optional)
-- `theta`: Barnes-Hut approximation threshold (default: 0.5)
+- `theta`: Barnes-Hut approximation threshold (default: 0.5 for spectral, 0.65 for tree methods)
 - `gravityStrength`: Force multiplier (default: 0.0003)
 - `dt`: Timestep (default: 1/60)
 - `softening`: Softening length to prevent singularities (default: 0.2)
@@ -159,7 +173,7 @@ massSpotMesh({
 
 The integration in `demo.js` reveals the elegant choreography between renderer and physics:
 
-1. **Initialization**: Particle data flows from CPU arrays into the physics system via `particleSystem({ particles })`. The system uploads this data to GPU textures during initialization—positions, velocities, colors all transformed into WebGL textures.
+1. **Initialization**: Particle data flows from CPU arrays into the physics system via `particleSystem({ particles, method })`. The method parameter selects between 'monopole', 'quadrupole' (default), or 'spectral' implementations. The system uploads this data to GPU textures during initialization—positions, velocities, colors all transformed into WebGL textures.
 
 2. **GPU-to-GPU Pipeline**: The mass spot mesh is created in texture mode, directly consuming the physics system's position and color textures. No intermediate copies, no CPU readbacks—the renderer samples directly from the physics textures.
 
@@ -167,11 +181,33 @@ The integration in `demo.js` reveals the elegant choreography between renderer a
 
 4. **Animation Loop**: Each frame calls `physics.compute()` to advance the simulation, then updates the renderer's texture uniform to point at the newly computed positions. The entire pipeline—force calculation, integration, and rendering—occurs on the GPU without CPU intervention.
 
+### Method Selection
+
+Choose the computation method based on your requirements:
+
+- **Use 'quadrupole'** (default) for:
+  - Best accuracy-to-performance ratio
+  - Complex clustering scenarios
+  - When visual quality is paramount
+  - Production applications
+
+- **Use 'monopole'** for:
+  - Maximum performance with acceptable quality
+  - Simpler force models
+  - Debugging and comparison
+  - Educational purposes
+
+- **Use 'spectral'** for:
+  - Experimental smooth-field physics
+  - Periodic boundary conditions
+  - Research into spectral methods
+  - Development and testing (currently experimental)
+
 This architecture is not unique to gravitational physics. Any GPGPU computation that produces particle positions in a texture can plug into the same rendering pipeline, as demonstrated in `texture-mode.html`.
 
 ## The Barnes-Hut Algorithm: A Cosmic Optimization
 
-The particle system's gravitational simulation employs the Barnes-Hut algorithm, a hierarchical tree-based method that revolutionized N-body astrophysics when first proposed in 1986. Before Barnes-Hut, direct particle-particle force calculations scaled as O(N²)—prohibitive for systems beyond a few thousand bodies. The galaxy simulations and dark matter studies that transformed modern cosmology became tractable only after this algorithmic breakthrough.
+The particle system's tree-based gravitational simulation employs the Barnes-Hut algorithm, a hierarchical tree-based method that revolutionized N-body astrophysics when first proposed in 1986. Before Barnes-Hut, direct particle-particle force calculations scaled as O(N²)—prohibitive for systems beyond a few thousand bodies. The galaxy simulations and dark matter studies that transformed modern cosmology became tractable only after this algorithmic breakthrough.
 
 ### The Core Insight
 
@@ -179,9 +215,67 @@ Instead of computing forces between every pair of particles, Barnes-Hut groups d
 
 The algorithm constructs an octree (3D spatial hierarchy) where each node represents a cubic region of space. Leaf nodes contain individual particles; branch nodes aggregate the mass and center of mass of their children. During force calculation, the tree is traversed: if a node's angular size (as seen from the target particle) falls below a threshold θ (theta), its mass is treated as a point source. Otherwise, the node's children are recursively examined.
 
+### Computational Methods
+
+THREE-g implements three distinct approaches to N-body force computation, each with different accuracy/performance tradeoffs:
+
+#### Monopole Method (1st-order Barnes-Hut)
+
+The classic Barnes-Hut implementation. Each octree node stores only monopole moments: total mass M₀ and center of mass position. When a node is accepted by the multipole acceptance criterion (MAC), it contributes a force as if all its mass were concentrated at the center of mass:
+
+```
+F = G · M₀ · r / |r|³
+```
+
+This provides good performance but can exhibit directional bias when nodes are accepted too aggressively, leading to artifacts in clustered configurations.
+
+**Implementation**: Uses individual 2D textures per octree level, storing `[Σ(m·x), Σ(m·y), Σ(m·z), Σm]` per voxel.
+
+#### Quadrupole Method (2nd-order Barnes-Hut, default)
+
+An enhanced Barnes-Hut variant that stores both monopole and quadrupole moments at each node. The quadrupole tensor captures the second moments of the mass distribution, enabling more accurate force approximations for extended mass distributions.
+
+Each node stores:
+- **A0**: Monopole moments `[Σ(m·x), Σ(m·y), Σ(m·z), Σm]`
+- **A1**: Second moments `[Σ(m·x²), Σ(m·y²), Σ(m·z²), Σ(m·xy)]`
+- **A2**: Second moments `[Σ(m·xz), Σ(m·yz), 0, 0]`
+
+The force computation assembles a trace-free quadrupole tensor Q from these moments and evaluates:
+
+```
+F = G · [M₀ · r/|r|³ + Q·r/|r|⁵ - 2.5·(r·Q·r)·r/|r|⁷]
+```
+
+The quadrupole method also uses an **improved multipole acceptance criterion (MAC)** that accounts for the offset between the node's geometric center and its center of mass:
+
+```
+Accept if: d > s/θ + δ
+```
+
+where d is the distance to the target particle, s is the cell size, θ is the opening angle, and δ = |COM - cell_center| is the COM offset.
+
+This approach markedly reduces anisotropic errors, allowing higher θ values (more aggressive pruning) without visual artifacts. It also includes optional KDK (Kick-Drift-Kick) symplectic integration for improved energy conservation.
+
+**Implementation**: Uses WebGL2 texture arrays (3 arrays of 8 layers each) to reduce texture unit usage and improve cache coherence. Supports occupancy masking to skip empty voxels during traversal.
+
+#### Spectral Method (Particle-Mesh with FFT, experimental)
+
+A fundamentally different approach that replaces the tree traversal with a spectral Poisson solver. Particles are deposited onto a regular 3D grid, and forces are computed via Fast Fourier Transform (FFT):
+
+1. **Deposit**: Particles → density field ρ(x) on 64³ grid (CIC/TSC interpolation)
+2. **Forward FFT**: ρ(x) → ρ̂(k) (real space → frequency space)
+3. **Poisson solve**: ρ̂(k) → φ̂(k) using Green's function -4πG/k²
+4. **Gradient**: φ̂(k) → ĝ(k) = ik·φ̂(k) (force in frequency space)
+5. **Inverse FFT**: ĝ(k) → g(x) (frequency space → real space)
+6. **Sample**: Interpolate g(x) at particle positions
+
+This method provides O(N + M log M) complexity where N is particle count and M is grid size. It excels with smooth, uniform distributions and eliminates the stepping artifacts inherent to tree methods. The spectral approach also naturally smooths short-wavelength noise that can seed numerical instabilities.
+
+**Current status**: The spectral implementation is functional but experimental. It includes a comprehensive debugging infrastructure (`pm-debug/`) with synthetic data generators, validators, and snapshot comparison tools for verifying each pipeline stage.
+
 ### GPU Implementation Challenges
 
-Translating this inherently recursive, pointer-based algorithm to GPU shaders—where recursion is forbidden and memory access is texture-based—required significant architectural ingenuity:
+Translating these algorithms to GPU shaders—where recursion is forbidden and memory access is texture-based—required significant architectural ingenuity:
 
 - **Octree as Textures**: The tree is stored as a pyramid of 3D textures (mapped to 2D via Z-slice stacking). Each level represents a spatial subdivision, with Level 0 containing individual particles and higher levels aggregating regions.
 
@@ -189,11 +283,19 @@ Translating this inherently recursive, pointer-based algorithm to GPU shaders—
 
 - **Isotropic 3D Subdivision**: Voxel grids are subdivided uniformly in all three dimensions, with Z-slices packed into 2D textures. This preserves spatial locality for cache coherence.
 
+- **MRT Aggregation**: Multiple render targets (MRT) enable simultaneous output of monopole and quadrupole moments during the aggregation and reduction passes, minimizing bandwidth.
+
+- **Spectral Transforms**: The FFT implementation uses Stockham's algorithm with ping-pong textures, performing three 1D transforms (X→Y→Z) on the sliced 3D grid.
+
 ### History of the Galaxies
 
-The Barnes-Hut algorithm enabled the first large-scale cosmological simulations in the late 1980s, revealing how dark matter halos form and evolve. Modern variants like Fast Multipole Method (FMM) and tree-particle-mesh (TPM) codes power exascale simulations tracking billions of particles across cosmic epochs. By bringing this technique to the browser via GPU shaders, THREE-g democratizes a computational approach that once required supercomputers—now anyone can experiment with gravitational choreography in real-time, right in their web browser.
+The Barnes-Hut algorithm enabled the first large-scale cosmological simulations in the late 1980s, revealing how dark matter halos form and evolve. Modern variants like Fast Multipole Method (FMM) and tree-particle-mesh (TPM) codes power exascale simulations tracking billions of particles across cosmic epochs. 
 
-The θ parameter controls the approximation threshold. Lower values mean tighter accuracy, higher GPU cost. The default of 0.5 keeps systems up to ~200,000 particles physically coherent without dropping below 10 FPS on modern hardware.
+The spectral particle-mesh approach, pioneered in the 1970s, became the foundation for modern cosmological codes like GADGET and Enzo when combined with adaptive mesh refinement. The PM method's ability to handle periodic boundary conditions naturally makes it ideal for simulating cosmic structure formation in expanding universes.
+
+By bringing these techniques to the browser via GPU shaders, THREE-g democratizes computational approaches that once required supercomputers—now anyone can experiment with gravitational choreography in real-time, right in their web browser.
+
+The θ parameter controls the approximation threshold. Lower values mean tighter accuracy, higher GPU cost. The default of 0.65 for tree methods keeps systems up to ~200,000 particles physically coherent without dropping below 10 FPS on modern hardware. The quadrupole method achieves similar accuracy with higher θ values due to its improved force model.
 
 ## License
 
