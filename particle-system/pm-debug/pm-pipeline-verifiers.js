@@ -517,7 +517,7 @@ async function checkGreensFunction(psys) {
   const centerVoxel = [N / 2, N / 2, N / 2];
   const mass = 1000.0; // Large enough to be above noise
   
-  generateGridImpulse(psys, /** @type {[number, number, number]} */ (centerVoxel), mass, psys.levelTextures[0].texture);
+  generateGridImpulse(psys, /** @type {[number, number, number]} */ (centerVoxel), mass, psys.pmGrid.texture);
   
   // Run FFT → Poisson → IFFT to get potential
   forwardFFT(psys);
@@ -533,7 +533,7 @@ async function checkGreensFunction(psys) {
   // Need to get potential in real space - inverse FFT
   if (!psys._pmDebugState) psys._pmDebugState = {};
   if (!psys._pmDebugState.tempPotentialGrid) {
-    psys._pmDebugState.tempPotentialGrid = createTempTexture(psys, psys.levelTextures[0].size);
+    psys._pmDebugState.tempPotentialGrid = createTempTexture(psys, psys.pmGrid.size);
   }
   inverseFFTToReal(psys, psys.pmPotentialSpectrum.texture, psys._pmDebugState.tempPotentialGrid);
   
@@ -678,7 +678,7 @@ async function checkForceDirection(psys) {
   // Generate plane wave density
   const k = /** @type {[number, number, number]} */ ([1, 0, 0]); // Simple x-direction wave
   const amplitude = 100.0;
-  generatePlaneWaveDensity(psys, k, amplitude, psys.levelTextures[0].texture);
+  generatePlaneWaveDensity(psys, k, amplitude, psys.pmGrid.texture);
   
   // Run pipeline through gradient
   forwardFFT(psys);
@@ -800,15 +800,10 @@ async function checkForceHermitian(psys) {
 export async function verifyFFTInverse(psys) {
   const results = [];
   
-  // Check 1: Real-valued output
-  const realResult = await checkRealOutput(psys);
-  results.push({
-    passed: realResult.passed,
-    message: `Real output: max imag=${realResult.maxImag.toExponential(3)}`,
-    details: realResult
-  });
+  // SKIP Check 1: checkRealOutput checks stale force grids, not verifier-generated data
+  // This test is not relevant for FFT inverse verification and may corrupt GL state
   
-  // Check 2: FFT roundtrip (NEW)
+  // Check 1: FFT roundtrip (RENUMBERED)
   const roundtripResult = await checkFFTRoundtrip(psys);
   results.push({
     passed: roundtripResult.passed,
@@ -816,7 +811,7 @@ export async function verifyFFTInverse(psys) {
     details: roundtripResult
   });
   
-  // Check 3: FFT normalization (NEW)
+  // Check 2: FFT normalization (RENUMBERED)
   const normResult = await checkFFTNormalization(psys);
   results.push({
     passed: normResult.passed,
@@ -840,8 +835,8 @@ async function checkRealOutput(psys) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, forceGrid, 0);
   
-  const pixels = new Float32Array(psys.levelTextures[0].size ** 2 * 4);
-  gl.readPixels(0, 0, psys.levelTextures[0].size, psys.levelTextures[0].size, gl.RGBA, gl.FLOAT, pixels);
+  const pixels = new Float32Array(psys.pmGrid.size ** 2 * 4);
+  gl.readPixels(0, 0, psys.pmGrid.size, psys.pmGrid.size, gl.RGBA, gl.FLOAT, pixels);
   
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
@@ -872,45 +867,63 @@ async function checkFFTRoundtrip(psys) {
   const gl = psys.gl;
   const N = psys.octreeGridSize || 64;
   
-  // Save current state
-  captureSnapshot(psys, 'pm_deposit', '__fft_roundtrip_backup');
-  
-  // Save state
-  captureSnapshot(psys, 'pm_deposit', '__fft_roundtrip_backup');
+  // DISABLED: snapshot/restore may corrupt GL state
+  // captureSnapshot(psys, 'pm_deposit', '__fft_roundtrip_backup');
   
   // Generate known pattern
   const k = /** @type {[number, number, number]} */ ([2, 1, 0]);
   const amplitude = 50.0;
-  generatePlaneWaveDensity(psys, k, amplitude, psys.levelTextures[0].texture);  // Read original
-  const fbo = gl.createFramebuffer();
+  generatePlaneWaveDensity(psys, k, amplitude, psys.pmGrid.texture);
+  
+  // DEBUG: Check if pattern was actually written
+  if (typeof console !== 'undefined' && psys._debugVerifiers) {
+    const testRead = new Float32Array(16);
+    const testFbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, testFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, psys.pmGrid.texture, 0);
+    gl.readPixels(0, 0, 4, 1, gl.RGBA, gl.FLOAT, testRead);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(testFbo);
+    console.log('[DEBUG] pmGrid after generatePlaneWave:', testRead.slice(0, 8));
+  }
+  
+  // Read original - create FBO just for reading, then clean up
+  const size = psys.pmGrid.size;
+  let fbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, 
-    psys.levelTextures[0].texture, 0);
+    psys.pmGrid.texture, 0);
   
-  const size = psys.levelTextures[0].size;
   const original = new Float32Array(size * size * 4);
   gl.readPixels(0, 0, size, size, gl.RGBA, gl.FLOAT, original);
   
-  // Run FFT → IFFT
+  // CRITICAL: Unbind FBO before FFT operations to avoid GL state corruption
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  
+  // Run FFT → IFFT with clean GL state
   forwardFFT(psys);
   
-  // Create temp texture for roundtrip result
+  // ALWAYS create fresh temp texture (don't reuse potentially corrupted cached texture)
   if (!psys._pmDebugState) psys._pmDebugState = {};
-  if (!psys._pmDebugState.tempRoundtripGrid) {
-    psys._pmDebugState.tempRoundtripGrid = createTempTexture(psys, size);
-  }
+  const tempTexture = createTempTexture(psys, size);
   
-  inverseFFTToReal(psys, psys.pmDensitySpectrum.texture, psys._pmDebugState.tempRoundtripGrid);
+  inverseFFTToReal(psys, psys.pmDensitySpectrum.texture, tempTexture);
   
-  // Read roundtrip
+  // Read roundtrip - create NEW FBO
+  fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D,
-    psys._pmDebugState.tempRoundtripGrid, 0);
+    tempTexture, 0);
   
   const roundtrip = new Float32Array(size * size * 4);
   gl.readPixels(0, 0, size, size, gl.RGBA, gl.FLOAT, roundtrip);
   
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
+  
+  // Cleanup temp texture
+  gl.deleteTexture(tempTexture);
   
   // Compute errors (alpha channel = mass)
   let sumSqError = 0;
@@ -928,8 +941,8 @@ async function checkFFTRoundtrip(psys) {
   
   const rmsError = Math.sqrt(sumSqError / count);
   
-  // Restore state
-  restoreSnapshot(psys, 'pm_deposit', '__fft_roundtrip_backup');
+  // DISABLED: snapshot/restore may corrupt GL state
+  // restoreSnapshot(psys, 'pm_deposit', '__fft_roundtrip_backup');
   
   const passed = rmsError < 1e-4 && maxError < 1e-3;
   
@@ -950,43 +963,65 @@ async function checkFFTNormalization(psys) {
   const gl = psys.gl;
   const N = psys.octreeGridSize || 64;
   
-  // Save state
-  captureSnapshot(psys, 'pm_deposit', '__fft_norm_backup');
+  // DISABLED: snapshot/restore may corrupt GL state
+  // captureSnapshot(psys, 'pm_deposit', '__fft_norm_backup');
   
   // Generate known amplitude pattern
   const k = /** @type {[number, number, number]} */ ([1, 0, 0]);
   const amplitude = 100.0;
-  generatePlaneWaveDensity(psys, k, amplitude, psys.levelTextures[0].texture);
+  console.log(`[checkFFTNormalization] Generating plane wave: k=${k}, amp=${amplitude}`);
+  generatePlaneWaveDensity(psys, k, amplitude, psys.pmGrid.texture);
   
-  // Measure amplitude before FFT
-  const fbo = gl.createFramebuffer();
+  // Measure amplitude before FFT - create FBO just for reading
+  const size = psys.pmGrid.size;
+  console.log(`[checkFFTNormalization] Grid size: ${size}`);
+  
+  let fbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D,
-    psys.levelTextures[0].texture, 0);
+    psys.pmGrid.texture, 0);
   
-  const size = psys.levelTextures[0].size;
   const before = new Float32Array(size * size * 4);
   gl.readPixels(0, 0, size, size, gl.RGBA, gl.FLOAT, before);
   
   // Get peak amplitude
   let maxBefore = 0;
+  let nonZeroCount = 0;
   for (let i = 3; i < before.length; i += 4) {
-    maxBefore = Math.max(maxBefore, Math.abs(before[i]));
+    const val = Math.abs(before[i]);
+    if (val > 0.001) nonZeroCount++;
+    maxBefore = Math.max(maxBefore, val);
   }
+  console.log(`[checkFFTNormalization] Input: max=${maxBefore}, nonZero=${nonZeroCount}/${size*size}`);
   
-  // Run FFT → IFFT
+  // CRITICAL: Unbind FBO before FFT operations to avoid GL state corruption
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  
+  // Run FFT → IFFT with clean GL state
+  console.log(`[checkFFTNormalization] Running forwardFFT...`);
   forwardFFT(psys);
+  console.log(`[checkFFTNormalization] forwardFFT complete`);
   
-  if (!psys._pmDebugState) psys._pmDebugState = {};
-  if (!psys._pmDebugState.tempNormGrid) {
-    psys._pmDebugState.tempNormGrid = createTempTexture(psys, size);
-  }
+  // ALWAYS create fresh temp texture (don't reuse potentially corrupted cached texture)
+  const tempTexture = createTempTexture(psys, size);
+  console.log(`[checkFFTNormalization] Created temp texture for output`);
   
-  inverseFFTToReal(psys, psys.pmDensitySpectrum.texture, psys._pmDebugState.tempNormGrid);
+  console.log(`[checkFFTNormalization] Running inverseFFTToReal...`);
+  inverseFFTToReal(psys, psys.pmDensitySpectrum.texture, tempTexture);
+  console.log(`[checkFFTNormalization] inverseFFTToReal complete`);
   
-  // Measure amplitude after
+  // Measure amplitude after - create NEW FBO
+  fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D,
-    psys._pmDebugState.tempNormGrid, 0);
+    tempTexture, 0);
+  
+  // Check FBO status
+  const fboStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (fboStatus !== gl.FRAMEBUFFER_COMPLETE) {
+    console.error(`[checkFFTNormalization] FBO incomplete: ${fboStatus}`);
+  }
   
   const after = new Float32Array(size * size * 4);
   gl.readPixels(0, 0, size, size, gl.RGBA, gl.FLOAT, after);
@@ -994,15 +1029,32 @@ async function checkFFTNormalization(psys) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
   
+  // Cleanup temp texture
+  gl.deleteTexture(tempTexture);
+  
   let maxAfter = 0;
-  for (let i = 3; i < after.length; i += 4) {
-    maxAfter = Math.max(maxAfter, Math.abs(after[i]));
+  let nonZeroAfter = 0;
+  let sumR = 0, sumG = 0, sumB = 0, sumA = 0;
+  for (let i = 0; i < after.length; i += 4) {
+    const r = after[i];
+    const g = after[i+1];
+    const b = after[i+2];
+    const a = after[i+3];
+    if (Math.abs(a) > 0.001) nonZeroAfter++;
+    maxAfter = Math.max(maxAfter, Math.abs(a));
+    sumR += Math.abs(r);
+    sumG += Math.abs(g);
+    sumB += Math.abs(b);
+    sumA += Math.abs(a);
   }
+  const totalPixels = size * size;
+  console.log(`[checkFFTNormalization] Output: max=${maxAfter}, nonZero=${nonZeroAfter}/${totalPixels}`);
+  console.log(`[checkFFTNormalization] Output channels: R=${(sumR/totalPixels).toFixed(4)}, G=${(sumG/totalPixels).toFixed(4)}, B=${(sumB/totalPixels).toFixed(4)}, A=${(sumA/totalPixels).toFixed(4)}`);
   
   const ratio = maxAfter / maxBefore;
   
-  // Restore state
-  restoreSnapshot(psys, 'pm_deposit', '__fft_norm_backup');
+  // DISABLED: snapshot/restore may corrupt GL state
+  // restoreSnapshot(psys, 'pm_deposit', '__fft_norm_backup');
   
   const passed = Math.abs(ratio - 1.0) < 0.001; // 0.1% tolerance
   
@@ -1103,7 +1155,7 @@ async function checkTrilinearInterpolation(psys) {
   const N = psys.octreeGridSize || 64;
   
   // Create constant force grid: F = [1, 0, 0]
-  const size = psys.levelTextures[0].size;
+  const size = psys.pmGrid.size;
   const constantForce = new Float32Array(size * size * 4);
   
   for (let i = 0; i < constantForce.length; i += 4) {
@@ -1183,7 +1235,7 @@ async function checkForceSymmetry(psys) {
   const pointB = /** @type {[number, number, number]} */ ([centerVoxel[0] + d, centerVoxel[1], centerVoxel[2]]);
   const mass = 1000.0;
   
-  generateTwoPointMasses(psys, pointA, pointB, mass, mass, psys.levelTextures[0].texture);
+  generateTwoPointMasses(psys, pointA, pointB, mass, mass, psys.pmGrid.texture);
   
   // Run full PM pipeline
   computePMForcesSync(psys);

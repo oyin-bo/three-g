@@ -10,6 +10,7 @@
 
 import fftFrag from '../shaders/fft.frag.js';
 import fsQuadVert from '../shaders/fullscreen.vert.js';
+import { inspectTexture } from '../pm-debug/texture-inspector.js';
 
 /**
  * Initialize FFT resources
@@ -59,7 +60,9 @@ export function initFFT(psys) {
       pingPong: pingPongTex,
       pingPongFBO: pingPongFBO,
       gridSize: gridSize,
-      textureSize: textureSize
+      textureSize: textureSize,
+      width: textureSize,
+      height: textureSize
     };
     
     console.log(`[PM FFT] Spectrum textures created (${textureSize}x${textureSize})`);
@@ -72,6 +75,7 @@ export function initFFT(psys) {
  */
 export function convertRealToComplex(psys) {
   const gl = psys.gl;
+  const debugFFT = psys._debugFFT || false;
   
   // Simple copy shader: read alpha (mass), write to RG (real, 0)
   const convertSrc = `#version 300 es
@@ -124,6 +128,11 @@ export function convertRealToComplex(psys) {
   }
   
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  
+  // Debug: inspect converted spectrum
+  if (debugFFT) {
+    inspectTexture(gl, psys.pmSpectrum.texture, textureSize, textureSize, 'RG', 'After convertRealToComplex');
+  }
 }
 
 /**
@@ -137,8 +146,16 @@ export function perform3DFFT(psys, inverse = false) {
   const gridSize = psys.pmGrid.gridSize;
   const textureSize = psys.pmGrid.size;
   const slicesPerRow = psys.pmGrid.slicesPerRow;
+  const debugFFT = psys._debugFFT || false;
   
   const numStages = Math.log2(gridSize); // 6 for 64³ grid
+  
+  // Debug: inspect input
+  if (debugFFT) {
+    const direction = inverse ? 'INVERSE' : 'FORWARD';
+    console.log(`[PM FFT] Starting ${direction} FFT`);
+    inspectTexture(gl, psys.pmSpectrum.texture, textureSize, textureSize, 'RG', `Before ${direction} FFT`);
+  }
   
   gl.useProgram(program);
   gl.viewport(0, 0, textureSize, textureSize);
@@ -190,6 +207,12 @@ export function perform3DFFT(psys, inverse = false) {
   
   const direction = inverse ? 'inverse' : 'forward';
   console.log(`[PM FFT] ${direction} 3D FFT completed (${numStages * 3} passes)`);
+  
+  // Debug: inspect output
+  if (debugFFT) {
+    const directionLabel = inverse ? 'INVERSE' : 'FORWARD';
+    inspectTexture(gl, psys.pmSpectrum.texture, textureSize, textureSize, 'RG', `After ${directionLabel} FFT`);
+  }
 }
 
 /**
@@ -246,7 +269,9 @@ export function forwardFFT(psys) {
       texture: densityTex,
       framebuffer: densityFb,
       gridSize: psys.pmSpectrum.gridSize,
-      textureSize: textureSize
+      textureSize: textureSize,
+      width: textureSize,
+      height: textureSize
     };
   }
   
@@ -271,13 +296,27 @@ export function forwardFFT(psys) {
 export function inverseFFTToReal(psys, inputSpectrum, outputReal) {
   const gl = psys.gl;
   const textureSize = psys.pmGrid.size;
+  const debugFFT = psys._debugFFT || false;
+  
+  // Debug: inspect input spectrum
+  if (debugFFT) {
+    console.log('[PM FFT] inverseFFTToReal called');
+    inspectTexture(gl, inputSpectrum, textureSize, textureSize, 'RG', 'inverseFFTToReal input spectrum');
+  }
   
   // First, copy input spectrum to working spectrum texture
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, gl.createFramebuffer());
+  const tempFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, tempFbo);
   gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, inputSpectrum, 0);
   gl.bindTexture(gl.TEXTURE_2D, psys.pmSpectrum.texture);
   gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, textureSize, textureSize);
   gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+  gl.deleteFramebuffer(tempFbo);
+  
+  // Debug: verify copy
+  if (debugFFT) {
+    inspectTexture(gl, psys.pmSpectrum.texture, textureSize, textureSize, 'RG', 'After copying to pmSpectrum.texture');
+  }
   
   // Perform inverse FFT
   perform3DFFT(psys, true);
@@ -326,4 +365,9 @@ export function inverseFFTToReal(psys, inputSpectrum, outputReal) {
   
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
+  
+  // Debug: inspect final output
+  if (debugFFT) {
+    inspectTexture(gl, outputReal, textureSize, textureSize, 'RGBA', 'inverseFFTToReal output real');
+  }
 }

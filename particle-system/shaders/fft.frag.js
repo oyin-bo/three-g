@@ -106,20 +106,14 @@ void main() {
   float twiddleSign = (u_inverse == 1) ? 1.0 : -1.0;
   vec2 w = twiddle(float(pairIndex), float(stageSize), twiddleSign);
   
-  // Butterfly operation
+  // Butterfly operation (back to working code)
   vec2 result;
   if (!isOdd) {
-    // Even: result = current + w * partner
+    // Even position: current + w * partner
     result = complexAdd(currentComplex, complexMul(w, partnerComplex));
   } else {
-    // Odd: For inverse FFT, we need to swap the subtraction order
-    if (u_inverse == 1) {
-      // Inverse: result = w * partner - current (flipped)
-      result = complexSub(complexMul(w, partnerComplex), currentComplex);
-    } else {
-      // Forward: result = current - w * partner
-      result = complexSub(currentComplex, complexMul(w, partnerComplex));
-    }
+    // Odd position: partner - w * current  
+    result = complexSub(partnerComplex, complexMul(w, currentComplex));
   }
   
   // Normalize if inverse FFT and final stage of each axis
