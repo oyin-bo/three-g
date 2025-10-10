@@ -13,7 +13,7 @@ import fsQuadVert from '../shaders/fullscreen.vert.js';
 
 /**
  * Initialize FFT resources
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 export function initFFT(psys) {
   const gl = psys.gl;
@@ -68,7 +68,7 @@ export function initFFT(psys) {
 
 /**
  * Convert real-valued mass grid to complex format (zero imaginary part)
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 export function convertRealToComplex(psys) {
   const gl = psys.gl;
@@ -95,8 +95,19 @@ export function convertRealToComplex(psys) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, psys.pmSpectrum.framebuffer);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, psys.pmSpectrum.texture, 0);
   
+  // Check framebuffer completeness
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    console.error('[PM FFT] Framebuffer incomplete in convertRealToComplex:', status);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return;
+  }
+  
   gl.viewport(0, 0, textureSize, textureSize);
   gl.useProgram(psys._realToComplexProgram);
+  
+  // Clear any previous GL errors
+  while (gl.getError() !== gl.NO_ERROR);
   
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, psys.pmGrid.texture);
@@ -106,12 +117,18 @@ export function convertRealToComplex(psys) {
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   gl.bindVertexArray(null);
   
+  // Check for GL errors after draw
+  const err = gl.getError();
+  if (err !== gl.NO_ERROR) {
+    console.error('[PM FFT] GL error in convertRealToComplex:', err);
+  }
+  
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
 
 /**
  * Perform 3D FFT (forward or inverse)
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {boolean} inverse - true for inverse FFT, false for forward
  */
 export function perform3DFFT(psys, inverse = false) {
@@ -196,7 +213,7 @@ function copyTexture(gl, src, dst, size) {
 
 /**
  * Forward FFT: mass grid → spectrum
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 export function forwardFFT(psys) {
   initFFT(psys);
@@ -204,21 +221,50 @@ export function forwardFFT(psys) {
   perform3DFFT(psys, false);
   
   // Store result as density spectrum for later use
-  // The result is already in psys.pmSpectrum.texture
-  // Create an alias for clarity
+  // IMPORTANT: We must create a COPY, not an alias, because subsequent
+  // inverse FFT operations will overwrite psys.pmSpectrum.texture
+  const gl = psys.gl;
+  const textureSize = psys.pmSpectrum.textureSize;
+  
   if (!psys.pmDensitySpectrum) {
+    // Create dedicated texture for density spectrum
+    const densityTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, densityTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, textureSize, textureSize, 0, gl.RG, gl.FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    
+    // Create framebuffer for the density spectrum
+    const densityFb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, densityFb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, densityTex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    
     psys.pmDensitySpectrum = {
-      texture: psys.pmSpectrum.texture,
-      framebuffer: psys.pmSpectrum.framebuffer,
+      texture: densityTex,
+      framebuffer: densityFb,
       gridSize: psys.pmSpectrum.gridSize,
-      textureSize: psys.pmSpectrum.textureSize
+      textureSize: textureSize
     };
   }
+  
+  // Copy the spectrum data to the density spectrum texture
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, psys.pmSpectrum.framebuffer);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, psys.pmDensitySpectrum.framebuffer);
+  gl.blitFramebuffer(
+    0, 0, textureSize, textureSize,
+    0, 0, textureSize, textureSize,
+    gl.COLOR_BUFFER_BIT, gl.NEAREST
+  );
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
 }
 
 /**
  * Inverse FFT: spectrum → real grid
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {WebGLTexture} inputSpectrum - Input complex spectrum
  * @param {WebGLTexture} outputReal - Output real-valued texture
  */

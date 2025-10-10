@@ -211,7 +211,7 @@ export function particleSystem({
         
         /**
          * Run all PM/FFT tests
-         * @returns {Promise<any[]>}
+         * @returns {Promise<{massConservation: any, dcZero: any, poissonEquation: any}>}
          */
         runAllTests: async () => {
           const { runAllTests } = await import('./pm-debug/test-runner.js');
@@ -229,7 +229,7 @@ export function particleSystem({
         
         /**
          * Run a single stage in isolation
-         * @param {string} stage - Stage ID
+         * @param {import('./pm-debug/types.js').PMStageID} stage - Stage ID
          * @param {any=} source - Source spec
          * @param {any=} sink - Sink spec
          */
@@ -242,14 +242,25 @@ export function particleSystem({
          * Snapshot management
          */
         snapshot: {
+          /**
+           * @param {string} key
+           * @param {import('./pm-debug/types.js').PMStageID} atStage
+           */
           store: async (key, atStage) => {
             const { pmSnapshotStore } = await import('./pm-debug/index.js');
             return pmSnapshotStore(spectralSystem, key, atStage);
           },
+          /**
+           * @param {string} key
+           * @param {import('./pm-debug/types.js').PMStageID} forStage
+           */
           load: async (key, forStage) => {
             const { pmSnapshotLoad } = await import('./pm-debug/index.js');
             return pmSnapshotLoad(spectralSystem, key, forStage);
           },
+          /**
+           * @param {string} key
+           */
           dispose: async (key) => {
             const { pmSnapshotDispose } = await import('./pm-debug/index.js');
             return pmSnapshotDispose(spectralSystem, key);

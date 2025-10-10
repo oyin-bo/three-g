@@ -93,13 +93,17 @@ export class ParticleSystemMonopole {
     this.frameCount = 0;
     
     // GPU resources
+    /** @type {{a0: WebGLTexture, a1: WebGLTexture, a2: WebGLTexture, size: number, gridSize: number, slicesPerRow: number}[]} */
     this.levelTargets = [];
+    /** @type {WebGLFramebuffer[]} */
     this.levelFramebuffers = [];
+    /** @type {{texture: WebGLTexture, size: number, gridSize: number, slicesPerRow: number}[]} */
     this.levelTextures = [];
     this.positionTextures = null;
     this.velocityTextures = null;
     this.forceTexture = null;
     this.colorTexture = null;
+    /** @type {{aggregation?: WebGLProgram, reduction?: WebGLProgram, traversal?: WebGLProgram, velIntegrate?: WebGLProgram, posIntegrate?: WebGLProgram}} */
     this.programs = {};
     this.quadVAO = null;
     this.particleVAO = null;
@@ -124,10 +128,16 @@ export class ParticleSystemMonopole {
     dbgUnbindAllTextures(this.gl);
   }
 
+  /**
+   * @param {string} tag
+   */
   checkGl(tag) {
     return dbgCheckGl(this.gl, tag);
   }
 
+  /**
+   * @param {string} tag
+   */
   checkFBO(tag) {
     dbgCheckFBO(this.gl, tag);
   }
@@ -289,11 +299,21 @@ export class ParticleSystemMonopole {
     const colorData = colors || new Uint8Array(expectedLength).fill(255);
     
     const gl = this.gl;
-    uploadTextureData(gl, this.positionTextures.textures[0], positions, this.textureWidth, this.textureHeight);
-    uploadTextureData(gl, this.positionTextures.textures[1], positions, this.textureWidth, this.textureHeight);
-    uploadTextureData(gl, this.velocityTextures.textures[0], velData, this.textureWidth, this.textureHeight);
-    uploadTextureData(gl, this.velocityTextures.textures[1], velData, this.textureWidth, this.textureHeight);
-    uploadTextureData(gl, this.colorTexture.texture, colorData, this.textureWidth, this.textureHeight, gl.RGBA, gl.UNSIGNED_BYTE);
+    const pos0 = this.positionTextures?.textures[0];
+    const pos1 = this.positionTextures?.textures[1];
+    const vel0 = this.velocityTextures?.textures[0];
+    const vel1 = this.velocityTextures?.textures[1];
+    const colorTex = this.colorTexture?.texture;
+    
+    if (!pos0 || !pos1 || !vel0 || !vel1 || !colorTex) {
+      throw new Error('Textures not initialized');
+    }
+    
+    uploadTextureData(gl, pos0, positions, this.textureWidth, this.textureHeight);
+    uploadTextureData(gl, pos1, positions, this.textureWidth, this.textureHeight);
+    uploadTextureData(gl, vel0, velData, this.textureWidth, this.textureHeight);
+    uploadTextureData(gl, vel1, velData, this.textureWidth, this.textureHeight);
+    uploadTextureData(gl, colorTex, colorData, this.textureWidth, this.textureHeight, gl.RGBA, gl.UNSIGNED_BYTE);
   }
 
   step() {
@@ -362,7 +382,11 @@ export class ParticleSystemMonopole {
   clearForceTexture() {
     const gl = this.gl;
     this.unbindAllTextures();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.forceTexture.framebuffer);
+    const forceFBO = this.forceTexture?.framebuffer;
+    if (!forceFBO) {
+      throw new Error('Force texture framebuffer not initialized');
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, forceFBO);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
     gl.viewport(0, 0, this.textureWidth, this.textureHeight);
     gl.clearColor(0, 0, 0, 0);
@@ -371,25 +395,28 @@ export class ParticleSystemMonopole {
   }
 
   getPositionTexture() {
-    return this.positionTextures.getCurrentTexture();
+    return this.positionTextures?.getCurrentTexture() || null;
   }
   
   getPositionTextures() {
-    return this.positionTextures.textures;
+    return this.positionTextures?.textures || [];
   }
   
   getCurrentIndex() {
-    return this.positionTextures.currentIndex;
+    return this.positionTextures?.currentIndex ?? 0;
   }
   
   getColorTexture() {
-    return this.colorTexture.texture;
+    return this.colorTexture?.texture || null;
   }
   
   getTextureSize() {
     return { width: this.textureWidth, height: this.textureHeight };
   }
 
+  /**
+   * @param {string} name
+   */
   beginProfile(name) {
     if (this.profiler) {
       this.profiler.begin(name);

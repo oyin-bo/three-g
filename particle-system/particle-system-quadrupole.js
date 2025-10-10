@@ -100,13 +100,18 @@ export class ParticleSystemQuadrupole {
     this.frameCount = 0;
     
     // GPU resources
+    /** @type {{a0: WebGLTexture, a1: WebGLTexture, a2: WebGLTexture, layer: number, size: number, gridSize: number, slicesPerRow: number}[]} */
     this.levelTargets = []; // Array of {a0, a1, a2, size, gridSize, slicesPerRow}
+    /** @type {WebGLFramebuffer[]} */
     this.levelFramebuffers = []; // Array of framebuffers for MRT rendering
     this.positionTextures = null;
     this.velocityTextures = null;
+    /** @type {{texture: WebGLTexture, framebuffer: WebGLFramebuffer}|null} */
     this.forceTexture = null;
+    /** @type {{texture: WebGLTexture, framebuffer: WebGLFramebuffer}|null} */
     this.forceTexturePrev = null; // For KDK integrator (Plan C)
     this.colorTexture = null;
+    /** @type {{aggregation?: WebGLProgram, reduction?: WebGLProgram, traversal?: WebGLProgram, velIntegrate?: WebGLProgram, posIntegrate?: WebGLProgram, traversalQuadrupole?: WebGLProgram|null, traversalQuadrupoleOccupancy?: WebGLProgram|null, reductionArray?: WebGLProgram|null}} */
     this.programs = {};
     
     // Quadrupole-specific: always use texture arrays and KDK integrator option
@@ -139,6 +144,7 @@ export class ParticleSystemQuadrupole {
     
     // Debug state for staging (Plan C)
     this.debugMode = 'FullPipeline';
+    /** @type {{useKDK?: boolean}} */
     this.debugFlags = {};
   }
 
@@ -148,11 +154,17 @@ export class ParticleSystemQuadrupole {
   }
 
   // Debug helper: log gl errors with a tag
+  /**
+   * @param {string} tag
+   */
   checkGl(tag) {
     return dbgCheckGl(this.gl, tag);
   }
 
   // Debug helper: check FBO completeness and tag
+  /**
+   * @param {string} tag
+   */
   checkFBO(tag) {
     dbgCheckFBO(this.gl, tag);
   }
@@ -257,13 +269,26 @@ export class ParticleSystemQuadrupole {
     }
   }
 
+  /**
+   * @param {string} vertexSource
+   * @param {string} fragmentSource
+   * @returns {WebGLProgram}
+   */
   createProgram(vertexSource, fragmentSource) {
     const gl = this.gl;
     
     const vertexShader = this.createShader(gl.VERTEX_SHADER, vertexSource);
     const fragmentShader = this.createShader(gl.FRAGMENT_SHADER, fragmentSource);
     
+    if (!vertexShader || !fragmentShader) {
+      throw new Error('Failed to create shaders');
+    }
+    
     const program = gl.createProgram();
+    if (!program) {
+      throw new Error('Failed to create program');
+    }
+    
     gl.attachShader(program, vertexShader);
     gl.attachShader(program, fragmentShader);
     gl.linkProgram(program);
@@ -280,9 +305,16 @@ export class ParticleSystemQuadrupole {
     return program;
   }
 
+  /**
+   * @param {number} type
+   * @param {string} source
+   * @returns {WebGLShader|null}
+   */
   createShader(type, source) {
     const gl = this.gl;
     const shader = gl.createShader(type);
+    if (!shader) return null;
+    
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
     
@@ -382,13 +414,13 @@ export class ParticleSystemQuadrupole {
           a2,
           layer: i,
           size: currentSize,
-          gridSize: currentGridSize,
-          slicesPerRow: currentSlicesPerRow
+          gridSize: /** @type {number} */ (currentGridSize),
+          slicesPerRow: /** @type {number} */ (currentSlicesPerRow)
         });
         this.levelFramebuffers.push(framebuffer);
 
-        currentGridSize = Math.max(1, Math.floor(currentGridSize / 2));
-        currentSlicesPerRow = Math.max(1, Math.floor(currentSlicesPerRow / 2));
+        currentGridSize = Math.max(1, Math.floor(/** @type {number} */ (currentGridSize) / 2));
+        currentSlicesPerRow = Math.max(1, Math.floor(/** @type {number} */ (currentSlicesPerRow) / 2));
         currentSize = currentGridSize * currentSlicesPerRow;
       }
 
@@ -413,6 +445,10 @@ export class ParticleSystemQuadrupole {
     this.colorTexture = this.createRenderTexture(this.textureWidth, this.textureHeight, gl.RGBA8, gl.UNSIGNED_BYTE);
   }
 
+  /**
+   * @param {number} width
+   * @param {number} height
+   */
   createPingPongTextures(width, height) {
     const gl = this.gl;
     const textures = [];
@@ -447,6 +483,12 @@ export class ParticleSystemQuadrupole {
     };
   }
 
+  /**
+   * @param {number} width
+   * @param {number} height
+   * @param {number} [internalFormat]
+   * @param {number} [type]
+   */
   createRenderTexture(width, height, internalFormat = this.gl.RGBA32F, type = this.gl.FLOAT) {
     const gl = this.gl;
     const texture = gl.createTexture();
@@ -502,7 +544,7 @@ export class ParticleSystemQuadrupole {
     const { positions, velocities, colors } = this.particleData;
     
     // Validate data lengths
-    const expectedLength = this.actualTextureSize * 4;
+    const expectedLength = (this.actualTextureSize || 0) * 4;
     if (positions.length !== expectedLength) {
       throw new Error(`Position data length mismatch: expected ${expectedLength}, got ${positions.length}`);
     }
@@ -517,13 +559,25 @@ export class ParticleSystemQuadrupole {
     const velData = velocities || new Float32Array(expectedLength); // Default to zero velocity
     const colorData = colors || new Uint8Array(expectedLength).fill(255); // Default to white
     
-    this.uploadTextureData(this.positionTextures.textures[0], positions);
-    this.uploadTextureData(this.positionTextures.textures[1], positions);
-    this.uploadTextureData(this.velocityTextures.textures[0], velData);
-    this.uploadTextureData(this.velocityTextures.textures[1], velData);
-    this.uploadTextureData(this.colorTexture.texture, colorData, this.gl.RGBA, this.gl.UNSIGNED_BYTE);
+    if (this.positionTextures) {
+      this.uploadTextureData(this.positionTextures.textures[0], positions);
+      this.uploadTextureData(this.positionTextures.textures[1], positions);
+    }
+    if (this.velocityTextures) {
+      this.uploadTextureData(this.velocityTextures.textures[0], velData);
+      this.uploadTextureData(this.velocityTextures.textures[1], velData);
+    }
+    if (this.colorTexture) {
+      this.uploadTextureData(this.colorTexture.texture, colorData, this.gl.RGBA, this.gl.UNSIGNED_BYTE);
+    }
   }
 
+  /**
+   * @param {WebGLTexture} texture
+   * @param {Float32Array|Uint8Array} data
+   * @param {number} [format]
+   * @param {number} [type]
+   */
   uploadTextureData(texture, data, format = this.gl.RGBA, type = this.gl.FLOAT) {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -580,7 +634,7 @@ export class ParticleSystemQuadrupole {
   step_KDK() {
     // 1) First half-kick using previous frame's forces
     if (this.profiler) this.profiler.begin('kick_1');
-    this.kick(0.5, this.forceTexture);
+    if (this.forceTexture) this.kick(0.5, this.forceTexture);
     if (this.profiler) this.profiler.end();
     
     // 2) Drift positions with full timestep
@@ -593,13 +647,15 @@ export class ParticleSystemQuadrupole {
     
     if (this.profiler) this.profiler.begin('traversal');
     // Store new forces in forceTexturePrev (will become "current" after swap)
-    this.clearForceTexture(this.forceTexturePrev);
-    this.accumulateForces(this.forceTexturePrev);
+    if (this.forceTexturePrev) {
+      this.clearForceTexture(this.forceTexturePrev);
+      this.accumulateForces(this.forceTexturePrev);
+    }
     if (this.profiler) this.profiler.end();
     
     // 4) Second half-kick using newly computed forces
     if (this.profiler) this.profiler.begin('kick_2');
-    this.kick(0.5, this.forceTexturePrev);
+    if (this.forceTexturePrev) this.kick(0.5, this.forceTexturePrev);
     if (this.profiler) this.profiler.end();
     
     // 5) Swap force textures (current becomes previous for next frame)
@@ -611,38 +667,41 @@ export class ParticleSystemQuadrupole {
   /**
    * Kick: update velocities from forces
    * @param {number} dtScale - Fraction of timestep (0.5 for half-kick)
-   * @param {object} forceTex - Force texture to use
+   * @param {{texture: WebGLTexture, framebuffer: WebGLFramebuffer}} forceTex - Force texture to use
    */
   kick(dtScale, forceTex) {
     const gl = this.gl;
-    gl.useProgram(this.programs.velIntegrate);
+    const prog = this.programs.velIntegrate;
+    if (!prog) return;
+    
+    gl.useProgram(prog);
     this.unbindAllTextures();
     
     // Bind target framebuffer (ping-pong)
-    const targetFBO = this.velocityTextures.getTargetFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO);
+    const targetFBO = this.velocityTextures?.getTargetFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO || null);
     gl.viewport(0, 0, this.textureWidth, this.textureHeight);
     
     // Bind current velocity
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.velocityTextures.getCurrentTexture());
-    gl.uniform1i(gl.getUniformLocation(this.programs.velIntegrate, 'u_velocity'), 0);
+    gl.bindTexture(gl.TEXTURE_2D, this.velocityTextures?.getCurrentTexture() || null);
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_velocity'), 0);
     
     // Bind force texture
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, forceTex.texture);
-    gl.uniform1i(gl.getUniformLocation(this.programs.velIntegrate, 'u_force'), 1);
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_force'), 1);
     
     // Bind current position (for mass)
     gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, this.positionTextures.getCurrentTexture());
-    gl.uniform1i(gl.getUniformLocation(this.programs.velIntegrate, 'u_position'), 2);
+    gl.bindTexture(gl.TEXTURE_2D, this.positionTextures?.getCurrentTexture() || null);
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_position'), 2);
     
     // Uniforms (scaled dt)
     const effectiveDt = this.options.dt * dtScale;
-    gl.uniform1f(gl.getUniformLocation(this.programs.velIntegrate, 'u_dt'), effectiveDt);
-    gl.uniform1f(gl.getUniformLocation(this.programs.velIntegrate, 'u_damping'), this.options.damping);
-    gl.uniform1f(gl.getUniformLocation(this.programs.velIntegrate, 'u_maxSpeed'), this.options.maxSpeed);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_dt'), effectiveDt);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_damping'), this.options.damping);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_maxSpeed'), this.options.maxSpeed);
     
     // Draw
     gl.bindVertexArray(this.quadVAO);
@@ -650,7 +709,7 @@ export class ParticleSystemQuadrupole {
     gl.bindVertexArray(null);
     
     // Swap velocity buffers
-    this.velocityTextures.swap();
+    this.velocityTextures?.swap();
     
     this.unbindAllTextures();
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -662,27 +721,30 @@ export class ParticleSystemQuadrupole {
    */
   drift(dtScale) {
     const gl = this.gl;
-    gl.useProgram(this.programs.posIntegrate);
+    const prog = this.programs.posIntegrate;
+    if (!prog) return;
+    
+    gl.useProgram(prog);
     this.unbindAllTextures();
     
     // Bind target framebuffer (ping-pong)
-    const targetFBO = this.positionTextures.getTargetFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO);
+    const targetFBO = this.positionTextures?.getTargetFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO || null);
     gl.viewport(0, 0, this.textureWidth, this.textureHeight);
     
     // Bind current position
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.positionTextures.getCurrentTexture());
-    gl.uniform1i(gl.getUniformLocation(this.programs.posIntegrate, 'u_position'), 0);
+    gl.bindTexture(gl.TEXTURE_2D, this.positionTextures?.getCurrentTexture() || null);
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_position'), 0);
     
     // Bind current velocity
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.velocityTextures.getCurrentTexture());
-    gl.uniform1i(gl.getUniformLocation(this.programs.posIntegrate, 'u_velocity'), 1);
+    gl.bindTexture(gl.TEXTURE_2D, this.velocityTextures?.getCurrentTexture() || null);
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_velocity'), 1);
     
     // Uniforms (scaled dt)
     const effectiveDt = this.options.dt * dtScale;
-    gl.uniform1f(gl.getUniformLocation(this.programs.posIntegrate, 'u_dt'), effectiveDt);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_dt'), effectiveDt);
     
     // Draw
     gl.bindVertexArray(this.quadVAO);
@@ -690,7 +752,7 @@ export class ParticleSystemQuadrupole {
     gl.bindVertexArray(null);
     
     // Swap position buffers
-    this.positionTextures.swap();
+    this.positionTextures?.swap();
     
     this.unbindAllTextures();
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -698,7 +760,7 @@ export class ParticleSystemQuadrupole {
 
   /**
    * Accumulate forces into specified texture
-   * @param {object} forceTex - Target force texture
+   * @param {{texture: WebGLTexture, framebuffer: WebGLFramebuffer}} forceTex - Target force texture
    */
   accumulateForces(forceTex) {
     // Temporarily swap forceTexture to accumulate into target
@@ -746,10 +808,12 @@ export class ParticleSystemQuadrupole {
 
   /**
    * Clear force texture
-   * @param {object} forceTex - Optional force texture to clear (defaults to this.forceTexture)
+   * @param {{texture: WebGLTexture, framebuffer: WebGLFramebuffer}|null} [forceTex] - Optional force texture to clear (defaults to this.forceTexture)
    */
   clearForceTexture(forceTex = null) {
     const target = forceTex || this.forceTexture;
+    if (!target) return;
+    
     const gl = this.gl;
     this.unbindAllTextures();
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
@@ -761,20 +825,20 @@ export class ParticleSystemQuadrupole {
   }
 
   getPositionTexture() {
-    return this.positionTextures.getCurrentTexture();
+    return this.positionTextures?.getCurrentTexture() || null;
   }
   
   getPositionTextures() {
     // Returns BOTH textures for ping-pong
-    return this.positionTextures.textures;
+    return this.positionTextures?.textures || [];
   }
   
   getCurrentIndex() {
-    return this.positionTextures.currentIndex;
+    return this.positionTextures?.currentIndex || 0;
   }
   
   getColorTexture() {
-    return this.colorTexture.texture;
+    return this.colorTexture?.texture || null;
   }
   
   getTextureSize() {

@@ -5,6 +5,9 @@ import { createScene } from 'three-pop';
 import { massSpotMesh } from './mass-spot-mesh.js';
 import { particleSystem } from './particle-system/index.js';
 
+// Import PM/FFT pipeline verifiers (statically, not dynamically)
+import * as pmVerifiers from './particle-system/pm-debug/pm-pipeline-verifiers.js';
+
 // 1. Setup Scene
 const outcome = createScene({
   renderer: { antialias: true },
@@ -49,7 +52,7 @@ let calculationMethod = 'quadrupole'; // Default to quadrupole
 let frameCount = 0;
 let lastProfileUpdate = 0;
 
-/** @type {any} */
+/** @type {ReturnType<import('./particle-system').particleSystem>} */
 let physics;
 /** @type {any} */
 let m;
@@ -145,6 +148,30 @@ console.log('  1. Switch to spectral: setMethod("spectral")');
 console.log('  2. Run quick diagnostic: await physics.pmDebug.quickDiag()');
 console.log('  3. Run all tests: await physics.pmDebug.runAllTests()');
 console.log('  4. Access modules: physics.pmDebug.modules.metrics, etc.');
+
+// Expose PM/FFT verifiers globally for DevTools and Playwright
+/** @type {any} */ (window).pmVerifiers = pmVerifiers;
+
+/** @type {any} */ (window).verifyPM = async () => {
+  if (!physics || !physics._system) {
+    console.error('[PM Verifiers] No particle system found. Switch to spectral method first using setMethod("spectral")');
+    return null;
+  }
+  console.log('[PM Verifiers] Running comprehensive PM/FFT pipeline verification...');
+  const results = await pmVerifiers.runAllPipelineVerifiers(physics._system);
+  console.log('[PM Verifiers] Verification complete. Results:', results);
+  return results;
+};
+
+console.log('\n[PM Verifiers] Pipeline verification available:');
+console.log('  window.verifyPM() - Run all PM/FFT pipeline verifiers');
+console.log('  window.pmVerifiers.verifyDeposit(physics._system) - Verify deposit stage');
+console.log('  window.pmVerifiers.verifyFFTForward(physics._system) - Verify FFT forward');
+console.log('  window.pmVerifiers.verifyPoisson(physics._system) - Verify Poisson solver');
+console.log('  window.pmVerifiers.verifyGradient(physics._system) - Verify gradient stage');
+console.log('  window.pmVerifiers.verifyFFTInverse(physics._system) - Verify FFT inverse');
+console.log('  window.pmVerifiers.verifySampling(physics._system) - Verify force sampling');
+
 
 
 // 5. Count input handler

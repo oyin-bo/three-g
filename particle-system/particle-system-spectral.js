@@ -89,17 +89,24 @@ export class ParticleSystemSpectral {
     this.frameCount = 0;
 
     // GPU resources
+    /** @type {{texture: WebGLTexture, size: number, gridSize: number, slicesPerRow: number}[]} */
     this.levelTextures = [];
+    /** @type {WebGLFramebuffer[]} */
     this.levelFramebuffers = [];
     this.positionTextures = null;
     this.velocityTextures = null;
     this.forceTexture = null;
     this.colorTexture = null;
+    /** @type {{aggregation?: WebGLProgram, reduction?: WebGLProgram, traversal?: WebGLProgram, velIntegrate?: WebGLProgram, posIntegrate?: WebGLProgram}} */
     this.programs = {};
     this.quadVAO = null;
     this.particleVAO = null;
     this.textureWidth = 0;
     this.textureHeight = 0;
+    /** @type {number} */
+    this.octreeGridSize = 0;
+    /** @type {number} */
+    this.octreeSlicesPerRow = 0;
     this.numLevels = 0;
     this.L0Size = 0;
     this._disableFloatBlend = false;
@@ -111,6 +118,7 @@ export class ParticleSystemSpectral {
     // PM/FFT resources (Plan A)
     this.pmGrid = null;
     this.pmGridFramebuffer = null;
+    /** @type {WebGLProgram|null} */
     this.pmDepositProgram = null;
     this.particleCount = options.particleCount;
 
@@ -121,6 +129,7 @@ export class ParticleSystemSpectral {
     }
 
     // PM Debug state (for Plan A debugging)
+    /** @type {any} */
     this._pmDebugState = null;
   }
 
@@ -130,11 +139,17 @@ export class ParticleSystemSpectral {
   }
 
   // Debug helper: log gl errors with a tag
+  /**
+   * @param {string} tag
+   */
   checkGl(tag) {
     return checkGl(this.gl, tag);
   }
 
   // Debug helper: check FBO completeness and tag
+  /**
+   * @param {string} tag
+   */
   checkFBO(tag) {
     checkFBO(this.gl, tag);
   }
@@ -234,52 +249,72 @@ export class ParticleSystemSpectral {
     this.programs.posIntegrate = this.createProgram(fsQuadVert, posIntegrateFrag);
   }
 
+  /**
+   * @param {string} vertexSource
+   * @param {string} fragmentSource
+   * @returns {WebGLProgram}
+   */
   createProgram(vertexSource, fragmentSource) {
     const gl = this.gl;
-
+    
     const vertexShader = this.createShader(gl.VERTEX_SHADER, vertexSource);
     const fragmentShader = this.createShader(gl.FRAGMENT_SHADER, fragmentSource);
-
+    
+    if (!vertexShader || !fragmentShader) {
+      throw new Error('Failed to create shaders');
+    }
+    
     const program = gl.createProgram();
+    if (!program) {
+      throw new Error('Failed to create program');
+    }
+    
     gl.attachShader(program, vertexShader);
     gl.attachShader(program, fragmentShader);
     gl.linkProgram(program);
-
+    
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
       const info = gl.getProgramInfoLog(program);
       gl.deleteProgram(program);
       throw new Error(`Shader program link failed: ${info}`);
     }
-
+    
     gl.deleteShader(vertexShader);
     gl.deleteShader(fragmentShader);
-
+    
     return program;
   }
 
+  /**
+   * @param {number} type
+   * @param {string} source
+   * @returns {WebGLShader|null}
+   */
   createShader(type, source) {
     const gl = this.gl;
     const shader = gl.createShader(type);
+    if (!shader) return null;
+    
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
-
+    
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
       const info = gl.getShaderInfoLog(shader);
       gl.deleteShader(shader);
       throw new Error(`Shader compile failed: ${info}\nSource:\n${source}`);
     }
-
+    
     return shader;
-  }
-
-  createTextures() {
+  }  createTextures() {
     const gl = this.gl;
 
     this.levelTextures = [];
     this.levelFramebuffers = [];
 
     let currentSize = this.L0Size;
+    /** @type {number} */
     let currentGridSize = this.octreeGridSize;
+    /** @type {number} */
     let currentSlicesPerRow = this.octreeSlicesPerRow;
 
     for (let i = 0; i < this.numLevels; i++) {
@@ -315,6 +350,11 @@ export class ParticleSystemSpectral {
     this.colorTexture = this.createRenderTexture(this.textureWidth, this.textureHeight, gl.RGBA8, gl.UNSIGNED_BYTE);
   }
 
+  /**
+   * @param {number} width
+   * @param {number} height
+   * @returns {{textures: (WebGLTexture|null)[], framebuffers: (WebGLFramebuffer|null)[], currentIndex: number, getCurrentTexture: () => WebGLTexture|null, getTargetTexture: () => WebGLTexture|null, getCurrentFramebuffer: () => WebGLFramebuffer|null, getTargetFramebuffer: () => WebGLFramebuffer|null, swap: () => void}}
+   */
   createPingPongTextures(width, height) {
     const gl = this.gl;
     const textures = [];
@@ -344,11 +384,19 @@ export class ParticleSystemSpectral {
       currentIndex: 0,
       getCurrentTexture: function () { return this.textures[this.currentIndex]; },
       getTargetTexture: function () { return this.textures[1 - this.currentIndex]; },
+      getCurrentFramebuffer: function () { return this.framebuffers[this.currentIndex]; },
       getTargetFramebuffer: function () { return this.framebuffers[1 - this.currentIndex]; },
       swap: function () { this.currentIndex = 1 - this.currentIndex; }
     };
   }
 
+  /**
+   * @param {number} width
+   * @param {number} height
+   * @param {number} internalFormat
+   * @param {number} type
+   * @returns {{texture: WebGLTexture|null, framebuffer: WebGLFramebuffer|null}}
+   */
   createRenderTexture(width, height, internalFormat = this.gl.RGBA32F, type = this.gl.FLOAT) {
     const gl = this.gl;
     const texture = gl.createTexture();
@@ -403,6 +451,10 @@ export class ParticleSystemSpectral {
   uploadParticleData() {
     const { positions, velocities, colors } = this.particleData;
 
+    if (!this.actualTextureSize) {
+      throw new Error('actualTextureSize is not initialized');
+    }
+
     // Validate data lengths
     const expectedLength = this.actualTextureSize * 4;
     if (positions.length !== expectedLength) {
@@ -419,13 +471,29 @@ export class ParticleSystemSpectral {
     const velData = velocities || new Float32Array(expectedLength); // Default to zero velocity
     const colorData = colors || new Uint8Array(expectedLength).fill(255); // Default to white
 
-    this.uploadTextureData(this.positionTextures.textures[0], positions);
-    this.uploadTextureData(this.positionTextures.textures[1], positions);
-    this.uploadTextureData(this.velocityTextures.textures[0], velData);
-    this.uploadTextureData(this.velocityTextures.textures[1], velData);
-    this.uploadTextureData(this.colorTexture.texture, colorData, this.gl.RGBA, this.gl.UNSIGNED_BYTE);
+    const pos0 = this.positionTextures?.textures[0];
+    const pos1 = this.positionTextures?.textures[1];
+    const vel0 = this.velocityTextures?.textures[0];
+    const vel1 = this.velocityTextures?.textures[1];
+    const colorTex = this.colorTexture?.texture;
+    
+    if (!pos0 || !pos1 || !vel0 || !vel1 || !colorTex) {
+      throw new Error('Textures not initialized');
+    }
+    
+    this.uploadTextureData(pos0, positions);
+    this.uploadTextureData(pos1, positions);
+    this.uploadTextureData(vel0, velData);
+    this.uploadTextureData(vel1, velData);
+    this.uploadTextureData(colorTex, colorData, this.gl.RGBA, /** @type {number} */ (this.gl.UNSIGNED_BYTE));
   }
 
+  /**
+   * @param {WebGLTexture} texture
+   * @param {Float32Array|Uint8Array} data
+   * @param {number} format
+   * @param {number} type
+   */
   uploadTextureData(texture, data, format = this.gl.RGBA, type = this.gl.FLOAT) {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -535,7 +603,11 @@ export class ParticleSystemSpectral {
   clearForceTexture() {
     const gl = this.gl;
     this.unbindAllTextures();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.forceTexture.framebuffer);
+    const forceFBO = this.forceTexture?.framebuffer;
+    if (!forceFBO) {
+      throw new Error('Force texture framebuffer not initialized');
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, forceFBO);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
     gl.viewport(0, 0, this.textureWidth, this.textureHeight);
     gl.clearColor(0, 0, 0, 0);
@@ -544,20 +616,20 @@ export class ParticleSystemSpectral {
   }
 
   getPositionTexture() {
-    return this.positionTextures.getCurrentTexture();
+    return this.positionTextures?.getCurrentTexture() || null;
   }
 
   getPositionTextures() {
     // Returns BOTH textures for ping-pong
-    return this.positionTextures.textures;
+    return this.positionTextures?.textures || [];
   }
 
   getCurrentIndex() {
-    return this.positionTextures.currentIndex;
+    return this.positionTextures?.currentIndex ?? 0;
   }
 
   getColorTexture() {
-    return this.colorTexture.texture;
+    return this.colorTexture?.texture || null;
   }
 
   getTextureSize() {

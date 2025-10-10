@@ -22,13 +22,46 @@
 export async function checkMassConservation(psys) {
   const gl = psys.gl;
   
-  // Sum mass in L0 grid using pyramid reduction
-  const gridMass = await sumTexture(psys, psys.levelTextures[0].texture, 
-    psys.levelTextures[0].size, psys.levelTextures[0].size, 3); // alpha channel = mass
+  // Get the PM grid
+  const grid = psys.pmGrid;
+  if (!grid) {
+    console.warn('[PM Metrics] PM grid not initialized');
+    return { passed: false, gridMass: 0, particleMass: 0, error: 1.0 };
+  }
   
-  // Sum particle masses (position.w = mass)
-  const particleMass = await sumTexture(psys, psys.positionTextures.getCurrentTexture(),
-    psys.textureWidth, psys.textureHeight, 3); // alpha channel = mass
+  // Read the entire grid texture to CPU and sum mass (alpha channel)
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, grid.texture, 0);
+  
+  const gridSize = grid.size;
+  const gridData = new Float32Array(gridSize * gridSize * 4); // RGBA
+  gl.readPixels(0, 0, gridSize, gridSize, gl.RGBA, gl.FLOAT, gridData);
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  
+  // Sum mass from alpha channel (every 4th element: indices 3, 7, 11, ...)
+  let gridMass = 0.0;
+  for (let i = 0; i < gridSize * gridSize; i++) {
+    gridMass += gridData[i * 4 + 3]; // RGBA: index 3 is alpha (mass)
+  }
+  
+  // Sum particle masses from CPU-side position data
+  // Position data is RGBA format: [x, y, z, mass, x, y, z, mass, ...]
+  // Mass is stored in every 4th element (indices 3, 7, 11, ...)
+  let particleMass = 0.0;
+  const positions = psys.particleData?.positions;
+  
+  if (!positions || !psys.particleCount) {
+    console.warn('[PM Metrics] No particle position data available');
+    return { passed: false, gridMass: gridMass, particleMass: 0, error: 1.0 };
+  }
+  
+  // Sum all mass values (every 4th element starting at index 3)
+  for (let i = 0; i < psys.particleCount; i++) {
+    particleMass += positions[i * 4 + 3]; // positions[3, 7, 11, 15, ...] = mass
+  }
   
   const error = Math.abs(gridMass - particleMass) / Math.max(particleMass, 1e-10);
   const passed = error < 1e-3; // 0.1% tolerance
