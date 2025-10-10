@@ -1,7 +1,21 @@
 // Barnes–Hut traversal to compute force texture
 export function calculateForces(ctx) {
   const gl = ctx.gl;
-  gl.useProgram(ctx.programs.traversal);
+  
+  // Select shader variant based on Plan C and occupancy masking
+  const useQuadrupoles = ctx.options.planC && ctx.programs.traversalQuadrupole;
+  const useOccupancyMasks = useQuadrupoles && ctx._occupancyMasksEnabled && ctx.occupancyMaskArray && ctx.programs.traversalQuadrupoleOccupancy;
+  
+  let program;
+  if (useOccupancyMasks) {
+    program = ctx.programs.traversalQuadrupoleOccupancy;
+  } else if (useQuadrupoles) {
+    program = ctx.programs.traversalQuadrupole;
+  } else {
+    program = ctx.programs.traversal;
+  }
+  
+  gl.useProgram(program);
   // Avoid feedback
   ctx.unbindAllTextures();
 
@@ -15,36 +29,64 @@ export function calculateForces(ctx) {
   // Bind particle positions
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, ctx.positionTextures.getCurrentTexture());
-  gl.uniform1i(gl.getUniformLocation(ctx.programs.traversal, 'u_particlePositions'), 0);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_particlePositions'), 0);
 
-  // Bind quadtree levels
-  for (let i = 0; i < Math.min(8, ctx.numLevels); i++) {
-    gl.activeTexture(gl.TEXTURE1 + i);
-    gl.bindTexture(gl.TEXTURE_2D, ctx.levelTextures[i].texture);
-    const loc = gl.getUniformLocation(ctx.programs.traversal, `u_quadtreeLevel${i}`);
-    if (loc) gl.uniform1i(loc, 1 + i);
+  if (useQuadrupoles) {
+    // Bind texture arrays for Plan C (3 texture arrays instead of 24 individual textures)
+    // This reduces texture unit usage from 25 (exceeds limit) to 4 (within limit)
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, ctx.levelTextureArrayA0);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_levelsA0'), 1);
+    
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, ctx.levelTextureArrayA1);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_levelsA1'), 2);
+    
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, ctx.levelTextureArrayA2);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_levelsA2'), 3);
+    
+    // Bind occupancy masks if enabled
+    if (useOccupancyMasks) {
+      gl.activeTexture(gl.TEXTURE4);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, ctx.occupancyMaskArray);
+      gl.uniform1i(gl.getUniformLocation(program, 'u_occupancyMasks'), 4);
+    }
+    
+    // Enable/disable quadrupole evaluation (for A/B testing)
+    const enableQuadrupoles = ctx.debugFlags.enableQuadrupoles !== false;
+    gl.uniform1i(gl.getUniformLocation(program, 'u_enableQuadrupoles'), enableQuadrupoles ? 1 : 0);
+  } else {
+    // Bind monopole-only levels (standard)
+    for (let i = 0; i < Math.min(8, ctx.numLevels); i++) {
+      gl.activeTexture(gl.TEXTURE1 + i);
+      gl.bindTexture(gl.TEXTURE_2D, ctx.levelTextures[i].texture);
+      const loc = gl.getUniformLocation(program, `u_quadtreeLevel${i}`);
+      if (loc) gl.uniform1i(loc, 1 + i);
+    }
   }
 
-  // Uniforms
-  gl.uniform1f(gl.getUniformLocation(ctx.programs.traversal, 'u_theta'), ctx.options.theta);
-  gl.uniform1i(gl.getUniformLocation(ctx.programs.traversal, 'u_numLevels'), ctx.numLevels);
-  gl.uniform2f(gl.getUniformLocation(ctx.programs.traversal, 'u_texSize'), ctx.textureWidth, ctx.textureHeight);
-  gl.uniform1i(gl.getUniformLocation(ctx.programs.traversal, 'u_particleCount'), ctx.options.particleCount);
-  gl.uniform3f(gl.getUniformLocation(ctx.programs.traversal, 'u_worldMin'), 
+  // Uniforms (use active program, not ctx.programs.traversal)
+  gl.uniform1f(gl.getUniformLocation(program, 'u_theta'), ctx.options.theta);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_numLevels'), ctx.numLevels);
+  gl.uniform2f(gl.getUniformLocation(program, 'u_texSize'), ctx.textureWidth, ctx.textureHeight);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_particleCount'), ctx.options.particleCount);
+  gl.uniform3f(gl.getUniformLocation(program, 'u_worldMin'), 
     ctx.options.worldBounds.min[0], 
     ctx.options.worldBounds.min[1],
     ctx.options.worldBounds.min[2]);
-  gl.uniform3f(gl.getUniformLocation(ctx.programs.traversal, 'u_worldMax'), 
+  gl.uniform3f(gl.getUniformLocation(program, 'u_worldMax'), 
     ctx.options.worldBounds.max[0], 
     ctx.options.worldBounds.max[1],
     ctx.options.worldBounds.max[2]);
-  gl.uniform1f(gl.getUniformLocation(ctx.programs.traversal, 'u_softening'), ctx.options.softening);
-  gl.uniform1f(gl.getUniformLocation(ctx.programs.traversal, 'u_G'), ctx.options.gravityStrength);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_softening'), ctx.options.softening);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_G'), ctx.options.gravityStrength);
 
   // Cell sizes, grid sizes, and slices per row per level
   const cellSizes = new Float32Array(8);
   const gridSizes = new Float32Array(8);
   const slicesPerRow = new Float32Array(8);
+  const maskWidths = useOccupancyMasks ? new Int32Array(8) : null;  // Only if using masks
   
   // World extent (use max dimension for isotropic cell size)
   const worldExtent = [
@@ -64,15 +106,27 @@ export function calculateForces(ctx) {
     gridSizes[i] = currentGridSize;
     slicesPerRow[i] = currentSlicesPerRow;
     
+    // Calculate mask dimensions if using occupancy masking
+    if (maskWidths) {
+      const totalVoxels = currentGridSize * currentGridSize * currentGridSize;
+      const texelsNeeded = Math.ceil(totalVoxels / 32);
+      maskWidths[i] = Math.ceil(Math.sqrt(texelsNeeded));
+    }
+    
     // Next level: halve grid dimensions
     currentGridSize = Math.max(1, Math.floor(currentGridSize / 2));
     currentSlicesPerRow = Math.max(1, Math.floor(currentSlicesPerRow / 2));
     cellSize *= 2.0;
   }
   
-  gl.uniform1fv(gl.getUniformLocation(ctx.programs.traversal, 'u_cellSizes'), cellSizes);
-  gl.uniform1fv(gl.getUniformLocation(ctx.programs.traversal, 'u_gridSizes'), gridSizes);
-  gl.uniform1fv(gl.getUniformLocation(ctx.programs.traversal, 'u_slicesPerRow'), slicesPerRow);
+  gl.uniform1fv(gl.getUniformLocation(program, 'u_cellSizes'), cellSizes);
+  gl.uniform1fv(gl.getUniformLocation(program, 'u_gridSizes'), gridSizes);
+  gl.uniform1fv(gl.getUniformLocation(program, 'u_slicesPerRow'), slicesPerRow);
+  
+  // Only set maskWidths uniform if using occupancy masking
+  if (maskWidths) {
+    gl.uniform1iv(gl.getUniformLocation(program, 'u_maskWidths'), maskWidths);
+  }
 
   // Draw quad
   ctx.checkFBO('calculateForces');

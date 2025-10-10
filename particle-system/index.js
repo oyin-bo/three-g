@@ -1,6 +1,7 @@
 // @ts-check
 
-import { ParticleSystem } from './particle-system.js';
+import { ParticleSystemMonopole } from './particle-system-monopole.js';
+import { ParticleSystemQuadrupole } from './particle-system-quadrupole.js';
 
 /**
  * Create a GPU-accelerated Barnes-Hut N-body simulation
@@ -13,7 +14,8 @@ import { ParticleSystem } from './particle-system.js';
  *    vx?: number, vy?: number, vz?: number,
  *    mass?: number,
  *    rgb?: number }) => void,
- *   theta?: number, // Barnes-Hut threshold, default: 0.5
+ *   method?: 'quadrupole' | 'monopole', // Calculation method: 'quadrupole' (2nd-order, default) or 'monopole' (1st-order)
+ *   theta?: number, // Barnes-Hut threshold, default: 0.65 (higher = faster, lower = more accurate)
  *   gravityStrength?: number, // Force multiplier, default: 0.0003
  *   dt?: number, // Timestep, default: 1/60
  *   softening?: number, // Softening length, default: 0.2
@@ -22,10 +24,11 @@ import { ParticleSystem } from './particle-system.js';
  *   maxAccel?: number, // Maximum acceleration, default: 1.0
  *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
  *   debugSkipQuadtree?: boolean, // Debug option to skip quadtree traversal, default: false
- *   enableProfiling?: boolean // Enable GPU profiling with EXT_disjoint_timer_query_webgl2, default: false
+ *   enableProfiling?: boolean, // Enable GPU profiling with EXT_disjoint_timer_query_webgl2, default: false
+ *   planC?: boolean // DEPRECATED: Use method: 'quadrupole' instead
  * }} options
  */
-export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2, damping = 0.0, maxSpeed = 2.0, maxAccel = 1.0, worldBounds, debugSkipQuadtree = false, enableProfiling = false }) {
+export function particleSystem({ gl, particles, get, method = 'quadrupole', theta = 0.65, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2, damping = 0.0, maxSpeed = 2.0, maxAccel = 1.0, worldBounds, debugSkipQuadtree = false, enableProfiling = false, planC }) {
   // Compute particle count from positions array (RGBA = 4 components per particle)
   const particleCount = particles.length;
 
@@ -56,8 +59,20 @@ export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrengt
     paddedColors.set(colorsBuf);
   }
   
+  // Backward compatibility: support deprecated planC option
+  if (planC !== undefined) {
+    console.warn('[particleSystem] planC option is deprecated. Use method: "quadrupole" instead.');
+    method = planC ? 'quadrupole' : 'monopole';
+  }
+  
+  // Select implementation based on method
+  const useQuadrupole = method === 'quadrupole';
+  const SystemClass = useQuadrupole ? ParticleSystemQuadrupole : ParticleSystemMonopole;
+  
+  console.log(`[particleSystem] Using ${useQuadrupole ? 'Quadrupole (2nd-order moments)' : 'Monopole (1st-order moments)'}`);
+  
   // Create system with particle data
-  const system = new ParticleSystem(gl, {
+  const system = new SystemClass(gl, {
     particleCount,
     particleData: {
       positions: paddedPositions,
@@ -74,7 +89,8 @@ export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrengt
     maxAccel,
     worldBounds,
     debugSkipQuadtree,
-    enableProfiling
+    enableProfiling,
+    planC: useQuadrupole // Internal flag for compatibility
   });
   
   // Initialize asynchronously (internal - user doesn't need to await)
@@ -129,6 +145,20 @@ export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrengt
     // Custom profiling timers (for profiling rendering, etc.)
     beginProfile: (name) => system.beginProfile(name),
     endProfile: () => system.endProfile(),
+
+    // Plan C staging API
+    setDebugMode: (mode) => system.setDebugMode(mode),
+    setDebugFlags: (flags) => system.setDebugFlags(flags),
+    step_Debug: () => system.step_Debug(),
+    
+    // Direct access to debug utilities (advanced usage)
+    _debug: () => {
+      // Lazy-load debug modules only when accessed
+      return import('./pipeline/debug/index.js');
+    },
+    
+    // Direct access to internal ParticleSystem instance (for validators/harnesses)
+    _system: system,
 
     // Cleanup GPU resources
     dispose: () => system.dispose()

@@ -1,11 +1,11 @@
 // @ts-check
 
 /**
- * Plan M: "The Menace" — GPU-side Dynamic Octree
+ * ParticleSystem Monopole - Barnes-Hut with Monopole Approximation
  * 
- * Implements a GPU-resident octree using WebGL2 fragment shaders for large-scale
+ * GPU-resident octree using WebGL2 fragment shaders for large-scale
  * particle simulation with O(N log N) complexity via Barnes-Hut algorithm.
- * Uses isotropic 3D treatment of X/Y/Z axes with Z-slice stacking for 2D texture mapping.
+ * Uses individual 2D textures per level with monopole moments (mass * position).
  */
 
 // Shader sources
@@ -24,12 +24,24 @@ import { runReductionPass as pyramidReduce } from './pipeline/pyramid.js';
 import { calculateForces as pipelineCalculateForces } from './pipeline/traversal.js';
 import { integratePhysics as pipelineIntegratePhysics } from './pipeline/integrator.js';
 import { updateWorldBoundsFromTexture as pipelineUpdateBounds } from './pipeline/bounds.js';
+import { createOccupancyMaskTextures, createOccupancyMaskArray, updateOccupancyMasks } from './pipeline/occupancy.js';
 import { GPUProfiler } from './utils/gpu-profiler.js';
 
-export class ParticleSystem {
+// Common utilities
+import {
+  createRenderTexture,
+  createPingPongTextures,
+  createGeometry,
+  uploadTextureData,
+  createProgram,
+  calculateParticleTextureDimensions,
+  checkWebGL2Support
+} from './utils/common.js';
+
+export class ParticleSystemMonopole {
 
   /**
-   * ParticleSystem constructor
+   * ParticleSystemMonopole constructor
    * @param {WebGL2RenderingContext} gl - WebGL2 rendering context
    * @param {{
    *   particleData: { positions: Float32Array, velocities?: Float32Array|null, colors?: Uint8Array|null },
@@ -47,17 +59,14 @@ export class ParticleSystem {
    * }} options
    */
   constructor(gl, options) {
-    // ONLY dependency: WebGL2 context (reuses existing from THREE.WebGLRenderer)
     this.gl = gl;
     
-    // Validate context (don't create!)
     if (!(gl instanceof WebGL2RenderingContext)) {
-      throw new Error('ParticleSystem requires WebGL2RenderingContext');
+      throw new Error('ParticleSystemMonopole requires WebGL2RenderingContext');
     }
     
-    // Validate and store particle data
     if (!options.particleData) {
-      throw new Error('ParticleSystem requires particleData with positions, velocities, and colors');
+      throw new Error('ParticleSystemMonopole requires particleData with positions, velocities, and colors');
     }
     
     this.particleData = options.particleData;
@@ -78,6 +87,7 @@ export class ParticleSystem {
       maxAccel: options.maxAccel || 1.0,
       debugSkipQuadtree: options.debugSkipQuadtree || false,
       enableProfiling: options.enableProfiling || false,
+      planC: false // Legacy mode never uses Plan C
     };
     
     // Internal state
@@ -85,8 +95,9 @@ export class ParticleSystem {
     this.frameCount = 0;
     
     // GPU resources
-    this.levelTextures = [];
+    this.levelTargets = [];
     this.levelFramebuffers = [];
+    this.levelTextures = [];
     this.positionTextures = null;
     this.velocityTextures = null;
     this.forceTexture = null;
@@ -96,32 +107,36 @@ export class ParticleSystem {
     this.particleVAO = null;
     this.textureWidth = 0;
     this.textureHeight = 0;
+    this.actualTextureSize = 0;
     this.numLevels = 0;
     this.L0Size = 0;
+    this.octreeGridSize = 64;
+    this.octreeSlicesPerRow = 8;
     this._disableFloatBlend = false;
-    this._quadtreeDisabled = false;
-    this._lastBoundsUpdateFrame = -1;
-    // Time (ms) when bounds were last updated via GPU readback
     this._lastBoundsUpdateTime = -1;
     
-    // GPU Profiler (created only if enabled)
+    // Occupancy masks for traversal optimization
+    this.occupancyMasks = null;
+    this.occupancyMaskArray = null;
+    this._occupancyMasksEnabled = false;
+    this._lastOccupancyUpdateFrame = -1;
+    this._occupancyFirstUpdateLogged = false;
+    
+    // GPU Profiler
     this.profiler = null;
     if (this.options.enableProfiling) {
       this.profiler = new GPUProfiler(gl);
     }
   }
 
-  // Debug helper: unbind all textures on commonly used units to avoid feedback loops
   unbindAllTextures() {
     dbgUnbindAllTextures(this.gl);
   }
 
-  // Debug helper: log gl errors with a tag
   checkGl(tag) {
     return dbgCheckGl(this.gl, tag);
   }
 
-  // Debug helper: check FBO completeness and tag
   checkFBO(tag) {
     dbgCheckFBO(this.gl, tag);
   }
@@ -133,7 +148,7 @@ export class ParticleSystem {
       this.calculateTextureDimensions();
       this.createShaderPrograms();
       this.createTextures();
-      this.createGeometry();
+      this.createGeometry_();
       this.uploadParticleData();
       
       // Restore GL state for THREE.js compatibility
@@ -141,7 +156,6 @@ export class ParticleSystem {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.bindTexture(gl.TEXTURE_2D, null);
       gl.bindVertexArray(null);
-      // NOTE: Don't call gl.useProgram(null) - breaks THREE.js shaders!
       gl.disable(gl.BLEND);
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.SCISSOR_TEST);
@@ -155,121 +169,84 @@ export class ParticleSystem {
   }
 
   checkWebGL2Support() {
-    const gl = this.gl;
-    
-    const colorBufferFloat = gl.getExtension('EXT_color_buffer_float');
-    const floatBlend = gl.getExtension('EXT_float_blend');
-    
-    if (!colorBufferFloat) {
-      throw new Error('EXT_color_buffer_float extension not supported');
-    }
-    
-    if (!floatBlend) {
-      console.warn('EXT_float_blend extension not supported: required for additive blending to float textures. Performance may be degraded.');
-      this._disableFloatBlend = true;
-    }
-    
-    const caps = {
-      maxVertexTextureUnits: gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS),
-      maxTextureUnits: gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS),
-      maxDrawBuffers: gl.getParameter(gl.MAX_DRAW_BUFFERS),
-    };
+    const result = checkWebGL2Support(this.gl);
+    this._disableFloatBlend = result.disableFloatBlend;
   }
 
   calculateTextureDimensions() {
     // Octree configuration: 64³ voxels with Z-slice stacking
-    this.octreeGridSize = 64; // 64x64x64 3D grid
-    this.octreeSlicesPerRow = 8; // 8x8 grid of Z-slices
     this.numLevels = 7; // 64 → 32 → 16 → 8 → 4 → 2 → 1
-    
-    // L0 texture size: gridSize * slicesPerRow (64 * 8 = 512)
     this.L0Size = this.octreeGridSize * this.octreeSlicesPerRow;
+    
     const maxTex = this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE);
     if (this.L0Size > maxTex) {
       throw new Error(`Octree L0 size ${this.L0Size} exceeds max texture size ${maxTex}`);
     }
     
-    // Particle texture dimensions (unchanged)
-    this.textureWidth = Math.ceil(Math.sqrt(this.options.particleCount));
-    this.textureHeight = Math.ceil(this.options.particleCount / this.textureWidth);
-    this.actualTextureSize = this.textureWidth * this.textureHeight;
+    // Particle texture dimensions
+    const dims = calculateParticleTextureDimensions(this.options.particleCount);
+    this.textureWidth = dims.width;
+    this.textureHeight = dims.height;
+    this.actualTextureSize = dims.actualSize;
   }
 
   createShaderPrograms() {
     const gl = this.gl;
     
-    this.programs.aggregation = this.createProgram(aggregationVert, aggregationFrag);
-    this.programs.reduction = this.createProgram(fsQuadVert, reductionFrag);
-    this.programs.traversal = this.createProgram(fsQuadVert, traversalFrag);
-    this.programs.velIntegrate = this.createProgram(fsQuadVert, velIntegrateFrag);
-    this.programs.posIntegrate = this.createProgram(fsQuadVert, posIntegrateFrag);
-  }
-
-  createProgram(vertexSource, fragmentSource) {
-    const gl = this.gl;
-    
-    const vertexShader = this.createShader(gl.VERTEX_SHADER, vertexSource);
-    const fragmentShader = this.createShader(gl.FRAGMENT_SHADER, fragmentSource);
-    
-    const program = gl.createProgram();
-    gl.attachShader(program, vertexShader);
-    gl.attachShader(program, fragmentShader);
-    gl.linkProgram(program);
-    
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      const info = gl.getProgramInfoLog(program);
-      gl.deleteProgram(program);
-      throw new Error(`Shader program link failed: ${info}`);
-    }
-    
-    gl.deleteShader(vertexShader);
-    gl.deleteShader(fragmentShader);
-    
-    return program;
-  }
-
-  createShader(type, source) {
-    const gl = this.gl;
-    const shader = gl.createShader(type);
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      const info = gl.getShaderInfoLog(shader);
-      gl.deleteShader(shader);
-      throw new Error(`Shader compile failed: ${info}\nSource:\n${source}`);
-    }
-    
-    return shader;
+    this.programs.aggregation = createProgram(gl, aggregationVert, aggregationFrag);
+    this.programs.reduction = createProgram(gl, fsQuadVert, reductionFrag);
+    this.programs.traversal = createProgram(gl, fsQuadVert, traversalFrag);
+    this.programs.velIntegrate = createProgram(gl, fsQuadVert, velIntegrateFrag);
+    this.programs.posIntegrate = createProgram(gl, fsQuadVert, posIntegrateFrag);
   }
 
   createTextures() {
     const gl = this.gl;
     
-    this.levelTextures = [];
-    this.levelFramebuffers = [];
-    
+    // Create individual 2D textures per level (legacy approach)
     let currentSize = this.L0Size;
     let currentGridSize = this.octreeGridSize;
     let currentSlicesPerRow = this.octreeSlicesPerRow;
     
     for (let i = 0; i < this.numLevels; i++) {
-      const texture = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, texture);
+      // Create three textures per level for MRT (A0, A1, A2)
+      const a0 = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, a0);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       
+      const a1 = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, a1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      
+      const a2 = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, a2);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      
+      // Create framebuffer with MRT attachments
       const framebuffer = gl.createFramebuffer();
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, a0, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, a1, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, a2, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
       
-      this.levelTextures.push({
-        texture, 
-        size: currentSize, 
+      this.levelTargets.push({
+        a0,
+        a1,
+        a2,
+        size: currentSize,
         gridSize: currentGridSize,
         slicesPerRow: currentSlicesPerRow
       });
@@ -280,95 +257,31 @@ export class ParticleSystem {
       currentSize = currentGridSize * currentSlicesPerRow;
     }
     
-    this.positionTextures = this.createPingPongTextures(this.textureWidth, this.textureHeight);
-    this.velocityTextures = this.createPingPongTextures(this.textureWidth, this.textureHeight);
-    this.forceTexture = this.createRenderTexture(this.textureWidth, this.textureHeight);
-    this.colorTexture = this.createRenderTexture(this.textureWidth, this.textureHeight, gl.RGBA8, gl.UNSIGNED_BYTE);
+    // Backward compatibility: levelTextures points to A0 attachment
+    this.levelTextures = this.levelTargets.map(level => ({
+      texture: level.a0,
+      size: level.size,
+      gridSize: level.gridSize,
+      slicesPerRow: level.slicesPerRow
+    }));
+    
+    // Create occupancy masks for traversal optimization
+    this.occupancyMasks = createOccupancyMaskTextures(gl, this.numLevels, this.levelTargets);
+    this.occupancyMaskArray = createOccupancyMaskArray(gl, this.numLevels, this.levelTargets);
+    this._occupancyMasksEnabled = true;
+    console.log('[ParticleSystemMonopole] Occupancy masks created for traversal optimization');
+    
+    // Create particle textures
+    this.positionTextures = createPingPongTextures(gl, this.textureWidth, this.textureHeight);
+    this.velocityTextures = createPingPongTextures(gl, this.textureWidth, this.textureHeight);
+    this.forceTexture = createRenderTexture(gl, this.textureWidth, this.textureHeight);
+    this.colorTexture = createRenderTexture(gl, this.textureWidth, this.textureHeight, gl.RGBA8, gl.UNSIGNED_BYTE);
   }
 
-  createPingPongTextures(width, height) {
-    const gl = this.gl;
-    const textures = [];
-    const framebuffers = [];
-    
-    for (let i = 0; i < 2; i++) {
-      const texture = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      
-      const framebuffer = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-      
-      textures.push(texture);
-      framebuffers.push(framebuffer);
-    }
-    
-    return {
-      textures,
-      framebuffers,
-      currentIndex: 0,
-      getCurrentTexture: function() { return this.textures[this.currentIndex]; },
-      getTargetTexture: function() { return this.textures[1 - this.currentIndex]; },
-      getTargetFramebuffer: function() { return this.framebuffers[1 - this.currentIndex]; },
-      swap: function() { this.currentIndex = 1 - this.currentIndex; }
-    };
-  }
-
-  createRenderTexture(width, height, internalFormat = this.gl.RGBA32F, type = this.gl.FLOAT) {
-    const gl = this.gl;
-    const texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, width, height, 0, gl.RGBA, type, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-    const framebuffer = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-
-    return { texture, framebuffer };
-  }
-
-  createGeometry() {
-    const gl = this.gl;
-    
-    const quadVertices = new Float32Array([
-      -1, -1,  1, -1,  -1, 1,  1, 1
-    ]);
-    
-    this.quadVAO = gl.createVertexArray();
-    gl.bindVertexArray(this.quadVAO);
-    
-    const quadBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    
-    const particleIndices = new Float32Array(this.options.particleCount);
-    for (let i = 0; i < this.options.particleCount; i++) {
-      particleIndices[i] = i;
-    }
-    
-    this.particleVAO = gl.createVertexArray();
-    gl.bindVertexArray(this.particleVAO);
-    
-    const indexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, indexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, particleIndices, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 1, gl.FLOAT, false, 0, 0);
-    
-    gl.bindVertexArray(null);
+  createGeometry_() {
+    const geo = createGeometry(this.gl, this.options.particleCount);
+    this.quadVAO = geo.quadVAO;
+    this.particleVAO = geo.particleVAO;
   }
 
   uploadParticleData() {
@@ -387,52 +300,47 @@ export class ParticleSystem {
     }
     
     // Use provided data or defaults
-    const velData = velocities || new Float32Array(expectedLength); // Default to zero velocity
-    const colorData = colors || new Uint8Array(expectedLength).fill(255); // Default to white
+    const velData = velocities || new Float32Array(expectedLength);
+    const colorData = colors || new Uint8Array(expectedLength).fill(255);
     
-    this.uploadTextureData(this.positionTextures.textures[0], positions);
-    this.uploadTextureData(this.positionTextures.textures[1], positions);
-    this.uploadTextureData(this.velocityTextures.textures[0], velData);
-    this.uploadTextureData(this.velocityTextures.textures[1], velData);
-    this.uploadTextureData(this.colorTexture.texture, colorData, this.gl.RGBA, this.gl.UNSIGNED_BYTE);
-  }
-
-  uploadTextureData(texture, data, format = this.gl.RGBA, type = this.gl.FLOAT) {
     const gl = this.gl;
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, format, type, data);
+    uploadTextureData(gl, this.positionTextures.textures[0], positions, this.textureWidth, this.textureHeight);
+    uploadTextureData(gl, this.positionTextures.textures[1], positions, this.textureWidth, this.textureHeight);
+    uploadTextureData(gl, this.velocityTextures.textures[0], velData, this.textureWidth, this.textureHeight);
+    uploadTextureData(gl, this.velocityTextures.textures[1], velData, this.textureWidth, this.textureHeight);
+    uploadTextureData(gl, this.colorTexture.texture, colorData, this.textureWidth, this.textureHeight, gl.RGBA, gl.UNSIGNED_BYTE);
   }
 
   step() {
     if (!this.isInitialized) return;
     
-    // Update profiler (collect completed query results)
+    // Update profiler
     if (this.profiler) {
       this.profiler.update();
     }
     
-    // Update world bounds from texture infrequently (every 10 seconds) to avoid GPU-CPU stalls.
+    // Update world bounds infrequently (every 10 seconds)
     const now = performance.now ? performance.now() : Date.now();
-    const updateIntervalMs = 10000; // 10 seconds
+    const updateIntervalMs = 10000;
     if (this._lastBoundsUpdateTime < 0 || (now - this._lastBoundsUpdateTime) >= updateIntervalMs) {
       try {
         pipelineUpdateBounds(this, 16);
       } catch (e) {
-        // Swallow errors here to avoid breaking the simulation loop; leave previous bounds in place
         console.warn('updateWorldBoundsFromTexture failed:', e);
       }
       this._lastBoundsUpdateTime = now;
     }
     
+    // Standard Euler integration
     this.buildQuadtree();
     this.clearForceTexture();
     
-    // Profile force calculation
+    // Calculate forces
     if (this.profiler) this.profiler.begin('traversal');
     pipelineCalculateForces(this);
     if (this.profiler) this.profiler.end();
     
-    // Profile integration (split into velocity + position for granularity)
+    // Integrate physics
     pipelineIntegratePhysics(this);
     
     this.frameCount++;
@@ -442,27 +350,33 @@ export class ParticleSystem {
     const gl = this.gl;
     this.unbindAllTextures();
 
-    // Profile octree clear (7 gl.clear() calls)
+    // Clear all MRT attachments
     if (this.profiler) this.profiler.begin('octree_clear');
     for (let i = 0; i < this.numLevels; i++) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.levelFramebuffers[i]);
-      gl.viewport(0, 0, this.levelTextures[i].size, this.levelTextures[i].size);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+      gl.viewport(0, 0, this.levelTargets[i].size, this.levelTargets[i].size);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
     if (this.profiler) this.profiler.end();
     
-    // Profile aggregation
+    // Aggregate particles into L0
     if (this.profiler) this.profiler.begin('aggregation');
     aggregateL0(this);
     if (this.profiler) this.profiler.end();
     
-    // Profile pyramid reduction
+    // Pyramid reduction
     if (this.profiler) this.profiler.begin('pyramid_reduction');
     for (let level = 0; level < this.numLevels - 1; level++) {
       pyramidReduce(this, level, level + 1);
     }
     if (this.profiler) this.profiler.end();
+
+    // Update occupancy masks every 4 frames
+    if (this._occupancyMasksEnabled && this.frameCount % 4 === 0) {
+      updateOccupancyMasks(gl, this);
+    }
   }
 
   clearForceTexture() {
@@ -481,7 +395,6 @@ export class ParticleSystem {
   }
   
   getPositionTextures() {
-    // Returns BOTH textures for ping-pong
     return this.positionTextures.textures;
   }
   
@@ -497,30 +410,43 @@ export class ParticleSystem {
     return { width: this.textureWidth, height: this.textureHeight };
   }
 
-  /**
-   * Begin profiling a custom timer (e.g., for rendering)
-   * @param {string} name - Timer name
-   */
   beginProfile(name) {
     if (this.profiler) {
       this.profiler.begin(name);
     }
   }
 
-  /**
-   * End profiling the current timer
-   */
   endProfile() {
     if (this.profiler) {
       this.profiler.end();
     }
   }
 
-  dispose() {    
+  stats() {
+    if (this.profiler) {
+      return this.profiler.getAll();
+    }
+    return null;
+  }
+
+  dispose() {
     const gl = this.gl;
     
-    this.levelTextures.forEach(level => gl.deleteTexture(level.texture));
+    // Clean up level textures
+    this.levelTargets.forEach(level => {
+      if (level.a0) gl.deleteTexture(level.a0);
+      if (level.a1) gl.deleteTexture(level.a1);
+      if (level.a2) gl.deleteTexture(level.a2);
+    });
     this.levelFramebuffers.forEach(fbo => gl.deleteFramebuffer(fbo));
+    
+    // Clean up occupancy masks
+    if (this.occupancyMasks) {
+      this.occupancyMasks.forEach(tex => gl.deleteTexture(tex));
+    }
+    if (this.occupancyMaskArray) {
+      gl.deleteTexture(this.occupancyMaskArray);
+    }
     
     if (this.positionTextures) {
       this.positionTextures.textures.forEach(tex => gl.deleteTexture(tex));
@@ -544,7 +470,6 @@ export class ParticleSystem {
     if (this.quadVAO) gl.deleteVertexArray(this.quadVAO);
     if (this.particleVAO) gl.deleteVertexArray(this.particleVAO);
     
-    // Clean up profiler
     if (this.profiler) {
       this.profiler.dispose();
       this.profiler = null;

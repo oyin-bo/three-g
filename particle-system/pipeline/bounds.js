@@ -13,8 +13,8 @@ export function updateWorldBoundsFromTexture(ctx, sampleCount = 16) {
   // Some drivers require readBuffer to be set explicitly
   gl.readBuffer(gl.COLOR_ATTACHMENT0);
 
-  let minX = Infinity, minY = Infinity;
-  let maxX = -Infinity, maxY = -Infinity;
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
 
   // Coarse row-based sampling to reduce the number of blocking readPixels calls.
   // Instead of calling readPixels per texel (~N calls), read a full row few times and sample
@@ -44,10 +44,13 @@ export function updateWorldBoundsFromTexture(ctx, sampleCount = 16) {
       if (a > 0.0) { // mass filter
         const X = rowBuf[i + 0];
         const Y = rowBuf[i + 1];
+        const Z = rowBuf[i + 2];
         if (X < minX) minX = X;
         if (Y < minY) minY = Y;
+        if (Z < minZ) minZ = Z;
         if (X > maxX) maxX = X;
         if (Y > maxY) maxY = Y;
+        if (Z > maxZ) maxZ = Z;
         count++;
       }
     }
@@ -56,12 +59,13 @@ export function updateWorldBoundsFromTexture(ctx, sampleCount = 16) {
   // Unbind FBO
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-  if (count > 0 && isFinite(minX) && isFinite(minY) && isFinite(maxX) && isFinite(maxY)) {
+  if (count > 0 && isFinite(minX) && isFinite(minY) && isFinite(minZ) && isFinite(maxX) && isFinite(maxY) && isFinite(maxZ)) {
     const padX = Math.max(0.5, 0.1 * Math.max(1e-6, (maxX - minX)));
     const padY = Math.max(0.5, 0.1 * Math.max(1e-6, (maxY - minY)));
+    const padZ = Math.max(0.5, 0.1 * Math.max(1e-6, (maxZ - minZ)));
     ctx.options.worldBounds = {
-      min: [minX - padX, minY - padY, ctx.options.worldBounds.min[2]],
-      max: [maxX + padX, maxY + padY, ctx.options.worldBounds.max[2]]
+      min: [minX - padX, minY - padY, minZ - padZ],
+      max: [maxX + padX, maxY + padY, maxZ + padZ]
     };
   }
 }

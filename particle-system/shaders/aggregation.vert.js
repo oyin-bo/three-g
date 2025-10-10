@@ -10,7 +10,9 @@ uniform vec3 u_worldMax;         // XYZ world max
 uniform float u_gridSize;        // octree grid size (e.g., 64)
 uniform float u_slicesPerRow;    // slices per row (e.g., 8 for 8x8 grid)
 
-out vec4 v_particleData;
+out vec4 v_particleA0;
+out vec4 v_particleA1;
+out vec4 v_particleA2;
 
 ivec2 indexToCoord(int index, vec2 texSize) {
   int w = int(texSize.x);
@@ -47,7 +49,9 @@ void main() {
     // Cull zero-mass entries
     gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
     gl_PointSize = 0.0;
-    v_particleData = vec4(0.0);
+    v_particleA0 = vec4(0.0);
+    v_particleA1 = vec4(0.0);
+    v_particleA2 = vec4(0.0);
     return;
   }
 
@@ -70,5 +74,13 @@ void main() {
   gl_PointSize = 1.0;
 
   // Weighted sum: store 3D weighted position and mass
-  v_particleData = vec4(pos.xyz * mass, mass);
-}`;
+  vec3 weightedPos = pos.xyz * mass;
+  vec4 a0 = vec4(weightedPos, mass);
+  vec4 a1 = vec4(pos.x * pos.x, pos.y * pos.y, pos.z * pos.z, pos.x * pos.y) * mass;
+  vec4 a2 = vec4(pos.x * pos.z, pos.y * pos.z, 0.0, 0.0) * mass;
+
+  v_particleA0 = a0;
+  v_particleA1 = a1;
+  v_particleA2 = a2;
+}
+`;

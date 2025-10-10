@@ -11,6 +11,7 @@ export function unbindAllTextures(gl, maxUnitsHint = 16) {
   for (let i = 0; i < maxUnits; i++) {
     gl.activeTexture(gl.TEXTURE0 + i);
     gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null); // Also unbind texture arrays (Plan C)
   }
   gl.activeTexture(gl.TEXTURE0);
 }

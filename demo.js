@@ -30,6 +30,8 @@ document.body.appendChild(container);
 // 2. Get UI elements
 const countInput = /** @type {HTMLInputElement} */ (document.getElementById('count-input'));
 const profilingCheckbox = /** @type {HTMLInputElement} */ (document.getElementById('profiling-checkbox'));
+const monopoleRadio = /** @type {HTMLInputElement} */ (document.getElementById('monopole-radio'));
+const quadrupoleRadio = /** @type {HTMLInputElement} */ (document.getElementById('quadrupole-radio'));
 const profilerOutput = /** @type {HTMLDivElement} */ (document.getElementById('profiler-output'));
 
 // 3. Initialize state
@@ -42,6 +44,7 @@ const worldBounds = /** @type {const} */({
 });
 
 let profilingEnabled = false;
+let calculationMethod = 'quadrupole'; // Default to quadrupole
 let frameCount = 0;
 let lastProfileUpdate = 0;
 
@@ -95,6 +98,53 @@ recreateAll();
 /** @type {any} */ (window).m = m;
 /** @type {any} */ (window).physics = physics;
 
+// 8. DevTools helpers for method switching
+/** @type {any} */ (window).setMethod = (method) => {
+  if (method === 'monopole' || method === 'quadrupole') {
+    calculationMethod = method;
+    monopoleRadio.checked = (method === 'monopole');
+    quadrupoleRadio.checked = (method === 'quadrupole');
+    console.log('[Demo] Method toggled via DevTools:', method);
+    recreateAll();
+  } else {
+    console.error('[Demo] Invalid method. Use "monopole" or "quadrupole"');
+  }
+};
+
+// Backward compatibility
+/** @type {any} */ (window).planC = (enabled) => {
+  console.warn('[Demo] window.planC() is deprecated. Use window.setMethod("quadrupole" | "monopole") instead.');
+  window.setMethod(enabled ? 'quadrupole' : 'monopole');
+};
+
+// Debug utilities shortcut
+/** @type {any} */ (window).dbg = {
+  mode: (m) => physics && physics.setDebugMode(m),
+  flags: (f) => physics && physics.setDebugFlags(f),
+  step: () => physics && physics.step_Debug(),
+  _utils: null
+};
+
+// Lazy-load debug utils
+Object.defineProperty(/** @type {any} */ (window).dbg, 'utils', {
+  get() {
+    if (!this._utils && physics) {
+      physics._debug().then(u => {
+        this._utils = u;
+        console.log('[Debug] Utilities loaded. Available functions:', Object.keys(u));
+      });
+    }
+    return this._utils;
+  }
+});
+
+console.log('[Demo] DevTools helpers available:');
+console.log('  window.setMethod("monopole"|"quadrupole") - Switch calculation method');
+console.log('  window.dbg.mode(mode) - Set debug mode');
+console.log('  window.dbg.flags({...}) - Set debug flags');
+console.log('  window.dbg.step() - Execute debug step');
+console.log('  window.dbg.utils - Lazy-load debug utilities');
+
 // 5. Count input handler
 /** @type {*} */
 let inputTimeout;
@@ -114,6 +164,23 @@ profilingCheckbox.onchange = () => {
   profilingEnabled = profilingCheckbox.checked;
   profilerOutput.classList.toggle('visible', profilingEnabled);
   recreateAll();
+};
+
+// 7. Calculation method radio handlers
+monopoleRadio.onchange = () => {
+  if (monopoleRadio.checked) {
+    calculationMethod = 'monopole';
+    console.log('[Demo] Switched to Monopole (1st-order)');
+    recreateAll();
+  }
+};
+
+quadrupoleRadio.onchange = () => {
+  if (quadrupoleRadio.checked) {
+    calculationMethod = 'quadrupole';
+    console.log('[Demo] Switched to Quadrupole (2nd-order)');
+    recreateAll();
+  }
 };
 
 function updateProfilingDisplay() {
@@ -211,7 +278,7 @@ function recreatePhysicsAndMesh() {
   let gravityStrength = Math.random();
   gravityStrength = gravityStrength * 0.0001;
   gravityStrength = gravityStrength * gravityStrength;
-  gravityStrength += 0.00000005;
+  gravityStrength += 0.0000005;
 
   const physics = particleSystem({
     gl,
@@ -238,18 +305,19 @@ function recreatePhysicsAndMesh() {
         ((Math.floor(y * 255) & 0xff) << 8) |
         (Math.floor(z * 255) & 0xff);
     },
-    theta: 0.5,
+    theta: 0.65,  // Optimized for performance (was 0.5)
     gravityStrength,
     softening: 0.2,
     dt: 10 / 60,
-    enableProfiling: profilingEnabled
+    enableProfiling: profilingEnabled,
+    method: calculationMethod
   });
 
   const textureSize = physics.getTextureSize();
   
   const m = massSpotMesh({
     textureMode: true,
-    particleCount: particleCount,
+    particleCount,
     textures: {
       position: physics.getPositionTexture(),
       color: physics.getColorTexture(),
@@ -292,7 +360,7 @@ function createParticles(count, worldBounds) {
     const height = (Math.random() - 0.5) * heightRange;
     let mass = Math.random();
     mass = 1 - Math.pow(mass, 1/20);
-    mass = 0.01 + mass * 0.4;
+    mass = 0.01 + mass * 10;
 
     spots[i] = {
       x: center[0] + Math.cos(angle) * radiusFactor * radiusX,
