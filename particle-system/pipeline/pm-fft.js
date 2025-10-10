@@ -202,6 +202,18 @@ export function forwardFFT(psys) {
   initFFT(psys);
   convertRealToComplex(psys);
   perform3DFFT(psys, false);
+  
+  // Store result as density spectrum for later use
+  // The result is already in psys.pmSpectrum.texture
+  // Create an alias for clarity
+  if (!psys.pmDensitySpectrum) {
+    psys.pmDensitySpectrum = {
+      texture: psys.pmSpectrum.texture,
+      framebuffer: psys.pmSpectrum.framebuffer,
+      gridSize: psys.pmSpectrum.gridSize,
+      textureSize: psys.pmSpectrum.textureSize
+    };
+  }
 }
 
 /**

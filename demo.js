@@ -313,6 +313,7 @@ function recreatePhysicsAndMesh() {
     gravityStrength,
     softening: 0.2,
     dt: 10 / 60,
+    damping: 0.007,
     enableProfiling: profilingEnabled,
     method: /** @type {'quadrupole' | 'monopole' | 'spectral'} */ (calculationMethod)
   });
