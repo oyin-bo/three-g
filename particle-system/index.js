@@ -123,9 +123,10 @@ export function particleSystem({ gl, particles, get, theta = 0.5, gravityStrengt
     particleCount: system.options.particleCount,
     
     // PM/FFT grid access (Plan A)
-    pmGrid: system.pmGrid,
-    pmGridFramebuffer: system.pmGridFramebuffer,
-    pmDepositProgram: system.pmDepositProgram,
+    get pmGrid() { return system.pmGrid; },
+    get pmGridFramebuffer() { return system.pmGridFramebuffer; },
+    get pmDepositProgram() { return system.pmDepositProgram; },
+    get pmForceTexture() { return system.pmForceTexture; }, // CRITICAL: Expose PM force texture for integrator
     gl: gl, // Expose GL context for debugging/testing
     
     // Internal system access for advanced usage

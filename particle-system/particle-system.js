@@ -22,6 +22,8 @@ import { unbindAllTextures, checkGl, checkFBO } from './utils/debug.js';
 import { aggregateL0, pyramidReduce, pipelineUpdateBounds, pipelineCalculateForces, pipelineIntegratePhysics } from './pipeline/index.js';
 import { GPUProfiler } from './utils/gpu-profiler.js';
 import { createPMGrid, createPMGridFramebuffer } from './pm-grid.js';
+import { computePMForcesSync } from './pipeline/pm-pipeline.js';
+import { pmDebugRunSingle, pmDebugBeforeStage, pmDebugAfterStage } from './pm-debug/index.js';
 
 export class ParticleSystem {
 
@@ -175,17 +177,6 @@ export class ParticleSystem {
     const gridSize = 64;
     this.pmGrid = createPMGrid(gl, gridSize);
     this.pmGridFramebuffer = createPMGridFramebuffer(gl, this.pmGrid.texture);
-    
-    // Initialize PM module loading state
-    this._pmModulesLoaded = false;
-    this._pmModules = null;
-    
-    // Preload PM modules asynchronously
-    import('./pipeline/pm-pipeline.js').then(({ preloadPMModules }) => {
-      return preloadPMModules(this);
-    }).catch(err => {
-      console.error('[PM Pipeline] Failed to preload modules:', err);
-    });
     
     console.log('[PM Pipeline] Initialized with', gridSize, '³ grid');
   }
@@ -450,7 +441,6 @@ export class ParticleSystem {
     // Check if PM debug is running in single-stage mode
     if (this._pmDebugState?.config?.enabled && this._pmDebugState.config.singleStageRun) {
       // Run exactly one stage in isolation, skip normal pipeline
-      const { pmDebugRunSingle } = require('./pm-debug/index.js');
       const { stage, source, sink } = this._pmDebugState.config.singleStageRun;
       pmDebugRunSingle(this, stage, source, sink);
       return;
@@ -472,18 +462,7 @@ export class ParticleSystem {
     // Choose force computation method based on Plan A setting
     if (this.options.planA) {
       // Plan A: Use PM/FFT gravitational force computation
-      if (!this._pmModulesLoaded) {
-        console.warn('[PM Pipeline] Modules not loaded, falling back to octree method');
-        this.buildQuadtreeWithDebug();
-        this.clearForceTexture();
-        if (this.profiler) this.profiler.begin('traversal');
-        pipelineCalculateForces(this);
-        if (this.profiler) this.profiler.end();
-      } else {
-        // Run PM/FFT pipeline
-        const { computePMForcesSync } = require('./pipeline/pm-pipeline.js');
-        computePMForcesSync(this);
-      }
+      computePMForcesSync(this);
     } else {
       // Original: Use octree + Barnes-Hut traversal
       this.buildQuadtreeWithDebug();
@@ -502,8 +481,6 @@ export class ParticleSystem {
   buildQuadtreeWithDebug() {
     // Check for debug hooks before/after deposit stage
     if (this._pmDebugState?.config?.enabled) {
-      const { pmDebugBeforeStage, pmDebugAfterStage } = require('./pm-debug/index.js');
-      
       // Before hook for pm_deposit
       const sourceBefore = pmDebugBeforeStage(this, 'pm_deposit');
       if (sourceBefore && sourceBefore.kind !== 'live') {

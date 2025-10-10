@@ -109,6 +109,304 @@ recreateAll();
   }
 };
 
+window.verifyPM = function() {
+  if (!physics || !physics._system) {
+    console.error('[verifyPM] Physics system not initialized');
+    return;
+  }
+  
+  const system = physics._system;
+  const pmForceTexture = system.pmForceTexture;
+  
+  if (!pmForceTexture) {
+    console.error('[verifyPM] pmForceTexture not found');
+    return;
+  }
+  
+  console.log('[verifyPM] Verifying PM force computation...');
+  console.log('[verifyPM] pmForceTexture:', pmForceTexture);
+  console.log('[verifyPM] Texture dimensions:', system.textureWidth, 'x', system.textureHeight);
+  
+  const gl = system.gl;
+  const width = system.textureWidth;
+  const height = system.textureHeight;
+  
+  // Read back force texture
+  const pixels = new Float32Array(width * height * 4);
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pmForceTexture, 0);
+  
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    console.error('[verifyPM] Framebuffer incomplete!');
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return;
+  }
+  
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, pixels);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  
+  // Analyze forces
+  let nonZeroCount = 0;
+  let maxForce = 0;
+  let totalForce = 0;
+  const sampleSize = 100;
+  
+  for (let i = 0; i < sampleSize && i < width * height; i++) {
+    const idx = i * 4;
+    const fx = pixels[idx];
+    const fy = pixels[idx + 1];
+    const fz = pixels[idx + 2];
+    const force = Math.sqrt(fx*fx + fy*fy + fz*fz);
+    
+    if (force > 0.0000001) {
+      nonZeroCount++;
+    }
+    maxForce = Math.max(maxForce, force);
+    totalForce += force;
+  }
+  
+  const avgForce = totalForce / sampleSize;
+  
+  console.log('[verifyPM] === Force Statistics ===');
+  console.log(`[verifyPM] Sampled: ${sampleSize} particles`);
+  console.log(`[verifyPM] Non-zero forces: ${nonZeroCount} (${(nonZeroCount/sampleSize*100).toFixed(1)}%)`);
+  console.log(`[verifyPM] Max force magnitude: ${maxForce.toExponential(3)}`);
+  console.log(`[verifyPM] Mean force magnitude: ${avgForce.toExponential(3)}`);
+  
+  if (nonZeroCount === 0) {
+    console.warn('[verifyPM] ⚠️  ALL FORCES ARE ZERO! PM pipeline may not be working correctly.');
+  } else {
+    console.log('[verifyPM] ✅ Forces detected - PM pipeline appears to be working!');
+  }
+};
+
+// Debug helper: Check force grid textures (before sampling)
+window.verifyForceGrids = function() {
+  if (!physics || !physics._system) {
+    console.error('[verifyForceGrids] Physics system not initialized');
+    return;
+  }
+  
+  const system = physics._system;
+  const forceGrids = system.pmForceGrids;
+  
+  if (!forceGrids) {
+    console.error('[verifyForceGrids] pmForceGrids not found');
+    return;
+  }
+  
+  console.log('[verifyForceGrids] Checking force grid textures...');
+  
+  const gl = system.gl;
+  const texSize = forceGrids.textureSize;
+  
+  // Read back X force grid
+  const pixels = new Float32Array(texSize * texSize * 4);
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, forceGrids.x, 0);
+  
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    console.error('[verifyForceGrids] Framebuffer incomplete!');
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return;
+  }
+  
+  gl.readPixels(0, 0, texSize, texSize, gl.RGBA, gl.FLOAT, pixels);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  
+  // Analyze force grid X
+  let nonZeroCount = 0;
+  let maxVal = 0;
+  let minVal = 0;
+  let totalAbs = 0;
+  const sampleSize = Math.min(1000, texSize * texSize);
+  
+  for (let i = 0; i < sampleSize; i++) {
+    const idx = i * 4;
+    const r = pixels[idx];
+    const g = pixels[idx + 1];
+    const val = Math.sqrt(r*r + g*g); // Complex magnitude
+    
+    if (Math.abs(val) > 0.0000001) {
+      nonZeroCount++;
+    }
+    maxVal = Math.max(maxVal, val);
+    minVal = Math.min(minVal, val);
+    totalAbs += Math.abs(val);
+  }
+  
+  const avgVal = totalAbs / sampleSize;
+  
+  console.log('[verifyForceGrids] === Force Grid X Analysis ===');
+  console.log(`[verifyForceGrids] Texture size: ${texSize}x${texSize}`);
+  console.log(`[verifyForceGrids] Sampled: ${sampleSize} pixels`);
+  console.log(`[verifyForceGrids] Non-zero values: ${nonZeroCount} (${(nonZeroCount/sampleSize*100).toFixed(1)}%)`);
+  console.log(`[verifyForceGrids] Max value: ${maxVal.toExponential(3)}`);
+  console.log(`[verifyForceGrids] Min value: ${minVal.toExponential(3)}`);
+  console.log(`[verifyForceGrids] Mean |value|: ${avgVal.toExponential(3)}`);
+  
+  if (nonZeroCount === 0) {
+    console.warn('[verifyForceGrids] ⚠️  FORCE GRID IS ALL ZEROS! Inverse FFT may have failed.');
+  } else {
+    console.log('[verifyForceGrids] ✅ Force grid contains data.');
+  }
+};
+
+/**
+ * Verify force spectra (BEFORE inverse FFT) to check gradient computation
+ */
+window.verifyForceSpectra = function() {
+  if (!physics || !physics._system) {
+    console.error('[verifyForceSpectra] Physics system not initialized');
+    return;
+  }
+  
+  const system = physics._system;
+  const forceSpectra = system.pmForceSpectrum;
+  
+  if (!forceSpectra) {
+    console.error('[verifyForceSpectra] pmForceSpectrum not found');
+    return;
+  }
+  
+  console.log('[verifyForceSpectra] Checking force spectrum textures...');
+  
+  const gl = system.gl;
+  const texSize = forceSpectra.textureSize;
+  
+  // Read back X force spectrum (complex: RG = real, imaginary)
+  const pixels = new Float32Array(texSize * texSize * 4);
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, forceSpectra.x.texture, 0);
+  
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    console.error('[verifyForceSpectra] Framebuffer incomplete!');
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return;
+  }
+  
+  gl.readPixels(0, 0, texSize, texSize, gl.RGBA, gl.FLOAT, pixels);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  
+  // Analyze force spectrum X
+  let nonZeroCount = 0;
+  let maxMag = 0;
+  let minMag = Infinity;
+  let totalMag = 0;
+  const sampleSize = Math.min(1000, texSize * texSize);
+  
+  for (let i = 0; i < sampleSize; i++) {
+    const idx = i * 4;
+    const real = pixels[idx];
+    const imag = pixels[idx + 1];
+    const magnitude = Math.sqrt(real*real + imag*imag); // Complex magnitude
+    
+    if (magnitude > 1e-10) {
+      nonZeroCount++;
+    }
+    maxMag = Math.max(maxMag, magnitude);
+    minMag = Math.min(minMag, magnitude);
+    totalMag += magnitude;
+  }
+  
+  const avgMag = totalMag / sampleSize;
+  
+  console.log('[verifyForceSpectra] === Force Spectrum X Analysis ===');
+  console.log(`[verifyForceSpectra] Texture size: ${texSize}x${texSize}`);
+  console.log(`[verifyForceSpectra] Sampled: ${sampleSize} pixels`);
+  console.log(`[verifyForceSpectra] Non-zero values: ${nonZeroCount} (${(nonZeroCount/sampleSize*100).toFixed(1)}%)`);
+  console.log(`[verifyForceSpectra] Max magnitude: ${maxMag.toExponential(3)}`);
+  console.log(`[verifyForceSpectra] Min magnitude: ${minMag === Infinity ? 0 : minMag.toExponential(3)}`);
+  console.log(`[verifyForceSpectra] Mean magnitude: ${avgMag.toExponential(3)}`);
+  
+  if (nonZeroCount === 0) {
+    console.warn('[verifyForceSpectra] ⚠️  FORCE SPECTRUM IS ALL ZEROS! Gradient computation may have failed.');
+  } else {
+    console.log('[verifyForceSpectra] ✅ Force spectrum contains data.');
+  }
+};
+
+// @ts-ignore
+window.verifyPotentialSpectrum = function() {
+  console.log('[verifyPotentialSpectrum] Checking potential spectrum texture...');
+  
+  const psys = window.physics.particleSystem;
+  if (!psys || !psys.pmPotentialSpectrum || !psys.pmPotentialSpectrum.texture) {
+    console.error('[verifyPotentialSpectrum] ❌ pmPotentialSpectrum not found!');
+    return;
+  }
+
+  const gl = psys.renderer.getContext();
+  const tex = psys.pmPotentialSpectrum.texture;
+  const width = psys.pmPotentialSpectrum.textureSize;
+  const height = psys.pmPotentialSpectrum.textureSize;
+
+  // Create framebuffer to read texture
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+
+  // Check framebuffer status
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    console.error(`[verifyPotentialSpectrum] ❌ Framebuffer not complete: ${status}`);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fb);
+    return;
+  }
+
+  // Read pixels (RG32F format - complex numbers)
+  const pixels = new Float32Array(width * height * 4); // RGBA even though texture is RG
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, pixels);
+
+  // Cleanup
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fb);
+
+  // Sample 1000 random pixels and compute complex magnitude
+  const sampleCount = 1000;
+  let nonZeroCount = 0;
+  let maxMag = 0;
+  let minMag = Infinity;
+  let sumMag = 0;
+
+  for (let i = 0; i < sampleCount; i++) {
+    const idx = Math.floor(Math.random() * (width * height)) * 4;
+    const real = pixels[idx];     // R channel - real part
+    const imag = pixels[idx + 1]; // G channel - imaginary part
+    
+    // Complex magnitude: |z| = sqrt(real² + imag²)
+    const mag = Math.sqrt(real * real + imag * imag);
+    
+    if (mag > 1e-10) {
+      nonZeroCount++;
+      maxMag = Math.max(maxMag, mag);
+      minMag = Math.min(minMag, mag);
+    }
+    sumMag += mag;
+  }
+
+  const avgMag = sumMag / sampleCount;
+  const nonZeroPercent = (nonZeroCount / sampleCount * 100).toFixed(1);
+
+  console.log('[verifyPotentialSpectrum] === Potential Spectrum Analysis ===');
+  console.log(`[verifyPotentialSpectrum] Texture size: ${width}x${height}`);
+  console.log(`[verifyPotentialSpectrum] Sampled: ${sampleCount} pixels`);
+  console.log(`[verifyPotentialSpectrum] Non-zero values: ${nonZeroCount} (${nonZeroPercent}%)`);
+  console.log(`[verifyPotentialSpectrum] Max magnitude: ${maxMag.toExponential(3)}`);
+  console.log(`[verifyPotentialSpectrum] Min magnitude: ${minMag === Infinity ? 0 : minMag.toExponential(3)}`);
+  console.log(`[verifyPotentialSpectrum] Mean magnitude: ${avgMag.toExponential(3)}`);
+
+  if (nonZeroCount === 0) {
+    console.warn('[verifyPotentialSpectrum] ⚠️ POTENTIAL SPECTRUM IS ALL ZEROS! Poisson solver may have failed.');
+  } else {
+    console.log('[verifyPotentialSpectrum] ✅ Potential spectrum contains data.');
+  }
+};
+
 // 5. Count input handler
 /** @type {*} */
 let inputTimeout;
@@ -232,7 +530,7 @@ function recreatePhysicsAndMesh() {
   let gravityStrength = Math.random();
   gravityStrength = gravityStrength * 0.0001;
   gravityStrength = gravityStrength * gravityStrength;
-  gravityStrength += 0.00000005;
+  gravityStrength += 0.00005;
 
   const physics = particleSystem({
     gl,
@@ -313,8 +611,8 @@ function createParticles(count, worldBounds) {
     const radiusFactor = Math.pow(Math.random(), 1/7);
     const height = (Math.random() - 0.5) * heightRange;
     let mass = Math.random();
-    mass = 1 - Math.pow(mass, 1/20);
-    mass = 0.01 + mass * 0.4;
+    mass = 1 - Math.pow(mass, 1 / 20);
+    mass = 0.01 + mass * 10;
 
     spots[i] = {
       x: center[0] + Math.cos(angle) * radiusFactor * radiusX,

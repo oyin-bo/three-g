@@ -149,8 +149,13 @@ export function sampleForcesAtParticles(psys, forceGridX, forceGridY, forceGridZ
   gl.uniform3f(gl.getUniformLocation(program, 'u_worldMin'), bounds.min[0], bounds.min[1], bounds.min[2]);
   gl.uniform3f(gl.getUniformLocation(program, 'u_worldMax'), bounds.max[0], bounds.max[1], bounds.max[2]);
   
+  // Bind particle VAO for gl_VertexID-based rendering
+  gl.bindVertexArray(psys.particleVAO);
+  
   // Draw all particles as points
   gl.drawArrays(gl.POINTS, 0, psys.particleCount);
+  
+  gl.bindVertexArray(null);
   
   gl.finish(); // Ensure completion
   
