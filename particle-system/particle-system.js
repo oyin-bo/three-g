@@ -27,6 +27,7 @@ import { calculateForces as pipelineCalculateForces } from './pipeline/traversal
 import { integratePhysics as pipelineIntegratePhysics } from './pipeline/integrator.js';
 
 import { updateWorldBoundsFromTexture as pipelineUpdateBounds } from './pipeline/bounds.js';
+import { createOccupancyMaskTextures, createOccupancyMaskArray, updateOccupancyMasks } from './pipeline/occupancy.js';
 import { GPUProfiler } from './utils/gpu-profiler.js';
 
 // Debug staging modules (Plan C)
@@ -119,6 +120,13 @@ export class ParticleSystem {
     this._lastBoundsUpdateFrame = -1;
     // Time (ms) when bounds were last updated via GPU readback
     this._lastBoundsUpdateTime = -1;
+    
+    // Occupancy masks for traversal optimization (optional)
+    this.occupancyMasks = null;  // Array of textures (one per level)
+    this.occupancyMaskArray = null;  // 2D texture array (Plan C)
+    this._occupancyMasksEnabled = false;
+    this._lastOccupancyUpdateFrame = -1;
+    this._occupancyFirstUpdateLogged = false;
     
     // GPU Profiler (created only if enabled)
     this.profiler = null;
@@ -227,11 +235,17 @@ export class ParticleSystem {
     // Compile Plan C specific shaders if enabled
     if (this.options.planC) {
       try {
-        this.programs.traversalQuadrupole = this.createProgram(fsQuadVert, traversalQuadrupoleFrag);
-        console.log('[ParticleSystem] Quadrupole traversal shader compiled successfully');
+        // Compile both variants: with and without occupancy masking
+        const quadShaderNoMask = traversalQuadrupoleFrag(false);
+        const quadShaderWithMask = traversalQuadrupoleFrag(true);
+        
+        this.programs.traversalQuadrupole = this.createProgram(fsQuadVert, quadShaderNoMask);
+        this.programs.traversalQuadrupoleOccupancy = this.createProgram(fsQuadVert, quadShaderWithMask);
+        console.log('[ParticleSystem] Quadrupole traversal shaders compiled (2 variants)');
       } catch (e) {
         console.warn('[ParticleSystem] Failed to compile quadrupole shader, falling back to monopole:', e);
         this.programs.traversalQuadrupole = null;
+        this.programs.traversalQuadrupoleOccupancy = null;
       }
       
       try {
@@ -450,6 +464,12 @@ export class ParticleSystem {
         gridSize: level.gridSize,
         slicesPerRow: level.slicesPerRow
       }));
+      
+      // Create occupancy masks for traversal optimization
+      this.occupancyMasks = createOccupancyMaskTextures(gl, this.numLevels, this.levelTargets);
+      this.occupancyMaskArray = createOccupancyMaskArray(gl, this.numLevels, this.levelTargets);
+      this._occupancyMasksEnabled = true;  // ENABLED - using shader variants
+      console.log('[ParticleSystem] Occupancy masks created for traversal optimization');
     }
     
     this.positionTextures = this.createPingPongTextures(this.textureWidth, this.textureHeight);
@@ -782,6 +802,12 @@ export class ParticleSystem {
       pyramidReduce(this, level, level + 1);
     }
     if (this.profiler) this.profiler.end();
+
+    // Update occupancy masks for traversal optimization
+    // Only update every 4 frames to reduce CPU readback overhead
+    if (this._occupancyMasksEnabled && this.frameCount % 4 === 0) {
+      updateOccupancyMasks(this.gl, this);
+    }
   }
 
   /**

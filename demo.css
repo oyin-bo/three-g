@@ -16,6 +16,7 @@ html, body {
   border-radius: 0.5em;
   padding: 0.5em 1em;
   z-index: 100;
+  /* text-shadow: 0 0 14px black, 1px 0 14px black; */
 }
 
 #count-input {

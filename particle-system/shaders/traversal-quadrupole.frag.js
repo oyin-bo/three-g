@@ -1,9 +1,16 @@
-export default /* glsl */ `#version 300 es
+/**
+ * Generate traversal shader with optional occupancy masking
+ * @param {boolean} useOccupancyMasks - Whether to include occupancy masking code
+ * @returns {string} GLSL shader source
+ */
+export default function generateTraversalShader(useOccupancyMasks = false) {
+  return /* glsl */ `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
 
 // 3D isotropic octree traversal with Barnes-Hut + Quadrupoles (Plan C)
 // Implements improved MAC and quadrupole force evaluation
+// Occupancy masking: ${useOccupancyMasks ? 'ENABLED' : 'DISABLED'}
 
 uniform sampler2D u_particlePositions;
 
@@ -14,12 +21,19 @@ uniform sampler2DArray u_levelsA0;  // A0: monopole moments [Σ(m·x), Σ(m·y),
 uniform sampler2DArray u_levelsA1;  // A1: second moments [Σ(m·x²), Σ(m·y²), Σ(m·z²), Σ(m·xy)]
 uniform sampler2DArray u_levelsA2;  // A2: second moments [Σ(m·xz), Σ(m·yz), 0, 0]
 
+${useOccupancyMasks ? `
+// Occupancy mask textures (binary masks indicating which voxels contain mass)
+// Packed: 32 voxels per texel (RGBA8 = 4 channels × 8 bits = 32 bits)
+uniform sampler2DArray u_occupancyMasks;  // One mask per level
+` : ''}
+
 uniform float u_theta;
 uniform int u_numLevels;
 uniform float u_cellSizes[8];
 uniform float u_gridSizes[8];
 uniform float u_slicesPerRow[8];
-uniform vec2 u_texSize;
+${useOccupancyMasks ? `uniform int u_maskWidths[8];  // Occupancy mask texture width per level
+` : ''}uniform vec2 u_texSize;
 uniform int u_particleCount;
 uniform vec3 u_worldMin;
 uniform vec3 u_worldMax;
@@ -43,6 +57,40 @@ vec4 sampleLevelA1(int level, ivec2 coord) {
 vec4 sampleLevelA2(int level, ivec2 coord) {
   return texelFetch(u_levelsA2, ivec3(coord, level), 0);
 }
+
+${useOccupancyMasks ? `
+// Check if voxel contains mass using occupancy mask
+// Returns true if the voxel is occupied, false if empty
+bool isVoxelOccupied(int level, ivec3 voxelCoord) {
+  int gridSize = int(u_gridSizes[level]);
+  int maskWidth = u_maskWidths[level];
+  
+  // Calculate voxel index in 3D grid
+  int voxelIndex = voxelCoord.z * gridSize * gridSize + voxelCoord.y * gridSize + voxelCoord.x;
+  
+  // Calculate texel position (32 voxels per texel)
+  int texelIndex = voxelIndex / 32;
+  int bitInTexel = voxelIndex % 32;
+  
+  int maskX = texelIndex % maskWidth;
+  int maskY = texelIndex / maskWidth;
+  
+  // Fetch packed mask data
+  vec4 maskData = texelFetch(u_occupancyMasks, ivec3(maskX, maskY, level), 0);
+  
+  // Unpack bit from appropriate channel
+  int channelIndex = bitInTexel / 8;  // 0-3 (R, G, B, A)
+  int bitInChannel = bitInTexel % 8;   // 0-7
+  
+  // Extract byte value (0-255)
+  float channelValue = maskData[channelIndex] * 255.0;
+  int byteValue = int(channelValue + 0.5);
+  
+  // Check if bit is set
+  int bitMask = 1 << bitInChannel;
+  return (byteValue & bitMask) != 0;
+}
+` : ''}
 
 // Convert 3D voxel coordinate to 2D texture coordinate
 ivec2 voxelToTexel(ivec3 voxelCoord, float gridSize, float slicesPerRow) {
@@ -188,7 +236,12 @@ void main() {
             continue;
           }
           
-          ivec2 texCoord = voxelToTexel(neighborVoxel, gridSize, slicesPerRow);
+${useOccupancyMasks ? `          // Occupancy mask check (skip empty voxels)
+          if (!isVoxelOccupied(level, neighborVoxel)) {
+            continue;
+          }
+          
+` : ''}          ivec2 texCoord = voxelToTexel(neighborVoxel, gridSize, slicesPerRow);
           vec4 A0 = sampleLevelA0(level, texCoord);
           float M0 = A0.a;
           if (M0 <= 0.0) { continue; }
@@ -242,7 +295,12 @@ void main() {
             continue;
           }
           
-          ivec2 texCoord = voxelToTexel(neighborVoxel, gridSize, slicesPerRow);
+${useOccupancyMasks ? `          // Occupancy mask check for L0
+          if (!isVoxelOccupied(0, neighborVoxel)) {
+            continue;
+          }
+          
+` : ''}          ivec2 texCoord = voxelToTexel(neighborVoxel, gridSize, slicesPerRow);
           vec4 A0 = sampleLevelA0(0, texCoord);
           float M0 = A0.a;
           if (M0 <= 0.0) { continue; }
@@ -259,3 +317,4 @@ void main() {
 
   fragColor = vec4(totalForce * u_G, 0.0);
 }`;
+}

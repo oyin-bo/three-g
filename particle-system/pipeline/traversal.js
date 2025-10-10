@@ -2,9 +2,18 @@
 export function calculateForces(ctx) {
   const gl = ctx.gl;
   
-  // Use quadrupole shader if Plan C enabled, otherwise use standard monopole shader
+  // Select shader variant based on Plan C and occupancy masking
   const useQuadrupoles = ctx.options.planC && ctx.programs.traversalQuadrupole;
-  const program = useQuadrupoles ? ctx.programs.traversalQuadrupole : ctx.programs.traversal;
+  const useOccupancyMasks = useQuadrupoles && ctx._occupancyMasksEnabled && ctx.occupancyMaskArray && ctx.programs.traversalQuadrupoleOccupancy;
+  
+  let program;
+  if (useOccupancyMasks) {
+    program = ctx.programs.traversalQuadrupoleOccupancy;
+  } else if (useQuadrupoles) {
+    program = ctx.programs.traversalQuadrupole;
+  } else {
+    program = ctx.programs.traversal;
+  }
   
   gl.useProgram(program);
   // Avoid feedback
@@ -36,6 +45,13 @@ export function calculateForces(ctx) {
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, ctx.levelTextureArrayA2);
     gl.uniform1i(gl.getUniformLocation(program, 'u_levelsA2'), 3);
+    
+    // Bind occupancy masks if enabled
+    if (useOccupancyMasks) {
+      gl.activeTexture(gl.TEXTURE4);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, ctx.occupancyMaskArray);
+      gl.uniform1i(gl.getUniformLocation(program, 'u_occupancyMasks'), 4);
+    }
     
     // Enable/disable quadrupole evaluation (for A/B testing)
     const enableQuadrupoles = ctx.debugFlags.enableQuadrupoles !== false;
@@ -70,6 +86,7 @@ export function calculateForces(ctx) {
   const cellSizes = new Float32Array(8);
   const gridSizes = new Float32Array(8);
   const slicesPerRow = new Float32Array(8);
+  const maskWidths = useOccupancyMasks ? new Int32Array(8) : null;  // Only if using masks
   
   // World extent (use max dimension for isotropic cell size)
   const worldExtent = [
@@ -89,6 +106,13 @@ export function calculateForces(ctx) {
     gridSizes[i] = currentGridSize;
     slicesPerRow[i] = currentSlicesPerRow;
     
+    // Calculate mask dimensions if using occupancy masking
+    if (maskWidths) {
+      const totalVoxels = currentGridSize * currentGridSize * currentGridSize;
+      const texelsNeeded = Math.ceil(totalVoxels / 32);
+      maskWidths[i] = Math.ceil(Math.sqrt(texelsNeeded));
+    }
+    
     // Next level: halve grid dimensions
     currentGridSize = Math.max(1, Math.floor(currentGridSize / 2));
     currentSlicesPerRow = Math.max(1, Math.floor(currentSlicesPerRow / 2));
@@ -98,6 +122,11 @@ export function calculateForces(ctx) {
   gl.uniform1fv(gl.getUniformLocation(program, 'u_cellSizes'), cellSizes);
   gl.uniform1fv(gl.getUniformLocation(program, 'u_gridSizes'), gridSizes);
   gl.uniform1fv(gl.getUniformLocation(program, 'u_slicesPerRow'), slicesPerRow);
+  
+  // Only set maskWidths uniform if using occupancy masking
+  if (maskWidths) {
+    gl.uniform1iv(gl.getUniformLocation(program, 'u_maskWidths'), maskWidths);
+  }
 
   // Draw quad
   ctx.checkFBO('calculateForces');
