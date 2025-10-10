@@ -145,7 +145,21 @@ vec3 computeQuadrupoleAcceleration(
   float trS = S[0][0] + S[1][1] + S[2][2];
   mat3 Q = 3.0 * S - trS * mat3(1.0);
   
-  // Compute monopole + quadrupole acceleration
+  // Compute distance
+  float d = length(r);
+  
+  // MODIFIED GRAVITY: threshold-based repulsion to prevent collapse
+  // If d >= eps: normal attraction (monopole + quadrupole)
+  // If d < eps: linear repulsion to prevent particles from collapsing
+  if (d < eps) {
+    // Linear repulsion inside softening radius
+    // Force magnitude increases linearly as particles get closer
+    float repulsionStrength = M0 / (eps * eps * eps);
+    vec3 rNorm = r / max(d, 1e-10);
+    return -repulsionStrength * d * rNorm;  // Negative sign = repulsion
+  }
+  
+  // Normal attraction outside softening radius
   float r2 = dot(r, r) + eps * eps;
   float invR = inversesqrt(r2);
   float invR3 = invR * invR * invR;
@@ -205,10 +219,16 @@ void main() {
             vec3 M1 = A0.rgb;
             totalForce += computeQuadrupoleAcceleration(r, M0, M1, A1, A2, eps);
           } else {
-            // Monopole only (fallback)
-            float r2 = dot(r, r) + eps * eps;
-            float invR3 = pow(r2, -1.5);
-            totalForce += M0 * r * invR3;
+            // Monopole only (fallback) with threshold repulsion
+            if (d < eps) {
+              float repulsionStrength = M0 / (eps * eps * eps);
+              vec3 rNorm = r / max(d, 1e-10);
+              totalForce -= repulsionStrength * d * rNorm;
+            } else {
+              float r2 = dot(r, r) + eps * eps;
+              float invR3 = pow(r2, -1.5);
+              totalForce += M0 * r * invR3;
+            }
           }
         }
         // If not accepted, rely on finer levels
@@ -307,9 +327,18 @@ ${useOccupancyMasks ? `          // Occupancy mask check for L0
           
           vec3 com = A0.rgb / max(M0, 1e-6);
           vec3 r = com - myPos;
-          float r2 = dot(r, r) + eps * eps;
-          float invR3 = pow(r2, -1.5);
-          totalForce += M0 * r * invR3;
+          float d = length(r);
+          
+          // Threshold-based gravity for L0 near-field
+          if (d < eps) {
+            float repulsionStrength = M0 / (eps * eps * eps);
+            vec3 rNorm = r / max(d, 1e-10);
+            totalForce -= repulsionStrength * d * rNorm;
+          } else {
+            float r2 = dot(r, r) + eps * eps;
+            float invR3 = pow(r2, -1.5);
+            totalForce += M0 * r * invR3;
+          }
         }
       }
     }

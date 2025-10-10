@@ -146,6 +146,27 @@ export class ParticleSystemQuadrupole {
     this.debugMode = 'FullPipeline';
     /** @type {{useKDK?: boolean}} */
     this.debugFlags = {};
+    
+    // Force modules (external forces like springs, edges)
+    /** @type {Array<{init: Function, accumulate: Function, dispose: Function}>} */
+    this.externalForceModules = [];
+    
+    // Laplacian force module for graph edges (auto-created if edges provided)
+    this.laplacianModule = null;
+    // @ts-ignore - edges/springStrength added to options type above
+    if (options.edges) {
+      // Lazy import to avoid circular dependencies
+      // @ts-ignore - module exports constructor function
+      const LaplacianForceModule = require('./force-modules/laplacian-force-module.js');
+      // @ts-ignore - edges/springStrength
+      this.laplacianModule = new LaplacianForceModule(gl, {
+        // @ts-ignore
+        edges: options.edges,
+        // @ts-ignore
+        springStrength: options.springStrength || 0.001
+      });
+      this.externalForceModules.push(this.laplacianModule);
+    }
   }
 
   // Debug helper: unbind all textures on commonly used units to avoid feedback loops
@@ -178,6 +199,16 @@ export class ParticleSystemQuadrupole {
       this.createTextures();
       this.createGeometry();
       this.uploadParticleData();
+      
+      // Initialize external force modules
+      for (const module of this.externalForceModules) {
+        module.init({
+          positionTextures: this.positionTextures.textures,
+          textureWidth: this.textureWidth,
+          textureHeight: this.textureHeight,
+          particleCount: this.options.particleCount
+        });
+      }
       
       // Restore GL state for THREE.js compatibility
       const gl = this.gl;
@@ -767,9 +798,53 @@ export class ParticleSystemQuadrupole {
     const originalForce = this.forceTexture;
     this.forceTexture = forceTex;
     
+    // Accumulate gravity forces from quadtree traversal
     pipelineCalculateForces(this);
     
+    // Accumulate forces from external modules (e.g., springs, edges)
+    for (const module of this.externalForceModules) {
+      module.accumulate({
+        targetForce: forceTex,
+        positionTextures: this.positionTextures.textures,
+        currentIndex: this.positionTextures.currentIndex,
+        textureWidth: this.textureWidth,
+        textureHeight: this.textureHeight,
+        particleCount: this.options.particleCount
+      });
+    }
+    
     this.forceTexture = originalForce;
+  }
+  
+  /**
+   * Register an external force module
+   * @param {{init: Function, accumulate: Function, dispose: Function}} module
+   */
+  registerForceModule(module) {
+    if (!this.externalForceModules.includes(module)) {
+      this.externalForceModules.push(module);
+      // Initialize module if particle system is already initialized
+      if (this.isInitialized) {
+        module.init({
+          positionTextures: this.positionTextures.textures,
+          textureWidth: this.textureWidth,
+          textureHeight: this.textureHeight,
+          particleCount: this.options.particleCount
+        });
+      }
+    }
+  }
+  
+  /**
+   * Unregister an external force module
+   * @param {{init: Function, accumulate: Function, dispose: Function}} module
+   */
+  unregisterForceModule(module) {
+    const index = this.externalForceModules.indexOf(module);
+    if (index !== -1) {
+      this.externalForceModules.splice(index, 1);
+      module.dispose();
+    }
   }
 
   buildQuadtree() {
@@ -978,6 +1053,13 @@ export class ParticleSystemQuadrupole {
       this.profiler.dispose();
       this.profiler = null;
     }
+    
+    // Dispose external force modules
+    for (const module of this.externalForceModules) {
+      module.dispose();
+    }
+    this.externalForceModules = [];
+    this.laplacianModule = null;
     
     this.isInitialized = false;
   }
