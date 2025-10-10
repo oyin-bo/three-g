@@ -111,12 +111,6 @@ recreateAll();
   }
 };
 
-// Backward compatibility
-/** @type {any} */ (window).planC = (enabled) => {
-  console.warn('[Demo] window.planC() is deprecated. Use window.setMethod("quadrupole" | "monopole") instead.');
-  window.setMethod(enabled ? 'quadrupole' : 'monopole');
-};
-
 // Debug utilities shortcut
 /** @type {any} */ (window).dbg = {
   mode: (m) => physics && physics.setDebugMode(m),

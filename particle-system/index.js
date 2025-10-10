@@ -2,9 +2,10 @@
 
 import { ParticleSystemMonopole } from './particle-system-monopole.js';
 import { ParticleSystemQuadrupole } from './particle-system-quadrupole.js';
+import { ParticleSystemSpectral } from './particle-system-spectral.js';
 
 /**
- * Create a GPU-accelerated Barnes-Hut N-body simulation
+ * Create a GPU-accelerated N-body simulation
  * 
  * @param {{
  *   gl: WebGL2RenderingContext,
@@ -14,21 +15,42 @@ import { ParticleSystemQuadrupole } from './particle-system-quadrupole.js';
  *    vx?: number, vy?: number, vz?: number,
  *    mass?: number,
  *    rgb?: number }) => void,
- *   method?: 'quadrupole' | 'monopole', // Calculation method: 'quadrupole' (2nd-order, default) or 'monopole' (1st-order)
- *   theta?: number, // Barnes-Hut threshold, default: 0.65 (higher = faster, lower = more accurate)
- *   gravityStrength?: number, // Force multiplier, default: 0.0003
- *   dt?: number, // Timestep, default: 1/60
- *   softening?: number, // Softening length, default: 0.2
- *   damping?: number, // Velocity damping, default: 0.0
- *   maxSpeed?: number, // Maximum velocity, default: 2.0
- *   maxAccel?: number, // Maximum acceleration, default: 1.0
+ *   method?: 'quadrupole' | 'monopole' | 'spectral',
+ *   theta?: number,
+ *   gravityStrength?: number,
+ *   dt?: number,
+ *   softening?: number,
+ *   damping?: number,
+ *   maxSpeed?: number,
+ *   maxAccel?: number,
  *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
- *   debugSkipQuadtree?: boolean, // Debug option to skip quadtree traversal, default: false
- *   enableProfiling?: boolean, // Enable GPU profiling with EXT_disjoint_timer_query_webgl2, default: false
- *   planC?: boolean // DEPRECATED: Use method: 'quadrupole' instead
+ *   debugSkipQuadtree?: boolean,
+ *   enableProfiling?: boolean
  * }} options
+ * 
+ * Method options:
+ * - 'quadrupole' (default): 2nd-order Barnes-Hut tree-code
+ * - 'monopole': 1st-order Barnes-Hut tree-code
+ * - 'spectral': Particle-Mesh with FFT (spectral method)
+ * 
+ * @returns Particle system API
  */
-export function particleSystem({ gl, particles, get, method = 'quadrupole', theta = 0.65, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2, damping = 0.0, maxSpeed = 2.0, maxAccel = 1.0, worldBounds, debugSkipQuadtree = false, enableProfiling = false, planC }) {
+export function particleSystem({
+  gl,
+  particles,
+  get,
+  method = 'quadrupole',
+  theta,
+  gravityStrength = 0.0003,
+  dt = 1 / 60,
+  softening = 0.2,
+  damping = 0.0,
+  maxSpeed = 2.0,
+  maxAccel = 1.0,
+  worldBounds,
+  debugSkipQuadtree = false,
+  enableProfiling = false
+}) {
   // Compute particle count from positions array (RGBA = 4 components per particle)
   const particleCount = particles.length;
 
@@ -58,21 +80,27 @@ export function particleSystem({ gl, particles, get, method = 'quadrupole', thet
     paddedColors = new Uint8Array(actualTextureSize * 4);
     paddedColors.set(colorsBuf);
   }
-  
-  // Backward compatibility: map old planC option to new method option
-  if (opts.planC !== undefined) {
-    console.warn(
-      '[particleSystem] planC option is deprecated. Use method: "quadrupole" or "monopole" instead. ' +
-      'planC will be removed in a future version.'
-    );
-    opts.method = opts.planC ? 'quadrupole' : 'monopole';
-  }
 
-  const method = opts.method || 'quadrupole';
-  
   // Select implementation based on method
-  const useQuadrupole = method === 'quadrupole';
-  const SystemClass = useQuadrupole ? ParticleSystemQuadrupole : ParticleSystemMonopole;
+  let SystemClass;
+  let defaultTheta;
+  let usePlanA = false;
+  
+  if (method === 'spectral') {
+    SystemClass = ParticleSystemSpectral;
+    defaultTheta = 0.5;
+    usePlanA = true;
+  } else if (method === 'monopole') {
+    SystemClass = ParticleSystemMonopole;
+    defaultTheta = 0.65;
+  } else {
+    // Default to quadrupole
+    SystemClass = ParticleSystemQuadrupole;
+    defaultTheta = 0.65;
+  }
+  
+  // Use provided theta or default for the selected method
+  const effectiveTheta = theta !== undefined ? theta : defaultTheta;
   
   // Create system with particle data
   const system = new SystemClass(gl, {
@@ -83,7 +111,7 @@ export function particleSystem({ gl, particles, get, method = 'quadrupole', thet
       colors: paddedColors
     },
     // Pass through all configuration parameters
-    theta,
+    theta: effectiveTheta,
     gravityStrength,
     dt,
     softening,
@@ -93,18 +121,19 @@ export function particleSystem({ gl, particles, get, method = 'quadrupole', thet
     worldBounds,
     debugSkipQuadtree,
     enableProfiling,
-    planC: useQuadrupole // Internal flag for compatibility
+    planA: usePlanA // For spectral method
   });
   
   // Initialize asynchronously (internal - user doesn't need to await)
   system.init();
   
-  return {
+  // Base API common to all methods
+  const baseAPI = {
     // Async initialization (wait for system to be ready)
     ready: async () => {
       // System is initialized synchronously in init(), but we provide this
       // for compatibility with async initialization patterns
-      return new Promise((resolve) => {
+      return new Promise((/** @type {any} */ resolve) => {
         if (system.isInitialized) {
           resolve();
         } else {
@@ -146,26 +175,57 @@ export function particleSystem({ gl, particles, get, method = 'quadrupole', thet
     },
     
     // Custom profiling timers (for profiling rendering, etc.)
-    beginProfile: (name) => system.beginProfile(name),
+    beginProfile: (/** @type {any} */ name) => system.beginProfile(name),
     endProfile: () => system.endProfile(),
 
-    // Plan C staging API
-    setDebugMode: (mode) => system.setDebugMode(mode),
-    setDebugFlags: (flags) => system.setDebugFlags(flags),
-    step_Debug: () => system.step_Debug(),
-    
-    // Direct access to debug utilities (advanced usage)
-    _debug: () => {
-      // Lazy-load debug modules only when accessed
-      return import('./pipeline/debug/index.js');
-    },
-    
     // Direct access to internal ParticleSystem instance (for validators/harnesses)
     _system: system,
 
     // Cleanup GPU resources
     dispose: () => system.dispose()
   };
+  
+  // Add method-specific APIs
+  if (method === 'spectral') {
+    // Spectral method (PM/FFT) specific exports
+    const spectralSystem = /** @type {any} */ (system);
+    return {
+      ...baseAPI,
+      // PM/FFT grid access
+      get pmGrid() { return spectralSystem.pmGrid; },
+      get pmGridFramebuffer() { return spectralSystem.pmGridFramebuffer; },
+      get pmDepositProgram() { return spectralSystem.pmDepositProgram; },
+      get pmForceTexture() { return spectralSystem.forceTexture; }, // PM force texture
+      gl: gl, // Expose GL context for debugging/testing
+    };
+  } else {
+    // Tree-code methods (monopole/quadrupole) specific exports
+    return {
+      ...baseAPI,
+      // Plan C staging API (only available for tree-code methods)
+      setDebugMode: (/** @type {any} */ mode) => {
+        if ('setDebugMode' in system) {
+          return (/** @type {any} */ (system)).setDebugMode(mode);
+        }
+      },
+      setDebugFlags: (/** @type {any} */ flags) => {
+        if ('setDebugFlags' in system) {
+          return (/** @type {any} */ (system)).setDebugFlags(flags);
+        }
+      },
+      step_Debug: () => {
+        if ('step_Debug' in system) {
+          return (/** @type {any} */ (system)).step_Debug();
+        }
+      },
+      
+      // Direct access to debug utilities (advanced usage)
+      _debug: () => {
+        // Lazy-load debug modules only when accessed
+        return import('./pipeline/debug/index.js');
+      },
+    };
+  }
 
   function populateBuffers() {
     const dummy = {

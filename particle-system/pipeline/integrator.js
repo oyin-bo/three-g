@@ -24,7 +24,9 @@ export function integratePhysics(ctx) {
   gl.uniform1i(gl.getUniformLocation(ctx.programs.velIntegrate, 'u_velocity'), 0);
 
   gl.activeTexture(gl.TEXTURE1);
-  gl.bindTexture(gl.TEXTURE_2D, ctx.forceTexture.texture);
+  // Use PM forces if Plan A is enabled and available, otherwise use octree forces
+  const forceTexture = (ctx.options.planA && ctx.pmForceTexture) ? ctx.pmForceTexture : ctx.forceTexture.texture;
+  gl.bindTexture(gl.TEXTURE_2D, forceTexture);
   gl.uniform1i(gl.getUniformLocation(ctx.programs.velIntegrate, 'u_force'), 1);
 
   gl.uniform2f(gl.getUniformLocation(ctx.programs.velIntegrate, 'u_texSize'), ctx.textureWidth, ctx.textureHeight);
