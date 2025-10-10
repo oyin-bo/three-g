@@ -58,8 +58,7 @@ export class ParticleSystemQuadrupole {
    *   maxSpeed?: number,
    *   maxAccel?: number,
    *   debugSkipQuadtree?: boolean,
-   *   enableProfiling?: boolean,
-   *   planC?: boolean
+   *   enableProfiling?: boolean
    * }} options
    */
   constructor(gl, options) {
@@ -93,8 +92,7 @@ export class ParticleSystemQuadrupole {
       maxSpeed: options.maxSpeed || 2.0,
       maxAccel: options.maxAccel || 1.0,
       debugSkipQuadtree: options.debugSkipQuadtree || false,
-      enableProfiling: options.enableProfiling || false,
-      planC: options.planC || false
+      enableProfiling: options.enableProfiling || false
     };
     
     // Internal state
@@ -110,6 +108,10 @@ export class ParticleSystemQuadrupole {
     this.forceTexturePrev = null; // For KDK integrator (Plan C)
     this.colorTexture = null;
     this.programs = {};
+    
+    // Quadrupole-specific: always use texture arrays and KDK integrator option
+    this.textureMode = 'array';  // Always use texture arrays for quadrupole
+    
     this.quadVAO = null;
     this.particleVAO = null;
     this.textureWidth = 0;
@@ -233,29 +235,25 @@ export class ParticleSystemQuadrupole {
     this.programs.velIntegrate = this.createProgram(fsQuadVert, velIntegrateFrag);
     this.programs.posIntegrate = this.createProgram(fsQuadVert, posIntegrateFrag);
     
-    // Compile Plan C specific shaders if enabled
-    if (this.options.planC) {
-      try {
-        // Compile both variants: with and without occupancy masking
-        const quadShaderNoMask = traversalQuadrupoleFrag(false);
-        const quadShaderWithMask = traversalQuadrupoleFrag(true);
-        
-        this.programs.traversalQuadrupole = this.createProgram(fsQuadVert, quadShaderNoMask);
-        this.programs.traversalQuadrupoleOccupancy = this.createProgram(fsQuadVert, quadShaderWithMask);
-        console.log('[ParticleSystem] Quadrupole traversal shaders compiled (2 variants)');
-      } catch (e) {
-        console.warn('[ParticleSystem] Failed to compile quadrupole shader, falling back to monopole:', e);
-        this.programs.traversalQuadrupole = null;
-        this.programs.traversalQuadrupoleOccupancy = null;
-      }
+    // Compile quadrupole traversal shaders (always enabled for this class)
+    try {
+      // Compile both variants: with and without occupancy masking
+      const quadShaderNoMask = traversalQuadrupoleFrag(false);
+      const quadShaderWithMask = traversalQuadrupoleFrag(true);
       
-      try {
-        this.programs.reductionArray = this.createProgram(fsQuadVert, reductionArrayFrag);
-        console.log('[ParticleSystem] Reduction array shader compiled successfully');
-      } catch (e) {
-        console.warn('[ParticleSystem] Failed to compile reduction array shader, falling back to standard:', e);
-        this.programs.reductionArray = null;
-      }
+      this.programs.traversalQuadrupole = this.createProgram(fsQuadVert, quadShaderNoMask);
+      this.programs.traversalQuadrupoleOccupancy = this.createProgram(fsQuadVert, quadShaderWithMask);
+    } catch (e) {
+      console.warn('[ParticleSystem] Failed to compile quadrupole shader, falling back to monopole:', e);
+      this.programs.traversalQuadrupole = null;
+      this.programs.traversalQuadrupoleOccupancy = null;
+    }
+    
+    try {
+      this.programs.reductionArray = this.createProgram(fsQuadVert, reductionArrayFrag);
+    } catch (e) {
+      console.warn('[ParticleSystem] Failed to compile reduction array shader, falling back to standard:', e);
+      this.programs.reductionArray = null;
     }
   }
 
@@ -303,13 +301,12 @@ export class ParticleSystemQuadrupole {
     this.levelTargets = [];
     this.levelFramebuffers = [];
     
-    // For Plan C: use texture arrays instead of individual textures
+    // Quadrupole mode: use texture arrays instead of individual textures
     // This reduces texture unit usage from 24 (8 levels × 3 attachments) to 3
-    if (this.options.planC) {
-      // Create 3 texture arrays (A0, A1, A2), each with 8 layers for 8 levels
-      const maxSize = this.L0Size; // Use L0 size for all layers
-      
-      // Create A0 array (monopole moments: Σ(m·x), Σ(m·y), Σ(m·z), Σm)
+    // Create 3 texture arrays (A0, A1, A2), each with 8 layers for 8 levels
+    const maxSize = this.L0Size; // Use L0 size for all layers
+    
+    // Create A0 array (monopole moments: Σ(m·x), Σ(m·y), Σ(m·z), Σm)
       this.levelTextureArrayA0 = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA0);
       gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA32F, maxSize, maxSize, 8, 0, gl.RGBA, gl.FLOAT, null);
@@ -403,75 +400,11 @@ export class ParticleSystemQuadrupole {
         slicesPerRow: level.slicesPerRow,
         layer: level.layer
       }));
-    } else {
-      // Original non-Plan-C path: individual textures per level
-      let currentSize = this.L0Size;
-      let currentGridSize = this.octreeGridSize;
-      let currentSlicesPerRow = this.octreeSlicesPerRow;
-      
-      for (let i = 0; i < this.numLevels; i++) {
-        // Create three textures per level for MRT (A0, A1, A2)
-        const a0 = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, a0);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        
-        const a1 = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, a1);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        
-        const a2 = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, a2);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, currentSize, currentSize, 0, gl.RGBA, gl.FLOAT, null);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        
-        // Create framebuffer with MRT attachments
-        const framebuffer = gl.createFramebuffer();
-        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, a0, 0);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, a1, 0);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, a2, 0);
-        gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
-        
-        this.levelTargets.push({
-          a0,
-          a1,
-          a2,
-          size: currentSize,
-          gridSize: currentGridSize,
-          slicesPerRow: currentSlicesPerRow
-        });
-        this.levelFramebuffers.push(framebuffer);
-        
-        currentGridSize = Math.max(1, Math.floor(currentGridSize / 2));
-        currentSlicesPerRow = Math.max(1, Math.floor(currentSlicesPerRow / 2));
-        currentSize = currentGridSize * currentSlicesPerRow;
-      }
-      
-      // Backward compatibility: levelTextures points to A0 attachment
-      this.levelTextures = this.levelTargets.map(level => ({
-        texture: level.a0,
-        size: level.size,
-        gridSize: level.gridSize,
-        slicesPerRow: level.slicesPerRow
-      }));
-      
-      // Create occupancy masks for traversal optimization
-      this.occupancyMasks = createOccupancyMaskTextures(gl, this.numLevels, this.levelTargets);
-      this.occupancyMaskArray = createOccupancyMaskArray(gl, this.numLevels, this.levelTargets);
-      this._occupancyMasksEnabled = true;  // ENABLED - using shader variants
-      console.log('[ParticleSystem] Occupancy masks created for traversal optimization');
-    }
+    
+    // Create occupancy masks for traversal optimization
+    this.occupancyMasks = createOccupancyMaskTextures(gl, this.numLevels, this.levelTargets);
+    this.occupancyMaskArray = createOccupancyMaskArray(gl, this.numLevels, this.levelTargets);
+    this._occupancyMasksEnabled = true;  // ENABLED - using shader variants
     
     this.positionTextures = this.createPingPongTextures(this.textureWidth, this.textureHeight);
     this.velocityTextures = this.createPingPongTextures(this.textureWidth, this.textureHeight);
@@ -618,8 +551,8 @@ export class ParticleSystemQuadrupole {
       this._lastBoundsUpdateTime = now;
     }
     
-    // Use KDK integrator if Plan C enabled and useKDK flag is set
-    const useKDK = this.options.planC && this.debugFlags.useKDK;
+    // Use KDK integrator if useKDK flag is set
+    const useKDK = this.debugFlags.useKDK || false;
     
     if (useKDK) {
       this.step_KDK();

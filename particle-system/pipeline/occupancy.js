@@ -172,13 +172,6 @@ export function updateOccupancyMasks(gl, ctx) {
       }
     }
     
-    // Debug: Log occupancy stats for first update
-    if (level === 0 && !ctx._occupancyFirstUpdateLogged) {
-      console.log(`[Occupancy] L0: ${occupiedCount}/${totalVoxels} voxels occupied (${(100*occupiedCount/totalVoxels).toFixed(1)}%)`);
-      console.log(`[Occupancy] Mask dimensions: ${maskWidth}x${maskHeight}, ${maskData.length} bytes`);
-      ctx._occupancyFirstUpdateLogged = true;
-    }
-    
     // Upload mask to GPU
     if (ctx.occupancyMaskArray) {
       // Upload to texture array (Plan C)

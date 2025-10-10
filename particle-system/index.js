@@ -59,17 +59,20 @@ export function particleSystem({ gl, particles, get, method = 'quadrupole', thet
     paddedColors.set(colorsBuf);
   }
   
-  // Backward compatibility: support deprecated planC option
-  if (planC !== undefined) {
-    console.warn('[particleSystem] planC option is deprecated. Use method: "quadrupole" instead.');
-    method = planC ? 'quadrupole' : 'monopole';
+  // Backward compatibility: map old planC option to new method option
+  if (opts.planC !== undefined) {
+    console.warn(
+      '[particleSystem] planC option is deprecated. Use method: "quadrupole" or "monopole" instead. ' +
+      'planC will be removed in a future version.'
+    );
+    opts.method = opts.planC ? 'quadrupole' : 'monopole';
   }
+
+  const method = opts.method || 'quadrupole';
   
   // Select implementation based on method
   const useQuadrupole = method === 'quadrupole';
   const SystemClass = useQuadrupole ? ParticleSystemQuadrupole : ParticleSystemMonopole;
-  
-  console.log(`[particleSystem] Using ${useQuadrupole ? 'Quadrupole (2nd-order moments)' : 'Monopole (1st-order moments)'}`);
   
   // Create system with particle data
   const system = new SystemClass(gl, {

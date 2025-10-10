@@ -24,7 +24,6 @@ import { runReductionPass as pyramidReduce } from './pipeline/pyramid.js';
 import { calculateForces as pipelineCalculateForces } from './pipeline/traversal.js';
 import { integratePhysics as pipelineIntegratePhysics } from './pipeline/integrator.js';
 import { updateWorldBoundsFromTexture as pipelineUpdateBounds } from './pipeline/bounds.js';
-import { createOccupancyMaskTextures, createOccupancyMaskArray, updateOccupancyMasks } from './pipeline/occupancy.js';
 import { GPUProfiler } from './utils/gpu-profiler.js';
 
 // Common utilities
@@ -86,8 +85,7 @@ export class ParticleSystemMonopole {
       maxSpeed: options.maxSpeed || 2.0,
       maxAccel: options.maxAccel || 1.0,
       debugSkipQuadtree: options.debugSkipQuadtree || false,
-      enableProfiling: options.enableProfiling || false,
-      planC: false // Legacy mode never uses Plan C
+      enableProfiling: options.enableProfiling || false
     };
     
     // Internal state
@@ -114,13 +112,6 @@ export class ParticleSystemMonopole {
     this.octreeSlicesPerRow = 8;
     this._disableFloatBlend = false;
     this._lastBoundsUpdateTime = -1;
-    
-    // Occupancy masks for traversal optimization
-    this.occupancyMasks = null;
-    this.occupancyMaskArray = null;
-    this._occupancyMasksEnabled = false;
-    this._lastOccupancyUpdateFrame = -1;
-    this._occupancyFirstUpdateLogged = false;
     
     // GPU Profiler
     this.profiler = null;
@@ -265,12 +256,6 @@ export class ParticleSystemMonopole {
       slicesPerRow: level.slicesPerRow
     }));
     
-    // Create occupancy masks for traversal optimization
-    this.occupancyMasks = createOccupancyMaskTextures(gl, this.numLevels, this.levelTargets);
-    this.occupancyMaskArray = createOccupancyMaskArray(gl, this.numLevels, this.levelTargets);
-    this._occupancyMasksEnabled = true;
-    console.log('[ParticleSystemMonopole] Occupancy masks created for traversal optimization');
-    
     // Create particle textures
     this.positionTextures = createPingPongTextures(gl, this.textureWidth, this.textureHeight);
     this.velocityTextures = createPingPongTextures(gl, this.textureWidth, this.textureHeight);
@@ -372,11 +357,6 @@ export class ParticleSystemMonopole {
       pyramidReduce(this, level, level + 1);
     }
     if (this.profiler) this.profiler.end();
-
-    // Update occupancy masks every 4 frames
-    if (this._occupancyMasksEnabled && this.frameCount % 4 === 0) {
-      updateOccupancyMasks(gl, this);
-    }
   }
 
   clearForceTexture() {
@@ -439,14 +419,6 @@ export class ParticleSystemMonopole {
       if (level.a2) gl.deleteTexture(level.a2);
     });
     this.levelFramebuffers.forEach(fbo => gl.deleteFramebuffer(fbo));
-    
-    // Clean up occupancy masks
-    if (this.occupancyMasks) {
-      this.occupancyMasks.forEach(tex => gl.deleteTexture(tex));
-    }
-    if (this.occupancyMaskArray) {
-      gl.deleteTexture(this.occupancyMaskArray);
-    }
     
     if (this.positionTextures) {
       this.positionTextures.textures.forEach(tex => gl.deleteTexture(tex));
