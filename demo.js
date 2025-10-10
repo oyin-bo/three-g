@@ -30,7 +30,8 @@ document.body.appendChild(container);
 // 2. Get UI elements
 const countInput = /** @type {HTMLInputElement} */ (document.getElementById('count-input'));
 const profilingCheckbox = /** @type {HTMLInputElement} */ (document.getElementById('profiling-checkbox'));
-const plancCheckbox = /** @type {HTMLInputElement} */ (document.getElementById('planc-checkbox'));
+const monopoleRadio = /** @type {HTMLInputElement} */ (document.getElementById('monopole-radio'));
+const quadrupoleRadio = /** @type {HTMLInputElement} */ (document.getElementById('quadrupole-radio'));
 const profilerOutput = /** @type {HTMLDivElement} */ (document.getElementById('profiler-output'));
 
 // 3. Initialize state
@@ -43,7 +44,7 @@ const worldBounds = /** @type {const} */({
 });
 
 let profilingEnabled = false;
-let plancEnabled = false;
+let calculationMethod = 'quadrupole'; // Default to quadrupole
 let frameCount = 0;
 let lastProfileUpdate = 0;
 
@@ -97,12 +98,23 @@ recreateAll();
 /** @type {any} */ (window).m = m;
 /** @type {any} */ (window).physics = physics;
 
-// 8. DevTools helpers for Plan C debugging
+// 8. DevTools helpers for method switching
+/** @type {any} */ (window).setMethod = (method) => {
+  if (method === 'monopole' || method === 'quadrupole') {
+    calculationMethod = method;
+    monopoleRadio.checked = (method === 'monopole');
+    quadrupoleRadio.checked = (method === 'quadrupole');
+    console.log('[Demo] Method toggled via DevTools:', method);
+    recreateAll();
+  } else {
+    console.error('[Demo] Invalid method. Use "monopole" or "quadrupole"');
+  }
+};
+
+// Backward compatibility
 /** @type {any} */ (window).planC = (enabled) => {
-  plancEnabled = enabled;
-  plancCheckbox.checked = enabled;
-  console.log('[Demo] Plan C toggled via DevTools:', enabled ? 'ON' : 'OFF');
-  recreateAll();
+  console.warn('[Demo] window.planC() is deprecated. Use window.setMethod("quadrupole" | "monopole") instead.');
+  window.setMethod(enabled ? 'quadrupole' : 'monopole');
 };
 
 // Debug utilities shortcut
@@ -127,7 +139,7 @@ Object.defineProperty(/** @type {any} */ (window).dbg, 'utils', {
 });
 
 console.log('[Demo] DevTools helpers available:');
-console.log('  window.planC(true/false) - Toggle Plan C');
+console.log('  window.setMethod("monopole"|"quadrupole") - Switch calculation method');
 console.log('  window.dbg.mode(mode) - Set debug mode');
 console.log('  window.dbg.flags({...}) - Set debug flags');
 console.log('  window.dbg.step() - Execute debug step');
@@ -154,11 +166,21 @@ profilingCheckbox.onchange = () => {
   recreateAll();
 };
 
-// 7. Plan C checkbox handler
-plancCheckbox.onchange = () => {
-  plancEnabled = plancCheckbox.checked;
-  console.log('[Demo] Plan C', plancEnabled ? 'enabled' : 'disabled');
-  recreateAll();
+// 7. Calculation method radio handlers
+monopoleRadio.onchange = () => {
+  if (monopoleRadio.checked) {
+    calculationMethod = 'monopole';
+    console.log('[Demo] Switched to Monopole (1st-order)');
+    recreateAll();
+  }
+};
+
+quadrupoleRadio.onchange = () => {
+  if (quadrupoleRadio.checked) {
+    calculationMethod = 'quadrupole';
+    console.log('[Demo] Switched to Quadrupole (2nd-order)');
+    recreateAll();
+  }
 };
 
 function updateProfilingDisplay() {
@@ -288,7 +310,7 @@ function recreatePhysicsAndMesh() {
     softening: 0.2,
     dt: 10 / 60,
     enableProfiling: profilingEnabled,
-    planC: plancEnabled
+    method: calculationMethod
   });
 
   const textureSize = physics.getTextureSize();

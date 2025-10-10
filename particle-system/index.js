@@ -14,6 +14,7 @@ import { ParticleSystemQuadrupole } from './particle-system-quadrupole.js';
  *    vx?: number, vy?: number, vz?: number,
  *    mass?: number,
  *    rgb?: number }) => void,
+ *   method?: 'quadrupole' | 'monopole', // Calculation method: 'quadrupole' (2nd-order, default) or 'monopole' (1st-order)
  *   theta?: number, // Barnes-Hut threshold, default: 0.65 (higher = faster, lower = more accurate)
  *   gravityStrength?: number, // Force multiplier, default: 0.0003
  *   dt?: number, // Timestep, default: 1/60
@@ -24,10 +25,10 @@ import { ParticleSystemQuadrupole } from './particle-system-quadrupole.js';
  *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
  *   debugSkipQuadtree?: boolean, // Debug option to skip quadtree traversal, default: false
  *   enableProfiling?: boolean, // Enable GPU profiling with EXT_disjoint_timer_query_webgl2, default: false
- *   planC?: boolean // Enable Plan C (quadrupoles + texture arrays + KDK + debug staging), default: false
+ *   planC?: boolean // DEPRECATED: Use method: 'quadrupole' instead
  * }} options
  */
-export function particleSystem({ gl, particles, get, theta = 0.65, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2, damping = 0.0, maxSpeed = 2.0, maxAccel = 1.0, worldBounds, debugSkipQuadtree = false, enableProfiling = false, planC = false }) {
+export function particleSystem({ gl, particles, get, method = 'quadrupole', theta = 0.65, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2, damping = 0.0, maxSpeed = 2.0, maxAccel = 1.0, worldBounds, debugSkipQuadtree = false, enableProfiling = false, planC }) {
   // Compute particle count from positions array (RGBA = 4 components per particle)
   const particleCount = particles.length;
 
@@ -58,10 +59,17 @@ export function particleSystem({ gl, particles, get, theta = 0.65, gravityStreng
     paddedColors.set(colorsBuf);
   }
   
-  // Select implementation based on planC flag
-  const SystemClass = planC ? ParticleSystemQuadrupole : ParticleSystemMonopole;
+  // Backward compatibility: support deprecated planC option
+  if (planC !== undefined) {
+    console.warn('[particleSystem] planC option is deprecated. Use method: "quadrupole" instead.');
+    method = planC ? 'quadrupole' : 'monopole';
+  }
   
-  console.log(`[particleSystem] Using ${planC ? 'Quadrupole (2nd-order moments)' : 'Monopole (1st-order moments)'}`);
+  // Select implementation based on method
+  const useQuadrupole = method === 'quadrupole';
+  const SystemClass = useQuadrupole ? ParticleSystemQuadrupole : ParticleSystemMonopole;
+  
+  console.log(`[particleSystem] Using ${useQuadrupole ? 'Quadrupole (2nd-order moments)' : 'Monopole (1st-order moments)'}`);
   
   // Create system with particle data
   const system = new SystemClass(gl, {
@@ -82,7 +90,7 @@ export function particleSystem({ gl, particles, get, theta = 0.65, gravityStreng
     worldBounds,
     debugSkipQuadtree,
     enableProfiling,
-    planC
+    planC: useQuadrupole // Internal flag for compatibility
   });
   
   // Initialize asynchronously (internal - user doesn't need to await)

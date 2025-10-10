@@ -29,10 +29,16 @@
     <input type="checkbox" id="profiling-checkbox">
   </label>
   
-  <label id="planc-toggle">
-    <span>Plan C (MRT + Debug)</span>
-    <input type="checkbox" id="planc-checkbox">
-  </label>
+  <div id="method-selector">
+    <label class="radio-label">
+      <input type="radio" id="quadrupole-radio" name="method" value="quadrupole" checked>
+      <span>Quadrupole</span>
+    </label>
+    <label class="radio-label">
+      <input type="radio" id="monopole-radio" name="method" value="monopole">
+      <span>Monopole</span>
+    </label>
+  </div>
   
   <!-- Profiler Output Panel -->
   <div id="profiler-output">
