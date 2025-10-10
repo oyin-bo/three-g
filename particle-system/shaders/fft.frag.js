@@ -36,7 +36,7 @@ ivec3 texCoordToVoxel(vec2 uv, float gridSize, float slicesPerRow) {
 // Convert 3D voxel to 2D texture coords
 vec2 voxelToTexCoord(ivec3 voxel, float gridSize, float slicesPerRow) {
   int sliceRow = voxel.z / int(slicesPerRow);
-  int sliceCol = voxel.z - sliceRow * int(slicesPerRow);
+  int sliceCol = voxel.z % int(slicesPerRow);  // Use modulo instead of subtraction
   
   float texX = float(sliceCol * int(gridSize) + voxel.x) + 0.5;
   float texY = float(sliceRow * int(gridSize) + voxel.y) + 0.5;
@@ -92,7 +92,7 @@ void main() {
   else if (u_axis == 1) partnerVoxel.y = partnerIdx;
   else partnerVoxel.z = partnerIdx;
   
-  // Read current value and partner value
+  // Read current value (at this fragment's position) and partner value
   vec2 currentUV = v_uv;
   vec2 partnerUV = voxelToTexCoord(partnerVoxel, u_gridSize, u_slicesPerRow);
   
@@ -106,13 +106,17 @@ void main() {
   float twiddleSign = (u_inverse == 1) ? 1.0 : -1.0;
   vec2 w = twiddle(float(pairIndex), float(stageSize), twiddleSign);
   
-  // Butterfly operation (back to working code)
+  // Butterfly operation
+  // Standard Cooley-Tukey: X[k] = E[k] + W^k*O[k], X[k+N/2] = E[k] - W^k*O[k]
+  // When processing even position: current=E, partner=O, compute E + W*O
+  // When processing odd position: current=O, partner=E, compute E - W*O (use partner for E!)
   vec2 result;
   if (!isOdd) {
-    // Even position: current + w * partner
+    // Even output position: E + W * O
     result = complexAdd(currentComplex, complexMul(w, partnerComplex));
   } else {
-    // Odd position: partner - w * current  
+    // Odd output position: E - W * O
+    // Partner is E (even data), current is O (odd data)
     result = complexSub(partnerComplex, complexMul(w, currentComplex));
   }
   
