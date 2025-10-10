@@ -1,11 +1,12 @@
 // @ts-check
 
 /**
- * Plan M: "The Menace" — GPU-side Dynamic Octree
+ * ParticleSystem Quadrupole - Barnes-Hut with Quadrupole Approximation
  * 
- * Implements a GPU-resident octree using WebGL2 fragment shaders for large-scale
+ * GPU-resident octree using WebGL2 fragment shaders for large-scale
  * particle simulation with O(N log N) complexity via Barnes-Hut algorithm.
- * Uses isotropic 3D treatment of X/Y/Z axes with Z-slice stacking for 2D texture mapping.
+ * Uses texture arrays and quadrupole moments for higher accuracy.
+ * Includes KDK symplectic integrator and debug staging infrastructure.
  */
 
 // Shader sources
@@ -40,10 +41,10 @@ import {
   runFullPipeline_Replay
 } from './pipeline/debug/router.js';
 
-export class ParticleSystem {
+export class ParticleSystemQuadrupole {
 
   /**
-   * ParticleSystem constructor
+   * ParticleSystemQuadrupole constructor
    * @param {WebGL2RenderingContext} gl - WebGL2 rendering context
    * @param {{
    *   particleData: { positions: Float32Array, velocities?: Float32Array|null, colors?: Uint8Array|null },

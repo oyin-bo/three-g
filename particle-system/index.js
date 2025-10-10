@@ -1,6 +1,7 @@
 // @ts-check
 
-import { ParticleSystem } from './particle-system.js';
+import { ParticleSystemMonopole } from './particle-system-monopole.js';
+import { ParticleSystemQuadrupole } from './particle-system-quadrupole.js';
 
 /**
  * Create a GPU-accelerated Barnes-Hut N-body simulation
@@ -23,7 +24,7 @@ import { ParticleSystem } from './particle-system.js';
  *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
  *   debugSkipQuadtree?: boolean, // Debug option to skip quadtree traversal, default: false
  *   enableProfiling?: boolean, // Enable GPU profiling with EXT_disjoint_timer_query_webgl2, default: false
- *   planC?: boolean // Enable Plan C (MRT quadrupoles + debug staging), default: false
+ *   planC?: boolean // Enable Plan C (quadrupoles + texture arrays + KDK + debug staging), default: false
  * }} options
  */
 export function particleSystem({ gl, particles, get, theta = 0.65, gravityStrength = 0.0003, dt = 1 / 60, softening = 0.2, damping = 0.0, maxSpeed = 2.0, maxAccel = 1.0, worldBounds, debugSkipQuadtree = false, enableProfiling = false, planC = false }) {
@@ -57,8 +58,13 @@ export function particleSystem({ gl, particles, get, theta = 0.65, gravityStreng
     paddedColors.set(colorsBuf);
   }
   
+  // Select implementation based on planC flag
+  const SystemClass = planC ? ParticleSystemQuadrupole : ParticleSystemMonopole;
+  
+  console.log(`[particleSystem] Using ${planC ? 'Quadrupole (2nd-order moments)' : 'Monopole (1st-order moments)'}`);
+  
   // Create system with particle data
-  const system = new ParticleSystem(gl, {
+  const system = new SystemClass(gl, {
     particleCount,
     particleData: {
       positions: paddedPositions,
