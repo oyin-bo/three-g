@@ -16,7 +16,8 @@ html, body {
   border-radius: 0.5em;
   padding: 0.5em 1em;
   z-index: 100;
-  /* text-shadow: 0 0 14px black, 1px 0 14px black; */
+  text-shadow: 0 0 14px black, 1px 0 14px black;
+  text-align: right;;
 }
 
 #count-input {
@@ -28,6 +29,7 @@ html, body {
   outline: none;
   width: 8em;
   font-family: monospace;
+  padding-right: none;
 }
 
 #profiling-toggle {
@@ -76,6 +78,7 @@ html, body {
   font-family: monospace;
   font-size: 90%;
   display: none;
+  text-align: left;
 }
 
 #profiler-output.visible {

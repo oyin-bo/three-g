@@ -32,6 +32,7 @@ const countInput = /** @type {HTMLInputElement} */ (document.getElementById('cou
 const profilingCheckbox = /** @type {HTMLInputElement} */ (document.getElementById('profiling-checkbox'));
 const monopoleRadio = /** @type {HTMLInputElement} */ (document.getElementById('monopole-radio'));
 const quadrupoleRadio = /** @type {HTMLInputElement} */ (document.getElementById('quadrupole-radio'));
+const spectralRadio = /** @type {HTMLInputElement} */ (document.getElementById('spectral-radio'));
 const profilerOutput = /** @type {HTMLDivElement} */ (document.getElementById('profiler-output'));
 
 // 3. Initialize state
@@ -99,15 +100,16 @@ recreateAll();
 /** @type {any} */ (window).physics = physics;
 
 // 8. DevTools helpers for method switching
-/** @type {any} */ (window).setMethod = (method) => {
-  if (method === 'monopole' || method === 'quadrupole') {
+/** @type {any} */ (window).setMethod = (/** @type {any} */ method) => {
+  if (method === 'monopole' || method === 'quadrupole' || method === 'spectral') {
     calculationMethod = method;
     monopoleRadio.checked = (method === 'monopole');
     quadrupoleRadio.checked = (method === 'quadrupole');
+    spectralRadio.checked = (method === 'spectral');
     console.log('[Demo] Method toggled via DevTools:', method);
     recreateAll();
   } else {
-    console.error('[Demo] Invalid method. Use "monopole" or "quadrupole"');
+    console.error('[Demo] Invalid method. Use "monopole", "quadrupole", or "spectral"');
   }
 };
 
@@ -133,7 +135,7 @@ Object.defineProperty(/** @type {any} */ (window).dbg, 'utils', {
 });
 
 console.log('[Demo] DevTools helpers available:');
-console.log('  window.setMethod("monopole"|"quadrupole") - Switch calculation method');
+console.log('  window.setMethod("monopole"|"quadrupole"|"spectral") - Switch calculation method');
 console.log('  window.dbg.mode(mode) - Set debug mode');
 console.log('  window.dbg.flags({...}) - Set debug flags');
 console.log('  window.dbg.step() - Execute debug step');
@@ -173,6 +175,14 @@ quadrupoleRadio.onchange = () => {
   if (quadrupoleRadio.checked) {
     calculationMethod = 'quadrupole';
     console.log('[Demo] Switched to Quadrupole (2nd-order)');
+    recreateAll();
+  }
+};
+
+spectralRadio.onchange = () => {
+  if (spectralRadio.checked) {
+    calculationMethod = 'spectral';
+    console.log('[Demo] Switched to Spectral (PM/FFT)');
     recreateAll();
   }
 };
@@ -304,7 +314,7 @@ function recreatePhysicsAndMesh() {
     softening: 0.2,
     dt: 10 / 60,
     enableProfiling: profilingEnabled,
-    method: calculationMethod
+    method: /** @type {'quadrupole' | 'monopole' | 'spectral'} */ (calculationMethod)
   });
 
   const textureSize = physics.getTextureSize();
