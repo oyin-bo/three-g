@@ -64,7 +64,8 @@ void main() {
   // Compute gradient: F(k) = -i·k·φ(k)
   // Multiplication by -i: (a + bi) * (-i) = b - ai
   // Then multiply by k_component
-  vec2 ik = vec2(0.0, -k_component);  // -i·k as complex number
+  // NOTE: For ATTRACTIVE gravity, we want F = -∇φ, so we use +i·k (not -i·k)
+  vec2 ik = vec2(0.0, k_component);  // +i·k as complex number (flipped sign for attractive force)
   vec2 F_k = complexMul(ik, phi_k);
   
   // Output force spectrum for this axis (complex)

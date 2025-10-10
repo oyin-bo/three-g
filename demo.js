@@ -140,6 +140,12 @@ console.log('  window.dbg.mode(mode) - Set debug mode');
 console.log('  window.dbg.flags({...}) - Set debug flags');
 console.log('  window.dbg.step() - Execute debug step');
 console.log('  window.dbg.utils - Lazy-load debug utilities');
+console.log('\n[PM Debug] To diagnose spectral method issues:');
+console.log('  1. Switch to spectral: setMethod("spectral")');
+console.log('  2. Run quick diagnostic: await physics.pmDebug.quickDiag()');
+console.log('  3. Run all tests: await physics.pmDebug.runAllTests()');
+console.log('  4. Access modules: physics.pmDebug.modules.metrics, etc.');
+
 
 // 5. Count input handler
 /** @type {*} */
@@ -309,11 +315,11 @@ function recreatePhysicsAndMesh() {
         ((Math.floor(y * 255) & 0xff) << 8) |
         (Math.floor(z * 255) & 0xff);
     },
-    theta: 0.65,  // Optimized for performance (was 0.5)
+    theta: 0.7,  // Optimized for performance (was 0.5)
     gravityStrength,
-    softening: 0.2,
+    softening: 0.1,
     dt: 10 / 60,
-    damping: 0.007,
+    damping: 0.01,
     enableProfiling: profilingEnabled,
     method: /** @type {'quadrupole' | 'monopole' | 'spectral'} */ (calculationMethod)
   });

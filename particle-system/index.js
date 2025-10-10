@@ -197,6 +197,87 @@ export function particleSystem({
       get pmDepositProgram() { return spectralSystem.pmDepositProgram; },
       get pmForceTexture() { return spectralSystem.forceTexture; }, // PM force texture
       gl: gl, // Expose GL context for debugging/testing
+      
+      // PM Debug API (Plan A staging)
+      pmDebug: {
+        /**
+         * Run quick diagnostic on PM/FFT pipeline
+         * @returns {Promise<{massResult: any, poissonResult: any}>}
+         */
+        quickDiag: async () => {
+          const { quickDiagnostic } = await import('./pm-debug/test-runner.js');
+          return quickDiagnostic(spectralSystem);
+        },
+        
+        /**
+         * Run all PM/FFT tests
+         * @returns {Promise<any[]>}
+         */
+        runAllTests: async () => {
+          const { runAllTests } = await import('./pm-debug/test-runner.js');
+          return runAllTests(spectralSystem);
+        },
+        
+        /**
+         * Initialize PM debug system
+         * @param {any} config - Debug configuration
+         */
+        init: async (config) => {
+          const { pmDebugInit } = await import('./pm-debug/index.js');
+          return pmDebugInit(spectralSystem, config);
+        },
+        
+        /**
+         * Run a single stage in isolation
+         * @param {string} stage - Stage ID
+         * @param {any=} source - Source spec
+         * @param {any=} sink - Sink spec
+         */
+        runStage: async (stage, source, sink) => {
+          const { pmDebugRunSingle } = await import('./pm-debug/index.js');
+          return pmDebugRunSingle(spectralSystem, stage, source, sink);
+        },
+        
+        /**
+         * Snapshot management
+         */
+        snapshot: {
+          store: async (key, atStage) => {
+            const { pmSnapshotStore } = await import('./pm-debug/index.js');
+            return pmSnapshotStore(spectralSystem, key, atStage);
+          },
+          load: async (key, forStage) => {
+            const { pmSnapshotLoad } = await import('./pm-debug/index.js');
+            return pmSnapshotLoad(spectralSystem, key, forStage);
+          },
+          dispose: async (key) => {
+            const { pmSnapshotDispose } = await import('./pm-debug/index.js');
+            return pmSnapshotDispose(spectralSystem, key);
+          },
+          list: async () => {
+            const { listSnapshots } = await import('./pm-debug/snapshot.js');
+            return listSnapshots(spectralSystem);
+          }
+        },
+        
+        /**
+         * Direct access to debug modules
+         */
+        modules: {
+          get metrics() {
+            return import('./pm-debug/metrics.js');
+          },
+          get overlay() {
+            return import('./pm-debug/overlay.js');
+          },
+          get synthetic() {
+            return import('./pm-debug/synthetic.js');
+          },
+          get testRunner() {
+            return import('./pm-debug/test-runner.js');
+          }
+        }
+      }
     };
   } else {
     // Tree-code methods (monopole/quadrupole) specific exports
