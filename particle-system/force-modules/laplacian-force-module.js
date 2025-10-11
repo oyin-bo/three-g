@@ -89,7 +89,7 @@ export class LaplacianForceModule {
    *   disableFloatBlend: boolean
    * }} opts
    */
-  init(gl, opts) {
+  async init(gl, opts) {
     this.gl = gl;
     this.particleCount = opts.particleCount;
     this.textureWidth = opts.textureWidth;

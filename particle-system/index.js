@@ -3,14 +3,6 @@
 import { ParticleSystemMonopole } from './particle-system-monopole.js';
 import { ParticleSystemQuadrupole } from './particle-system-quadrupole.js';
 import { ParticleSystemSpectral } from './particle-system-spectral.js';
-import { quickDiagnostic, runAllTests } from './pm-debug/test-runner.js';
-import { pmDebugInit, pmDebugRunSingle, pmSnapshotStore, pmSnapshotLoad, pmSnapshotDispose } from './pm-debug/index.js';
-import { listSnapshots } from './pm-debug/snapshot.js';
-import * as pmMetrics from './pm-debug/metrics.js';
-import * as pmOverlay from './pm-debug/overlay.js';
-import * as pmSynthetic from './pm-debug/synthetic.js';
-import * as pmTestRunner from './pm-debug/test-runner.js';
-import * as pipelineDebug from './pipeline/debug/index.js';
 
 /**
  * Create a GPU-accelerated N-body simulation
@@ -133,22 +125,34 @@ export function particleSystem({
     worldBounds,
     debugSkipQuadtree,
     enableProfiling,
-    planA: usePlanA, // For spectral method
-    // @ts-ignore - edges/springStrength only supported by quadrupole
     edges,
-    // @ts-ignore
     springStrength
   });
   
-  // Initialize synchronously
+  // Initialize asynchronously (internal - user doesn't need to await)
   system.init();
   
   // Base API common to all methods
   const baseAPI = {
-    // Check initialization status (synchronous)
-    ready: () => {
-      // System is initialized synchronously in init()
-      return system.isInitialized;
+    // Async initialization (wait for system to be ready)
+    ready: async () => {
+      // System is initialized synchronously in init(), but we provide this
+      // for compatibility with async initialization patterns
+      return new Promise((/** @type {any} */ resolve) => {
+        if (system.isInitialized) {
+          resolve();
+        } else {
+          // Poll for initialization (should be immediate)
+          const checkInit = () => {
+            if (system.isInitialized) {
+              resolve();
+            } else {
+              setTimeout(checkInit, 10);
+            }
+          };
+          checkInit();
+        }
+      });
     },
     
     // Step simulation forward (main loop call)
@@ -203,17 +207,19 @@ export function particleSystem({
       pmDebug: {
         /**
          * Run quick diagnostic on PM/FFT pipeline
-         * @returns {{massResult: any, poissonResult: any}}
+         * @returns {Promise<{massResult: any, poissonResult: any}>}
          */
-        quickDiag: () => {
+        quickDiag: async () => {
+          const { quickDiagnostic } = await import('./pm-debug/test-runner.js');
           return quickDiagnostic(spectralSystem);
         },
         
         /**
          * Run all PM/FFT tests
-         * @returns {{massConservation: any, dcZero: any, poissonEquation: any}}
+         * @returns {Promise<{massConservation: any, dcZero: any, poissonEquation: any}>}
          */
-        runAllTests: () => {
+        runAllTests: async () => {
+          const { runAllTests } = await import('./pm-debug/test-runner.js');
           return runAllTests(spectralSystem);
         },
         
@@ -221,7 +227,8 @@ export function particleSystem({
          * Initialize PM debug system
          * @param {any} config - Debug configuration
          */
-        init: (config) => {
+        init: async (config) => {
+          const { pmDebugInit } = await import('./pm-debug/index.js');
           return pmDebugInit(spectralSystem, config);
         },
         
@@ -231,7 +238,8 @@ export function particleSystem({
          * @param {any=} source - Source spec
          * @param {any=} sink - Sink spec
          */
-        runStage: (stage, source, sink) => {
+        runStage: async (stage, source, sink) => {
+          const { pmDebugRunSingle } = await import('./pm-debug/index.js');
           return pmDebugRunSingle(spectralSystem, stage, source, sink);
         },
         
@@ -243,23 +251,27 @@ export function particleSystem({
            * @param {string} key
            * @param {import('./pm-debug/types.js').PMStageID} atStage
            */
-          store: (key, atStage) => {
+          store: async (key, atStage) => {
+            const { pmSnapshotStore } = await import('./pm-debug/index.js');
             return pmSnapshotStore(spectralSystem, key, atStage);
           },
           /**
            * @param {string} key
            * @param {import('./pm-debug/types.js').PMStageID} forStage
            */
-          load: (key, forStage) => {
+          load: async (key, forStage) => {
+            const { pmSnapshotLoad } = await import('./pm-debug/index.js');
             return pmSnapshotLoad(spectralSystem, key, forStage);
           },
           /**
            * @param {string} key
            */
-          dispose: (key) => {
+          dispose: async (key) => {
+            const { pmSnapshotDispose } = await import('./pm-debug/index.js');
             return pmSnapshotDispose(spectralSystem, key);
           },
-          list: () => {
+          list: async () => {
+            const { listSnapshots } = await import('./pm-debug/snapshot.js');
             return listSnapshots(spectralSystem);
           }
         },
@@ -269,16 +281,16 @@ export function particleSystem({
          */
         modules: {
           get metrics() {
-            return pmMetrics;
+            return import('./pm-debug/metrics.js');
           },
           get overlay() {
-            return pmOverlay;
+            return import('./pm-debug/overlay.js');
           },
           get synthetic() {
-            return pmSynthetic;
+            return import('./pm-debug/synthetic.js');
           },
           get testRunner() {
-            return pmTestRunner;
+            return import('./pm-debug/test-runner.js');
           }
         }
       }
@@ -306,7 +318,8 @@ export function particleSystem({
       
       // Direct access to debug utilities (advanced usage)
       _debug: () => {
-        return pipelineDebug;
+        // Lazy-load debug modules only when accessed
+        return import('./pipeline/debug/index.js');
       },
     };
   }

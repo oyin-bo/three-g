@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "npx esbuild --serve=8302 --servedir=."
+    "start": "node serve.js"
   },
   "repository": "https://github.com/oyin-bo/three-g",
   "keywords": ["three", "galaxy", "particles", "barnes-hut", "n-body", "physics"],

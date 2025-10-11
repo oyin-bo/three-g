@@ -2,8 +2,12 @@
 
 /**
  * Common utilities shared between ParticleSystemLegacy and ParticleSystemPlanC
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ * @param {number | undefined} [internalFormat]
+ * @param {number | undefined} [type]
  */
-
 export function createRenderTexture(gl, width, height, internalFormat, type) {
   const format = internalFormat ?? gl.RGBA32F;
   const dataType = type ?? gl.FLOAT;
@@ -24,6 +28,11 @@ export function createRenderTexture(gl, width, height, internalFormat, type) {
   return { texture, framebuffer };
 }
 
+/**
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ */
 export function createPingPongTextures(gl, width, height) {
   const textures = [];
   const framebuffers = [];
@@ -57,6 +66,10 @@ export function createPingPongTextures(gl, width, height) {
   };
 }
 
+/**
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} particleCount
+ */
 export function createGeometry(gl, particleCount) {
   const quadVertices = new Float32Array([
     -1, -1,  1, -1,  -1, 1,  1, 1
@@ -90,6 +103,15 @@ export function createGeometry(gl, particleCount) {
   return { quadVAO, particleVAO };
 }
 
+/**
+ * @param {WebGL2RenderingContext} gl
+ * @param {WebGLTexture} texture
+ * @param {Float32Array | Uint8Array} data
+ * @param {number} width
+ * @param {number} height
+ * @param {number | undefined} [format]
+ * @param {number | undefined} [type]
+ */
 export function uploadTextureData(gl, texture, data, width, height, format, type) {
   const texFormat = format ?? gl.RGBA;
   const texType = type ?? gl.FLOAT;
@@ -98,6 +120,11 @@ export function uploadTextureData(gl, texture, data, width, height, format, type
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, texFormat, texType, data);
 }
 
+/**
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} type
+ * @param {string} source
+ */
 export function createShader(gl, type, source) {
   const shader = gl.createShader(type);
   if (!shader) {
@@ -116,6 +143,11 @@ export function createShader(gl, type, source) {
   return shader;
 }
 
+/**
+ * @param {WebGL2RenderingContext} gl
+ * @param {string} vertexSource
+ * @param {string} fragmentSource
+ */
 export function createProgram(gl, vertexSource, fragmentSource) {
   const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexSource);
   const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
@@ -141,6 +173,9 @@ export function createProgram(gl, vertexSource, fragmentSource) {
   return program;
 }
 
+/**
+ * @param {number} particleCount
+ */
 export function calculateParticleTextureDimensions(particleCount) {
   const width = Math.ceil(Math.sqrt(particleCount));
   const height = Math.ceil(particleCount / width);
@@ -149,6 +184,9 @@ export function calculateParticleTextureDimensions(particleCount) {
   return { width, height, actualSize };
 }
 
+/**
+ * @param {WebGL2RenderingContext} gl
+ */
 export function checkWebGL2Support(gl) {
   const colorBufferFloat = gl.getExtension('EXT_color_buffer_float');
   const floatBlend = gl.getExtension('EXT_float_blend');

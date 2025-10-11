@@ -107,7 +107,8 @@ export class ParticleSystemQuadrupole {
     this.levelTargets = []; // Array of {a0, a1, a2, size, gridSize, slicesPerRow}
     /** @type {WebGLFramebuffer[]} */
     this.levelFramebuffers = []; // Array of framebuffers for MRT rendering
-    this.positionTextures = null;
+    /** @type {ReturnType<typeof this.createPingPongTextures>} */
+    this.positionTextures = /** @type {*} */(null);
     this.velocityTextures = null;
     /** @type {{texture: WebGLTexture, framebuffer: WebGLFramebuffer}|null} */
     this.forceTexture = null;
@@ -191,7 +192,7 @@ export class ParticleSystemQuadrupole {
     dbgCheckFBO(this.gl, tag);
   }
 
-  init() {
+  async init() {
     let finished = false;
     try {
       this.checkWebGL2Support();
@@ -214,7 +215,7 @@ export class ParticleSystemQuadrupole {
       
       // Initialize external force modules
       for (const module of this.externalForceModules) {
-        module.init(this.gl, {
+        await module.init(this.gl, {
           positionTextures: this.positionTextures.textures,
           textureWidth: this.textureWidth,
           textureHeight: this.textureHeight,
@@ -833,12 +834,12 @@ export class ParticleSystemQuadrupole {
    * Register an external force module
    * @param {{init: Function, accumulate: Function, dispose: Function}} module
    */
-  registerForceModule(module) {
+  async registerForceModule(module) {
     if (!this.externalForceModules.includes(module)) {
       this.externalForceModules.push(module);
       // Initialize module if particle system is already initialized
       if (this.isInitialized) {
-        module.init(this.gl, {
+        await module.init(this.gl, {
           positionTextures: this.positionTextures.textures,
           textureWidth: this.textureWidth,
           textureHeight: this.textureHeight,

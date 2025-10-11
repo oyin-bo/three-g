@@ -11,10 +11,6 @@
  */
 
 import './types.js';
-import { generateGridImpulse, generateTwoPointMasses, generatePlaneWaveDensity, generateSpectrumDelta } from './synthetic.js';
-import { captureSnapshot as capSnap, restoreSnapshot as restSnap } from './snapshot.js';
-import { renderGridSlice, renderSpectrumMagnitude, renderVectorGlyphs } from './overlay.js';
-import { runAllMetrics as runAllMetricsSync } from './metrics.js';
 
 /**
  * Initialize PM debug system
@@ -77,19 +73,19 @@ export function pmDebugDispose(psys) {
  * @param {import('./types.js').PMSourceSpec=} source 
  * @param {import('./types.js').PMSinkSpec=} sink 
  */
-export function pmDebugRunSingle(psys, stage, source, sink) {
+export async function pmDebugRunSingle(psys, stage, source, sink) {
   if (!psys._pmDebugState?.config.enabled) return;
 
   psys.beginProfile?.(`pm_debug_single_${stage}`);
 
   // Provide source (synthetic, snapshot, or live)
-  provideSource(psys, stage, source || { kind: 'live' });
+  await provideSource(psys, stage, source || { kind: 'live' });
 
   // Run the stage
   runStage(psys, stage);
 
   // Apply sink (overlay, metrics, snapshot, or noop)
-  applySink(psys, stage, sink || { kind: 'noop' });
+  await applySink(psys, stage, sink || { kind: 'noop' });
 
   psys.endProfile?.();
 }
@@ -144,16 +140,16 @@ export function pmDebugAfterStage(psys, stage) {
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMSourceSpec} source 
  */
-function provideSource(psys, stage, source) {
+async function provideSource(psys, stage, source) {
   if (source.kind === 'live') {
     // Normal path - no override
     return;
   }
 
   if (source.kind === 'synthetic') {
-    provideSyntheticSource(psys, stage, source.synth);
+    await provideSyntheticSource(psys, stage, source.synth);
   } else if (source.kind === 'snapshot') {
-    provideSnapshotSource(psys, stage, source.key);
+    await provideSnapshotSource(psys, stage, source.key);
   }
 }
 
@@ -163,17 +159,17 @@ function provideSource(psys, stage, source) {
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMSinkSpec} sink 
  */
-function applySink(psys, stage, sink) {
+async function applySink(psys, stage, sink) {
   if (sink.kind === 'noop') return;
 
   if (sink.kind === 'snapshot') {
-    captureSnapshot(psys, stage, sink.key);
+    await captureSnapshot(psys, stage, sink.key);
   } else if (sink.kind === 'overlay') {
-    renderOverlay(psys, stage, sink.view);
+    await renderOverlay(psys, stage, sink.view);
   } else if (sink.kind === 'metrics') {
-    runMetrics(psys, stage, sink.checks);
+    await runMetrics(psys, stage, sink.checks);
   } else if (sink.kind === 'readback') {
-    performReadback(psys, stage, sink.buffers);
+    await performReadback(psys, stage, sink.buffers);
   }
 }
 
@@ -203,7 +199,8 @@ function initDebugPrograms(psys) {
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMSyntheticSpec} synth 
  */
-function provideSyntheticSource(psys, stage, synth) {
+async function provideSyntheticSource(psys, stage, synth) {
+  const { generateGridImpulse, generateTwoPointMasses, generatePlaneWaveDensity, generateSpectrumDelta } = await import('./synthetic.js');
   
   console.log(`[PM Debug] Providing synthetic source for ${stage}:`, synth.type);
   
@@ -243,7 +240,9 @@ function provideSyntheticSource(psys, stage, synth) {
  * @param {import('./types.js').PMStageID} stage 
  * @param {string} key 
  */
-function provideSnapshotSource(psys, stage, key) {
+async function provideSnapshotSource(psys, stage, key) {
+  const { restoreSnapshot } = await import('./snapshot.js');
+  
   const snapshot = psys._pmDebugState?.snapshots.get(key);
   if (!snapshot) {
     console.warn(`[PM Debug] Snapshot not found: ${key}`);
@@ -251,7 +250,7 @@ function provideSnapshotSource(psys, stage, key) {
   }
   
   console.log(`[PM Debug] Providing snapshot source for ${stage}: ${key}`);
-  restSnap(psys, stage, key);
+  restoreSnapshot(psys, stage, key);
 }
 
 /**
@@ -260,7 +259,8 @@ function provideSnapshotSource(psys, stage, key) {
  * @param {import('./types.js').PMStageID} stage 
  * @param {string} key 
  */
-function captureSnapshot(psys, stage, key) {
+async function captureSnapshot(psys, stage, key) {
+  const { captureSnapshot: capSnap } = await import('./snapshot.js');
   capSnap(psys, stage, key);
 }
 
@@ -270,7 +270,8 @@ function captureSnapshot(psys, stage, key) {
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMOverlaySpec} view 
  */
-function renderOverlay(psys, stage, view) {
+async function renderOverlay(psys, stage, view) {
+  const { renderGridSlice, renderSpectrumMagnitude, renderVectorGlyphs } = await import('./overlay.js');
   
   console.log(`[PM Debug] Rendering overlay for ${stage}:`, view.type);
   
@@ -306,9 +307,11 @@ function renderOverlay(psys, stage, view) {
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMCheckSpec} checks 
  */
-function runMetrics(psys, stage, checks) {
+async function runMetrics(psys, stage, checks) {
+  const { runAllMetrics } = await import('./metrics.js');
+  
   console.log(`[PM Debug] Running metrics for ${stage}:`, checks);
-  const results = runAllMetricsSync(psys, stage, checks);
+  const results = await runAllMetrics(psys, stage, checks);
   
   // Log results
   console.log(`[PM Debug] Metrics results for ${stage}:`, results);
@@ -320,7 +323,7 @@ function runMetrics(psys, stage, checks) {
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMReadbackSpec} buffers 
  */
-function performReadback(psys, stage, buffers) {
+async function performReadback(psys, stage, buffers) {
   const gl = psys.gl;
   
   console.log(`[PM Debug] Performing readback for ${stage}:`, buffers);

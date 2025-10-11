@@ -9,7 +9,6 @@
 
 import { pmDebugInit, pmDebugRunSingle } from './index.js';
 import { checkMassConservation, checkDCZero, checkFFTInverseIdentity, checkPoissonOnPlaneWave } from './metrics.js';
-import { computePMForcesSync } from '../pipeline/pm-pipeline.js';
 
 /**
  * Test 1: Mass Conservation
@@ -17,7 +16,7 @@ import { computePMForcesSync } from '../pipeline/pm-pipeline.js';
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys
  */
-export function testMassConservation(psys) {
+export async function testMassConservation(psys) {
   console.log('\n========================================');
   console.log('TEST 1: Mass Conservation (pm_deposit)');
   console.log('========================================');
@@ -30,13 +29,13 @@ export function testMassConservation(psys) {
   });
   
   // Run deposit stage with live input
-  pmDebugRunSingle(psys, 'pm_deposit', 
+  await pmDebugRunSingle(psys, 'pm_deposit', 
     { kind: 'live' },
     { kind: 'metrics', checks: { checkMassConservation: true } }
   );
   
   // Run explicit check
-  const result = checkMassConservation(psys);
+  const result = await checkMassConservation(psys);
   
   console.log(`\nResult: ${result.passed ? '✓ PASSED' : '✗ FAILED'}`);
   console.log(`  Grid Mass: ${result.gridMass.toFixed(6)}`);
@@ -52,13 +51,13 @@ export function testMassConservation(psys) {
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys
  */
-export function testSinglePointMass(psys) {
+export async function testSinglePointMass(psys) {
   console.log('\n========================================');
   console.log('TEST 2: Single Point Mass Deposition');
   console.log('========================================');
   
   // Run deposit with synthetic single point at grid center
-  pmDebugRunSingle(psys, 'pm_deposit',
+  await pmDebugRunSingle(psys, 'pm_deposit',
     {
       kind: 'synthetic',
       synth: {
@@ -87,12 +86,12 @@ export function testSinglePointMass(psys) {
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys
  */
-export function testTwoPointMasses(psys) {
+export async function testTwoPointMasses(psys) {
   console.log('\n========================================');
   console.log('TEST 3: Two Point Masses');
   console.log('========================================');
   
-  pmDebugRunSingle(psys, 'pm_deposit',
+  await pmDebugRunSingle(psys, 'pm_deposit',
     {
       kind: 'synthetic',
       synth: {
@@ -123,7 +122,7 @@ export function testTwoPointMasses(psys) {
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys
  */
-export function testPlaneWave(psys) {
+export async function testPlaneWave(psys) {
   console.log('\n========================================');
   console.log('TEST 4: Plane Wave Density (FFT Test)');
   console.log('========================================');
@@ -131,7 +130,7 @@ export function testPlaneWave(psys) {
   const k = [4, 0, 0]; // Wave vector (4 periods in X)
   
   // Generate plane wave density
-  pmDebugRunSingle(psys, 'pm_deposit',
+  await pmDebugRunSingle(psys, 'pm_deposit',
     {
       kind: 'synthetic',
       synth: {
@@ -144,7 +143,7 @@ export function testPlaneWave(psys) {
   );
   
   // Run FFT forward
-  pmDebugRunSingle(psys, 'pm_fft_forward',
+  await pmDebugRunSingle(psys, 'pm_fft_forward',
     { kind: 'live' },
     {
       kind: 'overlay',
@@ -165,7 +164,7 @@ export function testPlaneWave(psys) {
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys
  */
-export function testFFTRoundtrip(psys) {
+export async function testFFTRoundtrip(psys) {
   console.log('\n========================================');
   console.log('TEST 5: FFT Roundtrip (Inverse Identity)');
   console.log('========================================');
@@ -183,13 +182,13 @@ export function testFFTRoundtrip(psys) {
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys
  */
-export function testDCZero(psys) {
+export async function testDCZero(psys) {
   console.log('\n========================================');
   console.log('TEST 6: DC Zero Check (Poisson)');
   console.log('========================================');
   
   // Deposit uniform density (should have zero DC after mean subtraction)
-  pmDebugRunSingle(psys, 'pm_deposit',
+  await pmDebugRunSingle(psys, 'pm_deposit',
     {
       kind: 'synthetic',
       synth: {
@@ -202,12 +201,12 @@ export function testDCZero(psys) {
   );
   
   // Run through pipeline to Poisson solve
-  pmDebugRunSingle(psys, 'pm_fft_forward', { kind: 'live' }, { kind: 'noop' });
-  pmDebugRunSingle(psys, 'pm_poisson', { kind: 'live' }, { kind: 'noop' });
+  await pmDebugRunSingle(psys, 'pm_fft_forward', { kind: 'live' }, { kind: 'noop' });
+  await pmDebugRunSingle(psys, 'pm_poisson', { kind: 'live' }, { kind: 'noop' });
   
   // Check DC component
   if (psys.pmPotentialSpectrum) {
-    const result = checkDCZero(psys, psys.pmPotentialSpectrum.texture);
+    const result = await checkDCZero(psys, psys.pmPotentialSpectrum.texture);
     
     console.log(`\nResult: ${result.passed ? '✓ PASSED' : '✗ FAILED'}`);
     console.log(`  DC Real: ${result.dcReal.toExponential(3)}`);
@@ -226,7 +225,7 @@ export function testDCZero(psys) {
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys
  */
-export function testPoissonEquation(psys) {
+export async function testPoissonEquation(psys) {
   console.log('\n========================================');
   console.log('TEST 7: Poisson Equation (-k²φ̂ = 4πGρ̂)');
   console.log('========================================');
@@ -234,7 +233,7 @@ export function testPoissonEquation(psys) {
   const k = [2, 0, 0]; // Test wave vector
   
   // Generate plane wave
-  pmDebugRunSingle(psys, 'pm_deposit',
+  await pmDebugRunSingle(psys, 'pm_deposit',
     {
       kind: 'synthetic',
       synth: {
@@ -247,12 +246,12 @@ export function testPoissonEquation(psys) {
   );
   
   // Run FFT and Poisson
-  pmDebugRunSingle(psys, 'pm_fft_forward', { kind: 'live' }, { kind: 'noop' });
-  pmDebugRunSingle(psys, 'pm_poisson', { kind: 'live' }, { kind: 'noop' });
+  await pmDebugRunSingle(psys, 'pm_fft_forward', { kind: 'live' }, { kind: 'noop' });
+  await pmDebugRunSingle(psys, 'pm_poisson', { kind: 'live' }, { kind: 'noop' });
   
   // Verify Poisson equation
   if (psys.pmDensitySpectrum && psys.pmPotentialSpectrum) {
-    const result = checkPoissonOnPlaneWave(
+    const result = await checkPoissonOnPlaneWave(
       psys,
       k,
       psys.pmDensitySpectrum.texture,
@@ -274,7 +273,7 @@ export function testPoissonEquation(psys) {
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys
  */
-export function testForceGradient(psys) {
+export async function testForceGradient(psys) {
   console.log('\n========================================');
   console.log('TEST 8: Force Gradient (∇φ = -g)');
   console.log('========================================');
@@ -282,7 +281,7 @@ export function testForceGradient(psys) {
   // Use plane wave: φ = cos(k·r) → g = k sin(k·r)
   const k = [1, 0, 0];
   
-  pmDebugRunSingle(psys, 'pm_deposit',
+  await pmDebugRunSingle(psys, 'pm_deposit',
     {
       kind: 'synthetic',
       synth: {
@@ -295,9 +294,9 @@ export function testForceGradient(psys) {
   );
   
   // Run through gradient computation
-  pmDebugRunSingle(psys, 'pm_fft_forward', { kind: 'live' }, { kind: 'noop' });
-  pmDebugRunSingle(psys, 'pm_poisson', { kind: 'live' }, { kind: 'noop' });
-  pmDebugRunSingle(psys, 'pm_gradient', { kind: 'live' }, { kind: 'noop' });
+  await pmDebugRunSingle(psys, 'pm_fft_forward', { kind: 'live' }, { kind: 'noop' });
+  await pmDebugRunSingle(psys, 'pm_poisson', { kind: 'live' }, { kind: 'noop' });
+  await pmDebugRunSingle(psys, 'pm_gradient', { kind: 'live' }, { kind: 'noop' });
   
   console.log('\nResult: ⚠ Manual verification required');
   console.log('  TODO: Implement gradient validation');
@@ -309,18 +308,18 @@ export function testForceGradient(psys) {
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys
  */
-export function testForceSampling(psys) {
+export async function testForceSampling(psys) {
   console.log('\n========================================');
   console.log('TEST 9: Force Sampling (Interpolation)');
   console.log('========================================');
   
   // Run full pipeline
-  pmDebugRunSingle(psys, 'pm_deposit', { kind: 'live' }, { kind: 'noop' });
-  pmDebugRunSingle(psys, 'pm_fft_forward', { kind: 'live' }, { kind: 'noop' });
-  pmDebugRunSingle(psys, 'pm_poisson', { kind: 'live' }, { kind: 'noop' });
-  pmDebugRunSingle(psys, 'pm_gradient', { kind: 'live' }, { kind: 'noop' });
-  pmDebugRunSingle(psys, 'pm_fft_inverse', { kind: 'live' }, { kind: 'noop' });
-  pmDebugRunSingle(psys, 'pm_sample', { kind: 'live' },
+  await pmDebugRunSingle(psys, 'pm_deposit', { kind: 'live' }, { kind: 'noop' });
+  await pmDebugRunSingle(psys, 'pm_fft_forward', { kind: 'live' }, { kind: 'noop' });
+  await pmDebugRunSingle(psys, 'pm_poisson', { kind: 'live' }, { kind: 'noop' });
+  await pmDebugRunSingle(psys, 'pm_gradient', { kind: 'live' }, { kind: 'noop' });
+  await pmDebugRunSingle(psys, 'pm_fft_inverse', { kind: 'live' }, { kind: 'noop' });
+  await pmDebugRunSingle(psys, 'pm_sample', { kind: 'live' },
     {
       kind: 'readback',
       buffers: {
@@ -339,13 +338,13 @@ export function testForceSampling(psys) {
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys
  */
-export function testFullPipeline(psys) {
+export async function testFullPipeline(psys) {
   console.log('\n========================================');
   console.log('TEST 10: Full Pipeline (End-to-End)');
   console.log('========================================');
   
   // Run with live particles
-  const { computePMForcesSync } = import('../pipeline/pm-pipeline.js');
+  const { computePMForcesSync } = await import('../pipeline/pm-pipeline.js');
   
   console.log('\nRunning full PM/FFT pipeline...');
   computePMForcesSync(psys);
@@ -359,7 +358,7 @@ export function testFullPipeline(psys) {
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys
  */
-export function runAllTests(psys) {
+export async function runAllTests(psys) {
   console.log('\n');
   console.log('╔════════════════════════════════════════╗');
   console.log('║   PM/FFT VERIFICATION TEST SUITE      ║');
@@ -373,27 +372,27 @@ export function runAllTests(psys) {
   
   try {
     // Test 1: Mass Conservation
-    results.massConservation = testMassConservation(psys);
+    results.massConservation = await testMassConservation(psys);
     
     // Test 2-3: Point masses (visual)
-    testSinglePointMass(psys);
-    testTwoPointMasses(psys);
+    await testSinglePointMass(psys);
+    await testTwoPointMasses(psys);
     
     // Test 4: Plane wave
-    testPlaneWave(psys);
+    await testPlaneWave(psys);
     
     // Test 6: DC zero
-    results.dcZero = testDCZero(psys);
+    results.dcZero = await testDCZero(psys);
     
     // Test 7: Poisson equation
-    results.poissonEquation = testPoissonEquation(psys);
+    results.poissonEquation = await testPoissonEquation(psys);
     
     // Test 8-9: Gradient and sampling
-    testForceGradient(psys);
-    testForceSampling(psys);
+    await testForceGradient(psys);
+    await testForceSampling(psys);
     
     // Test 10: Full pipeline
-    testFullPipeline(psys);
+    await testFullPipeline(psys);
     
   } catch (error) {
     console.error('\n✗ Test suite failed with error:', error);
@@ -449,16 +448,16 @@ export function runAllTests(psys) {
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys
  */
-export function quickDiagnostic(psys) {
+export async function quickDiagnostic(psys) {
   console.log('\n╔════════════════════════════════════════╗');
   console.log('║     QUICK DIAGNOSTIC TEST              ║');
   console.log('╚════════════════════════════════════════╝');
   
   // Test mass conservation
-  const massResult = testMassConservation(psys);
+  const massResult = await testMassConservation(psys);
   
   // Test Poisson on simple case
-  const poissonResult = testPoissonEquation(psys);
+  const poissonResult = await testPoissonEquation(psys);
   
   console.log('\n');
   console.log('╔════════════════════════════════════════╗');
