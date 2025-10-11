@@ -430,12 +430,31 @@ function recreatePhysicsAndMesh() {
   let edges = null;
   if (graphForcesEnabled) {
     console.log(`[Demo] Generating social graph for ${particleCount} nodes...`);
+
+    // Target avg degree: 6 edges/node = 3M total edges for 500K nodes
+    const targetAvgDegree = 6;
+
+    // More clusters for large graphs to keep cluster size manageable
+    const numClusters = Math.max(10, Math.ceil(Math.sqrt(particleCount) / 10));
+    const avgClusterSize = particleCount / numClusters;
+
+    // Direct edge sampling: allocate 80% to intra-cluster, 20% to inter-cluster
+    const targetEdgesPerCluster = targetAvgDegree * avgClusterSize * 0.8;
+    const possiblePairsPerCluster = (avgClusterSize * (avgClusterSize - 1)) / 2;
+    const intraClusterProb = targetEdgesPerCluster / possiblePairsPerCluster;
+
+    console.log(
+      `[Demo] Target: ${targetAvgDegree} avg degree, ${numClusters} clusters (avg ${Math.floor(
+        avgClusterSize
+      )} nodes)`
+    );
+
     edges = generateSocialGraph(particleCount, {
-      avgDegree: 6,
+      avgDegree: targetAvgDegree,
       powerLawExponent: 2.3,
-      numClusters: Math.ceil(Math.sqrt(particleCount) / 3),
-      intraClusterProb: 0.15,
-      interClusterProb: 0.005,
+      numClusters: numClusters,
+      intraClusterProb: intraClusterProb,
+      interClusterProb: 0.002,
       strengthMin: 0.001,
       strengthMax: 0.005,
     });
@@ -494,7 +513,7 @@ function recreatePhysicsAndMesh() {
       calculationMethod
     ),
     edges: edges || undefined,
-    springStrength: 0.3,
+    springStrength: 4,
   });
 
   const textureSize = physics.getTextureSize();
