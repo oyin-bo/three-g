@@ -230,6 +230,56 @@ createServer((req, res) => {
       return;
     }
 
+    // B2) Admin: queue eval via POST body when ?eval=post
+    if (req.method === 'POST' && qEval === 'post') {
+      if (!qName) {
+        res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('eval requires &name=<id-fragment>');
+        return;
+      }
+      const needle = qName.toLowerCase();
+      let page = null;
+      for (const [name, p] of PAGES) {
+        if (name.toLowerCase().includes(needle)) { page = p; break; }
+      }
+      if (!page) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('No page matches name fragment: ' + qName);
+        return;
+      }
+
+      let body = '';
+      req.setEncoding('utf8');
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        const code = body || '';
+        if (!code) {
+          res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('empty body');
+          return;
+        }
+
+        const job = {
+          id: String(NEXT_JOB_ID++),
+          code,
+          res, done: false, timer: null
+        };
+        page.queue.push(job);
+
+        job.timer = setTimeout(() => {
+          if (job.done) return;
+          job.done = true;
+          const i = page.queue.indexOf(job);
+          if (i >= 0) page.queue.splice(i, 1);
+          try {
+            res.writeHead(504, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('timeout');
+          } catch { }
+        }, JOB_TIMEOUT_MS);
+      });
+      return;
+    }
+
     // C) Page poll: GET /serve.js?name=...&url=...
     if (req.method === 'GET' && qName) {
       const page = pageFor(qName, qUrl);
@@ -252,7 +302,7 @@ createServer((req, res) => {
       return;
     }
 
-    // D) Page POSTs result
+    // D) Page POSTs result (client response). NOTE: must come AFTER admin POST branch
     if (req.method === 'POST') {
       let body = '';
       req.setEncoding('utf8');
