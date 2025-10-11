@@ -76,7 +76,7 @@ void main() {
   int stageSize = 1 << (u_stage + 1);  // 2^(stage+1)
   int halfStage = stageSize >> 1;      // 2^stage
   int blockIndex = idx / stageSize;
-  int indexInBlock = idx - blockIndex * stageSize;
+  int indexInBlock = idx % stageSize;  // Use modulo instead of subtraction
   
   // Determine if this is the even or odd element
   int pairIndex = indexInBlock % halfStage;
@@ -86,14 +86,23 @@ void main() {
   int partnerOffset = isOdd ? -halfStage : halfStage;
   int partnerIdx = idx + partnerOffset;
   
-  // Build the 3D coordinate for the partner
+  // Build the 3D coordinates for both current and partner
+  // CRITICAL: Reconstruct currentVoxel from idx to ensure consistency
+  ivec3 currentVoxel = voxel;
   ivec3 partnerVoxel = voxel;
-  if (u_axis == 0) partnerVoxel.x = partnerIdx;
-  else if (u_axis == 1) partnerVoxel.y = partnerIdx;
-  else partnerVoxel.z = partnerIdx;
+  if (u_axis == 0) {
+    currentVoxel.x = idx;
+    partnerVoxel.x = partnerIdx;
+  } else if (u_axis == 1) {
+    currentVoxel.y = idx;
+    partnerVoxel.y = partnerIdx;
+  } else {
+    currentVoxel.z = idx;
+    partnerVoxel.z = partnerIdx;
+  }
   
-  // Read current value (at this fragment's position) and partner value
-  vec2 currentUV = v_uv;
+  // Read both values using reconstructed voxel coordinates
+  vec2 currentUV = voxelToTexCoord(currentVoxel, u_gridSize, u_slicesPerRow);
   vec2 partnerUV = voxelToTexCoord(partnerVoxel, u_gridSize, u_slicesPerRow);
   
   vec4 current = texture(u_inputTexture, currentUV);
@@ -103,8 +112,10 @@ void main() {
   vec2 partnerComplex = partner.rg;
   
   // Compute twiddle factor
+  // For Cooley-Tukey DIT: W_N^(k * 2^stage) where N is grid size, k is pairIndex
   float twiddleSign = (u_inverse == 1) ? 1.0 : -1.0;
-  vec2 w = twiddle(float(pairIndex), float(stageSize), twiddleSign);
+  float twiddleK = float(pairIndex * halfStage);
+  vec2 w = twiddle(twiddleK, u_gridSize, twiddleSign);
   
   // Butterfly operation
   // Standard Cooley-Tukey: X[k] = E[k] + W^k*O[k], X[k+N/2] = E[k] - W^k*O[k]
