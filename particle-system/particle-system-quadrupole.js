@@ -20,6 +20,9 @@ import traversalQuadrupoleFrag from './shaders/traversal-quadrupole.frag.js';
 import velIntegrateFrag from './shaders/vel_integrate.frag.js';
 import posIntegrateFrag from './shaders/pos_integrate.frag.js';
 
+// Force modules
+import { LaplacianForceModule } from './force-modules/laplacian-force-module.js';
+
 // Pipeline utilities
 import { unbindAllTextures as dbgUnbindAllTextures, checkGl as dbgCheckGl, checkFBO as dbgCheckFBO } from './utils/debug.js';
 import { aggregateParticlesIntoL0 as aggregateL0 } from './pipeline/aggregator.js';
@@ -153,19 +156,17 @@ export class ParticleSystemQuadrupole {
     
     // Laplacian force module for graph edges (auto-created if edges provided)
     this.laplacianModule = null;
+    this.laplacianModuleOptions = null;
     // @ts-ignore - edges/springStrength added to options type above
     if (options.edges) {
-      // Lazy import to avoid circular dependencies
-      // @ts-ignore - module exports constructor function
-      const LaplacianForceModule = require('./force-modules/laplacian-force-module.js');
+      // Store options for lazy initialization in init()
       // @ts-ignore - edges/springStrength
-      this.laplacianModule = new LaplacianForceModule(gl, {
+      this.laplacianModuleOptions = {
         // @ts-ignore
         edges: options.edges,
         // @ts-ignore
-        springStrength: options.springStrength || 0.001
-      });
-      this.externalForceModules.push(this.laplacianModule);
+        k: options.springStrength || 0.001
+      };
     }
   }
 
@@ -190,7 +191,7 @@ export class ParticleSystemQuadrupole {
     dbgCheckFBO(this.gl, tag);
   }
 
-  init() {
+  async init() {
     let finished = false;
     try {
       this.checkWebGL2Support();
@@ -200,13 +201,25 @@ export class ParticleSystemQuadrupole {
       this.createGeometry();
       this.uploadParticleData();
       
+      // Create Laplacian force module if edges provided
+      if (this.laplacianModuleOptions) {
+        this.laplacianModule = new LaplacianForceModule(
+          this.laplacianModuleOptions.edges,
+          {
+            k: this.laplacianModuleOptions.k
+          }
+        );
+        this.externalForceModules.push(this.laplacianModule);
+      }
+      
       // Initialize external force modules
       for (const module of this.externalForceModules) {
-        module.init({
+        await module.init(this.gl, {
           positionTextures: this.positionTextures.textures,
           textureWidth: this.textureWidth,
           textureHeight: this.textureHeight,
-          particleCount: this.options.particleCount
+          particleCount: this.options.particleCount,
+          disableFloatBlend: this._disableFloatBlend
         });
       }
       
@@ -820,16 +833,17 @@ export class ParticleSystemQuadrupole {
    * Register an external force module
    * @param {{init: Function, accumulate: Function, dispose: Function}} module
    */
-  registerForceModule(module) {
+  async registerForceModule(module) {
     if (!this.externalForceModules.includes(module)) {
       this.externalForceModules.push(module);
       // Initialize module if particle system is already initialized
       if (this.isInitialized) {
-        module.init({
+        await module.init(this.gl, {
           positionTextures: this.positionTextures.textures,
           textureWidth: this.textureWidth,
           textureHeight: this.textureHeight,
-          particleCount: this.options.particleCount
+          particleCount: this.options.particleCount,
+          disableFloatBlend: this._disableFloatBlend
         });
       }
     }

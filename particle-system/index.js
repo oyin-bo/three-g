@@ -25,7 +25,9 @@ import { ParticleSystemSpectral } from './particle-system-spectral.js';
  *   maxAccel?: number,
  *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
  *   debugSkipQuadtree?: boolean,
- *   enableProfiling?: boolean
+ *   enableProfiling?: boolean,
+ *   edges?: Iterable<{from: number, to: number, strength: number}>,
+ *   springStrength?: number
  * }} options
  * 
  * Method options:
@@ -49,7 +51,9 @@ export function particleSystem({
   maxAccel = 1.0,
   worldBounds,
   debugSkipQuadtree = false,
-  enableProfiling = false
+  enableProfiling = false,
+  edges,
+  springStrength = 0.001
 }) {
   // Compute particle count from positions array (RGBA = 4 components per particle)
   const particleCount = particles.length;
@@ -121,7 +125,11 @@ export function particleSystem({
     worldBounds,
     debugSkipQuadtree,
     enableProfiling,
-    planA: usePlanA // For spectral method
+    planA: usePlanA, // For spectral method
+    // @ts-ignore - edges/springStrength only supported by quadrupole
+    edges,
+    // @ts-ignore
+    springStrength
   });
   
   // Initialize asynchronously (internal - user doesn't need to await)

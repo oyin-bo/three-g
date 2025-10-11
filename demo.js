@@ -8,6 +8,9 @@ import { particleSystem } from './particle-system/index.js';
 // Import PM/FFT pipeline verifiers (statically, not dynamically)
 import * as pmVerifiers from './particle-system/pm-debug/pm-pipeline-verifiers.js';
 
+// Import graph generators for force-directed layout
+import { generateSocialGraph, generateGridGraph, generateTreeGraph } from './particle-system/utils/social-graph-generator.js';
+
 // 1. Setup Scene
 const outcome = createScene({
   renderer: { antialias: true },
@@ -33,6 +36,7 @@ document.body.appendChild(container);
 // 2. Get UI elements
 const countInput = /** @type {HTMLInputElement} */ (document.getElementById('count-input'));
 const profilingCheckbox = /** @type {HTMLInputElement} */ (document.getElementById('profiling-checkbox'));
+const graphForceCheckbox = /** @type {HTMLInputElement} */ (document.getElementById('graph-force-checkbox'));
 const monopoleRadio = /** @type {HTMLInputElement} */ (document.getElementById('monopole-radio'));
 const quadrupoleRadio = /** @type {HTMLInputElement} */ (document.getElementById('quadrupole-radio'));
 const spectralRadio = /** @type {HTMLInputElement} */ (document.getElementById('spectral-radio'));
@@ -48,6 +52,7 @@ const worldBounds = /** @type {const} */({
 });
 
 let profilingEnabled = false;
+let graphForcesEnabled = false;
 let calculationMethod = 'quadrupole'; // Default to quadrupole
 let frameCount = 0;
 let lastProfileUpdate = 0;
@@ -195,6 +200,13 @@ profilingCheckbox.onchange = () => {
   recreateAll();
 };
 
+// 6b. Graph forces checkbox handler
+graphForceCheckbox.onchange = () => {
+  graphForcesEnabled = graphForceCheckbox.checked;
+  console.log('[Demo] Graph forces:', graphForcesEnabled ? 'ENABLED' : 'DISABLED');
+  recreateAll();
+};
+
 // 7. Calculation method radio handlers
 monopoleRadio.onchange = () => {
   if (monopoleRadio.checked) {
@@ -316,6 +328,25 @@ function recreatePhysicsAndMesh() {
   gravityStrength = gravityStrength * 0.0001;
   gravityStrength = gravityStrength * gravityStrength;
   gravityStrength += 0.0000005;
+  
+  // Generate graph edges if graph forces enabled
+  let edges = null;
+  if (graphForcesEnabled) {
+    console.log(`[Demo] Generating social graph for ${particleCount} nodes...`);
+    edges = generateSocialGraph(particleCount, {
+      avgDegree: 6,
+      powerLawExponent: 2.3,
+      numClusters: Math.ceil(Math.sqrt(particleCount) / 3),
+      intraClusterProb: 0.15,
+      interClusterProb: 0.005,
+      strengthMin: 0.001,
+      strengthMax: 0.005
+    });
+    console.log(`[Demo] Generated ${edges.length} edges (avg degree: ${(2 * edges.length / particleCount).toFixed(2)})`);
+    
+    // Reduce gravity when using graph forces to prevent collapse
+    gravityStrength *= 0.1;
+  }
 
   const physics = particleSystem({
     gl,
@@ -344,11 +375,13 @@ function recreatePhysicsAndMesh() {
     },
     theta: 0.7,  // Optimized for performance (was 0.5)
     gravityStrength,
-    softening: 0.1,
+    softening: 0.2,
     dt: 10 / 60,
     damping: 0.01,
     enableProfiling: profilingEnabled,
-    method: /** @type {'quadrupole' | 'monopole' | 'spectral'} */ (calculationMethod)
+    method: /** @type {'quadrupole' | 'monopole' | 'spectral'} */ (calculationMethod),
+    edges: edges || undefined,
+    springStrength: 0.0003
   });
 
   const textureSize = physics.getTextureSize();
