@@ -1,131 +1,405 @@
-# Unload: read computed particle state back to CPU
+# Unload: Read Computed Particle State Back to CPU
 
-Goal
+## Overview
 
-Provide a small, deterministic API to read particle results (positions and velocities) from GPU textures back into a caller-provided JS structure.
+This document specifies how to read particle positions and velocities from GPU textures back to CPU memory for all three particle system implementations: **Monopole**, **Quadrupole**, and **Spectral**.
 
-API
+The challenge: the three systems store and compute velocity differently, requiring method-specific unload strategies.
 
-unload(particles, set?)
+---
 
-- particles: array of objects. Each element may already be a plain particle with optional numeric fields: x, y, z, vx, vy, vz. The array length defines how many particles to unpack.
-- set (optional): function called for each particle to receive unpacked values. Signature:
-  ({ particle, index, x?, y?, z?, vx?, vy?, vz? }) => void
+## System-Specific Data Layout
 
-Behavior
+### Monopole and Quadrupole (Tree-Code Methods)
 
-- The function will read the minimal set of GPU textures that contain computed data (positions and velocities). It will map texture texels to particle indices using the existing particle->texel packing scheme used by the pipeline.
-- For each particle index i (0..N-1) it will read x,y,z into x,y,z and vx,vy,vz from velocity textures when available.
-- If a provided particle object already has those fields, they will be overwritten. If a `set` callback is provided it will be called for every particle after unpacking; callers can store the values wherever they like.
-- The function must be synchronous from the caller's point of view only after the GPU readback completes. Implementation will perform an async readPixels/read or a mapped buffer read and then synchronously call the `set` callbacks once data is available. The exported `unload` may return a Promise that resolves when done.
+Both maintain explicit per-particle velocity textures throughout the simulation:
 
-Return value
+- **Position texture**: RGBA32F, ping-pong buffer
+  - `(x, y, z, mass)`
+- **Velocity texture**: RGBA32F, ping-pong buffer
+  - `(vx, vy, vz, unused)`
 
-- Promise<void> that resolves when all particles have been updated. (If implementation can do synchronous blocking readback in the environment, return Promise.resolve()).
+**Unload strategy**: Direct readback from both textures — straightforward, no computation required.
 
-Edge cases and rules
+### Spectral (Particle-Mesh/FFT Method)
 
-- If `particles` is not an array or its length doesn't match the active particle count, the function should throw an error. Prefer strict validation to avoid silent truncation.
-- Missing fields: if textures don't provide z or vz (2D-only systems), set those fields to 0 or leave undefined depending on project conventions — choose 0 for numeric consistency.
-- If both raw particle objects and a `set` callback are provided, prefer calling `set`. The `set` receives the original particle object in `particle` so it may also mutate it.
-- Large particle counts: do readback in large, contiguous chunks where possible to avoid repeated GPU round-trips. Use a typed buffer sized to N * components.
-- Precision: preserve float32 precision when reading back; float16-packed textures must be unpacked on read.
+Does **not** store per-particle velocities in a texture. Instead:
 
-Implementation steps (developer-ready)
+- **Position texture**: RGBA32F, ping-pong buffer
+  - `(x, y, z, mass)`
+- **Force texture**: RGBA32F, single texture
+  - `(fx, fy, fz, unused)` — updated each frame by PM/FFT pipeline
+- Velocities are **implicitly updated** during the integration shader and immediately consumed to advance positions. They exist only transiently during the `vel_integrate` shader execution.
 
-1. Validation
-	# Unload: read computed particle state back to CPU
+**Unload strategy**: Velocities must be **reconstructed** on GPU via a custom shader that reads position history (current vs. previous frame) and computes `v = (pos_current - pos_prev) / dt`. Alternatively, recompute from forces if position history is unavailable. This requires:
 
-	## Goal
+1. Saving previous-frame positions in an additional texture (not currently stored by spectral system), or
+2. Running a GPU shader to derive velocity from `(position_delta / dt)` using ping-pong state, or
+3. Reconstructing approximate velocity from current force via `v ≈ v_prev + (f / m) * dt` (less accurate, but viable if no position history exists).
 
-	Provide a small, deterministic API to read particle results (positions and velocities) from GPU textures back into a caller-provided JS structure.
+**Recommended approach for spectral**:  
+Use a dedicated unload shader that samples both position ping-pong textures (current and previous) and computes:
 
-	## API
+```glsl
+vec3 pos_current = texture(u_positionCurrent, uv).xyz;
+vec3 pos_previous = texture(u_positionPrevious, uv).xyz;
+float dt = u_dt;
+vec3 velocity = (pos_current - pos_previous) / dt;
+```
 
-	unload(particles, set?)
+This shader writes velocity to a temporary output texture, which is then read back alongside positions.
 
-	- particles: array of objects. Each element may already be a plain particle with optional numeric fields: x, y, z, vx, vy, vz. The array length defines how many particles to unpack.
-	- set (optional): function called for each particle to receive unpacked values. Signature:
-	  ({ particle, index, x?, y?, z?, vx?, vy?, vz? }) => void
+---
 
-	## Behavior
+## API Design
 
-	- The function will read the minimal set of GPU textures that contain computed data (positions and velocities). It will map texture texels to particle indices using the existing particle->texel packing scheme used by the pipeline.
-	- For each particle index i (0..N-1) it will read x,y,z into x,y,z and vx,vy,vz from velocity textures when available.
-	- If a provided particle object already has those fields, they will be overwritten. If a `set` callback is provided it will be called for every particle after unpacking; callers can store the values wherever they like.
-	- The function must be synchronous from the caller's point of view only after the GPU readback completes. Implementation will perform an async readPixels/read or a mapped buffer read and then synchronously call the `set` callbacks once data is available. The exported `unload` may return a Promise that resolves when done.
+```javascript
+/**
+ * Read particle positions and velocities from GPU back to CPU.
+ *
+ * @param {Array<object>} particles - Array of particle objects. Length must match particle count.
+ * @param {function} [set] - Optional callback invoked per particle:
+ *   ({ particle, index, x, y, z, vx, vy, vz }) => void
+ *
+ * @returns {Promise<void>} Resolves when all data has been transferred and particles updated.
+ *
+ * @throws {Error} If system is not initialized (check ps.isInitialized or await ps.ready())
+ * @throws {Error} If particles array length does not match ps.particleCount
+ * @throws {Error} If GPU readback fails
+ */
+async function unload(particles, set) {
+  // Implementation varies by system type
+}
+```
 
-	## Return value
+### Behavior
 
-	- Promise<void> that resolves when all particles have been updated. (If implementation can do synchronous blocking readback in the environment, return Promise.resolve()).
+- **Validates** that `particles.length === ps.options.particleCount`.
+- **Checks readiness**: throws if `ps.isInitialized === false`. Callers should `await ps.ready()` first.
+- Performs **minimal GPU readback**: reads position and velocity textures (or reconstructs velocity for spectral).
+- Calls `set(data)` for each particle if provided, otherwise mutates `particles[i]` directly with `x, y, z, vx, vy, vz`.
+- **Blocks** (async) until GPU readback completes. Returns a `Promise<void>`.
 
-	## Edge cases and rules
+---
 
-	- If `particles` is not an array or its length doesn't match the active particle count, the function should throw an error. Prefer strict validation to avoid silent truncation.
-	- Missing fields: if textures don't provide z or vz (2D-only systems), set those fields to 0 or leave undefined depending on project conventions — choose 0 for numeric consistency.
-	- If both raw particle objects and a `set` callback are provided, prefer calling `set`. The `set` receives the original particle object in `particle` so it may also mutate it.
-	- Large particle counts: do readback in large, contiguous chunks where possible to avoid repeated GPU round-trips. Use a typed buffer sized to N * components.
-	- Precision: preserve float32 precision when reading back; float16-packed textures must be unpacked on read.
+## Implementation Strategy by Method
 
-	## Implementation steps (developer-ready)
+### Monopole / Quadrupole
 
-	### 1. Validation
+```javascript
+async function unload_TreeCode(ps, particles, set) {
+  const gl = ps.gl;
+  if (!ps.isInitialized) throw new Error("System not initialized");
+  if (particles.length !== ps.options.particleCount) {
+    throw new Error(
+      `Particle count mismatch: expected ${ps.options.particleCount}, got ${particles.length}`
+    );
+  }
 
-		- assert Array.isArray(particles)
-		- read active particle count (N) from pipeline state and assert particles.length === N
+  const w = ps.textureWidth;
+  const h = ps.textureHeight;
+  const N = ps.options.particleCount;
 
-	### 2. Determine texture layout
+  // Allocate CPU buffers
+  const posBuffer = new Float32Array(w * h * 4);
+  const velBuffer = new Float32Array(w * h * 4);
 
-		- reuse the existing packing function that maps particle index -> texel coordinate. Usually the pipeline already stores width/height and packing stride.
-		- compute texel coordinates for indices 0..N-1
+  // Bind position FBO and read
+  const posFBO =
+    ps.positionTextures.framebuffers[ps.positionTextures.currentIndex];
+  gl.bindFramebuffer(gl.FRAMEBUFFER, posFBO);
+  gl.readBuffer(gl.COLOR_ATTACHMENT0);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, posBuffer);
 
-	### 3. Allocate CPU buffer
+  // Bind velocity FBO and read
+  const velFBO =
+    ps.velocityTextures.framebuffers[ps.velocityTextures.currentIndex];
+  gl.bindFramebuffer(gl.FRAMEBUFFER, velFBO);
+  gl.readBuffer(gl.COLOR_ATTACHMENT0);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, velBuffer);
 
-		- create a Float32Array of length N * componentsPerParticle (componentsPerParticle = 6 for x,y,z,vx,vy,vz)
-		- prefer a single readPixels into a RGBA float texture or a buffer mapped read if using WebGPU/WebGL2 + EXT_color_buffer_float + readPixelsFloat
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-	### 4. Issue GPU readback
+  // Unpack into particles
+  for (let i = 0; i < N; i++) {
+    const idx = i * 4;
+    const x = posBuffer[idx + 0];
+    const y = posBuffer[idx + 1];
+    const z = posBuffer[idx + 2];
+    const vx = velBuffer[idx + 0];
+    const vy = velBuffer[idx + 1];
+    const vz = velBuffer[idx + 2];
 
-		- bind the textures or framebuffer used for final position/velocity output
-		- perform a single readPixels or a single buffer map read to fill the Float32Array
-		- if the platform only allows RGBA per-texel, expand unpacking accordingly (e.g. two RGBA reads map to 6 components)
+    if (set) {
+      set({ particle: particles[i], index: i, x, y, z, vx, vy, vz });
+    } else {
+      particles[i].x = x;
+      particles[i].y = y;
+      particles[i].z = z;
+      particles[i].vx = vx;
+      particles[i].vy = vy;
+      particles[i].vz = vz;
+    }
+  }
+}
+```
 
-	### 5. Unpack into particles
+### Spectral (with Velocity Reconstruction Shader)
 
-		- iterate i from 0 to N-1:
-		  - compute source offset in the CPU buffer for particle i
-		  - read x,y,z,vx,vy,vz (use 0 for missing component)
-		  - if set provided: call set({ particle: particles[i], index: i, x, y, z, vx, vy, vz })
-		  - else: mutate particles[i].x = x; particles[i].y = y; ...
+Because spectral does not maintain per-particle velocity textures, we must reconstruct velocities on GPU.
 
-	### 6. Return
+**Step 1**: Create a temporary velocity extraction shader and framebuffer (done once, cached):
 
-		- resolve the returned Promise once all particles are updated
+```javascript
+// In ParticleSystemSpectral.init() or lazy-init on first unload():
+ps._unloadVelocityTexture = createRenderTexture(
+  gl,
+  ps.textureWidth,
+  ps.textureHeight
+);
+ps._unloadVelocityProgram = createProgram(
+  gl,
+  fsQuadVert,
+  `#version 300 es
+precision highp float;
+uniform sampler2D u_positionCurrent;
+uniform sampler2D u_positionPrevious;
+uniform float u_dt;
+in vec2 v_uv;
+out vec4 fragColor;
 
-	## Testing and verification
+void main() {
+  vec4 posCurrent = texture(u_positionCurrent, v_uv);
+  vec4 posPrevious = texture(u_positionPrevious, v_uv);
+  vec3 velocity = (posCurrent.xyz - posPrevious.xyz) / u_dt;
+  fragColor = vec4(velocity, 0.0);
+}
+`
+);
+```
 
-	- Unit test: create a tiny pipeline with 4 particles whose positions are computed on GPU to known values. Call `unload(particles)` and assert particle objects contain expected x/y/z and vx/vy/vz.
-	- Test with `set` callback: pass an array of empty objects and set function that pushes values into another array. Confirm order and values match.
-	- Stress test: test with large N (e.g., 1e5) to validate memory usage and that readback uses a single contiguous buffer.
+**Step 2**: During unload, run the shader to extract velocities:
 
-	## Follow-ups / optional improvements
+```javascript
+async function unload_Spectral(ps, particles, set) {
+  const gl = ps.gl;
+  if (!ps.isInitialized) throw new Error("System not initialized");
+  if (particles.length !== ps.options.particleCount) {
+    throw new Error(
+      `Particle count mismatch: expected ${ps.options.particleCount}, got ${particles.length}`
+    );
+  }
 
-	- Provide an alternative API `unloadIntoTypedArrays` that writes directly into caller-provided Float32Arrays for zero-allocation critical paths.
-	- Support partial ranges: allow optional start/length args to read subsets of particles.
-	- If using WebGL1, provide a fallback packing/unpacking path that reads RGBA unsigned bytes and decodes floats.
+  const w = ps.textureWidth;
+  const h = ps.textureHeight;
+  const N = ps.options.particleCount;
 
-	## Examples
+  // Extract velocity into temporary texture
+  gl.useProgram(ps._unloadVelocityProgram);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, ps._unloadVelocityTexture.framebuffer);
+  gl.viewport(0, 0, w, h);
 
-	- Basic (mutate existing array):
+  const currentIdx = ps.positionTextures.currentIndex;
+  const prevIdx = 1 - currentIdx;
 
-	  await unload(particles)
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, ps.positionTextures.textures[currentIdx]);
+  gl.uniform1i(
+    gl.getUniformLocation(ps._unloadVelocityProgram, "u_positionCurrent"),
+    0
+  );
 
-	- Using `set` to store values elsewhere:
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, ps.positionTextures.textures[prevIdx]);
+  gl.uniform1i(
+    gl.getUniformLocation(ps._unloadVelocityProgram, "u_positionPrevious"),
+    1
+  );
 
-	  await unload(particles, ({ index, x, y, z, vx, vy, vz }) => {
-		 bufferX[index] = x
-		 bufferY[index] = y
-		 // ...
-	  })
+  gl.uniform1f(
+    gl.getUniformLocation(ps._unloadVelocityProgram, "u_dt"),
+    ps.options.dt
+  );
 
-	Keep it simple: the exported `unload` should be small, predictable, and documented. It must validate inputs, read back all needed textures in as few GPU calls as possible, and then either mutate the provided particle objects or call the provided `set` callback for each particle.
+  gl.bindVertexArray(ps.quadVAO);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindVertexArray(null);
+
+  // Allocate CPU buffers
+  const posBuffer = new Float32Array(w * h * 4);
+  const velBuffer = new Float32Array(w * h * 4);
+
+  // Read position
+  const posFBO = ps.positionTextures.framebuffers[currentIdx];
+  gl.bindFramebuffer(gl.FRAMEBUFFER, posFBO);
+  gl.readBuffer(gl.COLOR_ATTACHMENT0);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, posBuffer);
+
+  // Read reconstructed velocity
+  gl.bindFramebuffer(gl.FRAMEBUFFER, ps._unloadVelocityTexture.framebuffer);
+  gl.readBuffer(gl.COLOR_ATTACHMENT0);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, velBuffer);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  // Unpack into particles
+  for (let i = 0; i < N; i++) {
+    const idx = i * 4;
+    const x = posBuffer[idx + 0];
+    const y = posBuffer[idx + 1];
+    const z = posBuffer[idx + 2];
+    const vx = velBuffer[idx + 0];
+    const vy = velBuffer[idx + 1];
+    const vz = velBuffer[idx + 2];
+
+    if (set) {
+      set({ particle: particles[i], index: i, x, y, z, vx, vy, vz });
+    } else {
+      particles[i].x = x;
+      particles[i].y = y;
+      particles[i].z = z;
+      particles[i].vx = vx;
+      particles[i].vy = vy;
+      particles[i].vz = vz;
+    }
+  }
+}
+```
+
+---
+
+## Runtime Constraints and Error Handling
+
+### GPU Readback Stalls
+
+- `gl.readPixels` is **synchronous** and **blocks** the GPU pipeline until all prior rendering commands complete.
+- Minimize calls: read entire textures in one `readPixels` call per texture.
+- Avoid calling `unload()` every frame — use sparingly (e.g., for snapshots, pause states, or final export).
+
+### Float Texture Support
+
+- Requires `EXT_color_buffer_float` extension (all systems already check this in `checkWebGL2Support()`).
+- If unavailable (rare on modern hardware), fall back to encoding floats as RGBA8 (not implemented here, but noted as future work).
+
+### Readiness Checks
+
+Always ensure the system is initialized before calling `unload`:
+
+```javascript
+await ps.ready(); // Wait for async initialization
+await unload(particles); // Safe to call now
+```
+
+If `ps.isInitialized === false`, `unload` must throw immediately with a clear message:
+
+```
+Error: Cannot unload: particle system not initialized. Call await ps.ready() first.
+```
+
+### Particle Count Validation
+
+Strict validation prevents silent data corruption:
+
+```javascript
+if (!Array.isArray(particles)) {
+  throw new Error("particles must be an array");
+}
+if (particles.length !== ps.options.particleCount) {
+  throw new Error(
+    `Particle count mismatch: expected ${ps.options.particleCount}, got ${particles.length}`
+  );
+}
+```
+
+---
+
+## Integration into Particle System API
+
+Add `unload` as a method on each particle system class:
+
+```javascript
+// In particle-system/index.js
+const baseAPI = {
+  // ... existing methods ...
+
+  /**
+   * Read particle positions and velocities from GPU to CPU.
+   * @param {Array<object>} particles - Target array (length must match particleCount)
+   * @param {function} [set] - Optional callback per particle
+   * @returns {Promise<void>}
+   */
+  unload: async (particles, set) => {
+    if (!system.isInitialized) {
+      throw new Error(
+        "Cannot unload: particle system not initialized. Call await ps.ready() first."
+      );
+    }
+    return system.unload(particles, set);
+  },
+};
+```
+
+Implement `unload()` method in each system class:
+
+- `ParticleSystemMonopole.unload()`
+- `ParticleSystemQuadrupole.unload()`
+- `ParticleSystemSpectral.unload()` (with velocity reconstruction shader)
+
+---
+
+## Testing and Verification
+
+### Unit Tests
+
+1. **Basic readback** (Monopole/Quadrupole):
+
+   - Create system with 4 particles at known positions `[(0,0,0), (1,0,0), (0,1,0), (0,0,1)]`.
+   - Step once (no forces, velocities remain zero).
+   - Call `unload(particles)`.
+   - Assert positions match input, velocities are zero.
+
+2. **Velocity reconstruction** (Spectral):
+
+   - Create system with 4 particles at `(0,0,0)` with force `(1,0,0)`.
+   - Step once.
+   - Call `unload(particles)`.
+   - Assert velocities are non-zero in x-direction, positions have advanced.
+
+3. **Large particle count**:
+
+   - Test with 10,000 particles.
+   - Verify single `readPixels` call per texture (check via profiling or logs).
+
+4. **Error handling**:
+   - Call `unload()` before `ps.ready()` → expect error.
+   - Pass wrong-length array → expect error.
+
+### Example Usage
+
+```javascript
+const ps = particleSystem({ gl, particles, method: "spectral" });
+await ps.ready();
+
+// Run simulation
+for (let i = 0; i < 100; i++) {
+  ps.compute();
+}
+
+// Read back results
+await ps.unload(particles);
+
+// Now particles array contains updated x, y, z, vx, vy, vz
+console.log(particles[0]); // { x: 1.23, y: 4.56, z: 0.78, vx: 0.01, vy: 0.02, vz: 0.00 }
+```
+
+---
+
+## Summary
+
+| System     | Position Source  | Velocity Source                       | Unload Strategy                    |
+| ---------- | ---------------- | ------------------------------------- | ---------------------------------- |
+| Monopole   | Position texture | Velocity texture                      | Direct readback (2 textures)       |
+| Quadrupole | Position texture | Velocity texture                      | Direct readback (2 textures)       |
+| Spectral   | Position texture | **Reconstructed** from position delta | GPU shader + readback (2 textures) |
+
+**Key takeaway**: Spectral requires a custom GPU shader to extract velocities before CPU readback, because it does not maintain per-particle velocity textures. Tree-code methods (Monopole/Quadrupole) can read velocities directly.
