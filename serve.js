@@ -89,9 +89,12 @@ async function inject() {
 
       let payload;
       try {
-        const globalEval = (0, eval);
-        const value = await globalEval(script);
-        payload = JSON.stringify({ ok: true, value });
+        const value = await (0, eval)(script);
+        try {
+          payload = JSON.stringify({ ok: true, value });
+        } catch (_err) {
+          payload = JSON.stringify({ ok: true, value: String(value) });
+        }
       } catch (err) {
         payload = JSON.stringify({
           ok: false,
