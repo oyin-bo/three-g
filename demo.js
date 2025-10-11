@@ -446,8 +446,14 @@ function recreatePhysicsAndMesh() {
       ).toFixed(2)})`
     );
 
-    // Reduce gravity when using graph forces to prevent collapse
-    // gravityStrength *= 0.1;
+    // Use NEGATIVE gravity for repulsion when using graph forces
+    // This creates a clean repulsion force instead of complex threshold logic
+    gravityStrength = -gravityStrength * 50.0; // Negative = repulsion, stronger to balance springs
+    console.log(
+      `[Demo] Using negative gravity (repulsion): ${gravityStrength.toExponential(
+        2
+      )}`
+    );
   }
 
   const physics = particleSystem({
@@ -488,7 +494,7 @@ function recreatePhysicsAndMesh() {
       calculationMethod
     ),
     edges: edges || undefined,
-    springStrength: 0.0003,
+    springStrength: 0.3,
   });
 
   const textureSize = physics.getTextureSize();

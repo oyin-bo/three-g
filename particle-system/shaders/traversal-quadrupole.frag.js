@@ -157,22 +157,7 @@ vec3 computeQuadrupoleAcceleration(
   float trS = S[0][0] + S[1][1] + S[2][2];
   mat3 Q = 3.0 * S - trS * mat3(1.0);
   
-  // Compute distance
-  float d = length(r);
-  
-  // MODIFIED GRAVITY: threshold-based repulsion to prevent collapse
-  // If d >= eps: normal attraction (monopole + quadrupole)
-  // If d < eps: strong repulsion with 1/r^2 falloff (like inverse gravity)
-  if (d < eps) {
-    // Strong repulsion inside softening radius using inverse-square law
-    // This ensures particles strongly repel when very close
-    vec3 rNorm = r / max(d, 1e-10);
-    float d2 = d * d;
-    float repulsionStrength = M0 / max(d2, eps * eps * 0.01);  // Capped at 1% of eps^2
-    return -repulsionStrength * rNorm;  // Negative sign = repulsion
-  }
-  
-  // Normal attraction outside softening radius
+  // Compute monopole + quadrupole acceleration
   float r2 = dot(r, r) + eps * eps;
   float invR = inversesqrt(r2);
   float invR3 = invR * invR * invR;
@@ -232,17 +217,10 @@ void main() {
             vec3 M1 = A0.rgb;
             totalForce += computeQuadrupoleAcceleration(r, M0, M1, A1, A2, eps);
           } else {
-            // Monopole only (fallback) with threshold repulsion
-            if (d < eps) {
-              vec3 rNorm = r / max(d, 1e-10);
-              float d2 = d * d;
-              float repulsionStrength = M0 / max(d2, eps * eps * 0.01);
-              totalForce -= repulsionStrength * rNorm;
-            } else {
-              float r2 = dot(r, r) + eps * eps;
-              float invR3 = pow(r2, -1.5);
-              totalForce += M0 * r * invR3;
-            }
+            // Monopole only (fallback)
+            float r2 = dot(r, r) + eps * eps;
+            float invR3 = pow(r2, -1.5);
+            totalForce += M0 * r * invR3;
           }
         }
         // If not accepted, rely on finer levels
@@ -300,17 +278,10 @@ ${
               vec3 M1 = A0.rgb;
               totalForce += computeQuadrupoleAcceleration(r, M0, M1, A1, A2, eps);
             } else {
-              // Monopole only (fallback) with threshold repulsion
-              if (d < eps) {
-                vec3 rNorm = r / max(d, 1e-10);
-                float d2 = d * d;
-                float repulsionStrength = M0 / max(d2, eps * eps * 0.01);
-                totalForce -= repulsionStrength * rNorm;
-              } else {
-                float r2 = dot(r, r) + eps * eps;
-                float invR3 = pow(r2, -1.5);
-                totalForce += M0 * r * invR3;
-              }
+              // Monopole only (fallback)
+              float r2 = dot(r, r) + eps * eps;
+              float invR3 = pow(r2, -1.5);
+              totalForce += M0 * r * invR3;
             }
           }
           // If not accepted, rely on finer levels or L0 near-field
@@ -356,19 +327,9 @@ ${
           
           vec3 com = A0.rgb / max(M0, 1e-6);
           vec3 r = com - myPos;
-          float d = length(r);
-          
-          // Threshold-based gravity for L0 near-field
-          if (d < eps) {
-            vec3 rNorm = r / max(d, 1e-10);
-            float d2 = d * d;
-            float repulsionStrength = M0 / max(d2, eps * eps * 0.01);
-            totalForce -= repulsionStrength * rNorm;
-          } else {
-            float r2 = dot(r, r) + eps * eps;
-            float invR3 = pow(r2, -1.5);
-            totalForce += M0 * r * invR3;
-          }
+          float r2 = dot(r, r) + eps * eps;
+          float invR3 = pow(r2, -1.5);
+          totalForce += M0 * r * invR3;
         }
       }
     }
