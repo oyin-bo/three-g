@@ -52,11 +52,11 @@ import { computePMForcesSync } from '../pipeline/pm-pipeline.js';
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<VerificationResult[]>}
  */
-export function verifyDeposit(psys) {
+export async function verifyDeposit(psys) {
   const results = [];
   
   // Check 1: Mass conservation
-  const massResult = checkMassConservation(psys);
+  const massResult = await checkMassConservation(psys);
   results.push({
     passed: massResult.passed,
     message: `Mass conservation: grid=${massResult.gridMass.toFixed(6)}, particles=${massResult.particleMass.toFixed(6)}, error=${(massResult.error * 100).toFixed(4)}%`,
@@ -64,7 +64,7 @@ export function verifyDeposit(psys) {
   });
   
   // Check 2: Grid bounds (no negative or NaN values)
-  const boundsResult = checkGridBounds(psys);
+  const boundsResult = await checkGridBounds(psys);
   results.push({
     passed: boundsResult.passed,
     message: `Grid bounds: ${boundsResult.passed ? 'OK' : 'FAILED'} (${boundsResult.details})`,
@@ -72,7 +72,7 @@ export function verifyDeposit(psys) {
   });
   
   // Check 3: CIC spread heuristic (non-zero cell count reasonable)
-  const spreadResult = checkCICSpread(psys);
+  const spreadResult = await checkCICSpread(psys);
   results.push({
     passed: spreadResult.passed,
     message: `CIC spread: ${spreadResult.nonZeroCells} non-zero cells (${spreadResult.fillRatio.toFixed(2)}%)`,
@@ -86,7 +86,7 @@ export function verifyDeposit(psys) {
  * Check grid bounds (no negative/NaN values)
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
-function checkGridBounds(psys) {
+async function checkGridBounds(psys) {
   const gl = psys.gl;
   const grid = psys.pmGrid;
   
@@ -135,7 +135,7 @@ function checkGridBounds(psys) {
  * Check CIC spread heuristic
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
-function checkCICSpread(psys) {
+async function checkCICSpread(psys) {
   const gl = psys.gl;
   const grid = psys.pmGrid;
   
@@ -187,11 +187,11 @@ function checkCICSpread(psys) {
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<VerificationResult[]>}
  */
-export function verifyFFTForward(psys) {
+export async function verifyFFTForward(psys) {
   const results = [];
   
   // Check 1: Parseval's theorem (energy conservation)
-  const parsevalResult = checkParseval(psys);
+  const parsevalResult = await checkParseval(psys);
   results.push({
     passed: parsevalResult.passed,
     message: `Parseval: real=${parsevalResult.realEnergy.toExponential(3)}, freq=${parsevalResult.freqEnergy.toExponential(3)}, ratio=${parsevalResult.ratio.toFixed(6)}`,
@@ -199,7 +199,7 @@ export function verifyFFTForward(psys) {
   });
   
   // Check 2: Plane wave spectrum peak
-  const peakResult = checkPlaneWavePeak(psys);
+  const peakResult = await checkPlaneWavePeak(psys);
   results.push({
     passed: peakResult.passed,
     message: `Plane wave peak: ${peakResult.passed ? 'detected' : 'NOT FOUND'} at k=${peakResult.peakK}`,
@@ -207,7 +207,7 @@ export function verifyFFTForward(psys) {
   });
   
   // Check 3: Hermitian symmetry (F(-k) = F*(k) for real input)
-  const hermitianResult = checkHermitianSymmetry(psys);
+  const hermitianResult = await checkHermitianSymmetry(psys);
   results.push({
     passed: hermitianResult.passed,
     message: `Hermitian symmetry: max error=${hermitianResult.maxError.toExponential(3)}`,
@@ -221,7 +221,7 @@ export function verifyFFTForward(psys) {
  * Check Parseval's theorem
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
-function checkParseval(psys) {
+async function checkParseval(psys) {
   const gl = psys.gl;
   
   // Check if spectrum is initialized
@@ -237,11 +237,11 @@ function checkParseval(psys) {
   
   // Real-space energy: ∑|f|²
   const grid = /** @type {NonNullable<typeof psys.pmGrid>} */(psys.pmGrid);
-  const realEnergy = computeTextureEnergy(psys, grid.texture, grid.size, grid.size, true);
+  const realEnergy = await computeTextureEnergy(psys, grid.texture, grid.size, grid.size, true);
   
   // Frequency-space energy: ∑|F̂|²
   const spectrum = psys.pmDensitySpectrum;
-  const freqEnergy = computeTextureEnergy(psys, spectrum.texture, spectrum.textureSize, spectrum.textureSize, false);
+  const freqEnergy = await computeTextureEnergy(psys, spectrum.texture, spectrum.textureSize, spectrum.textureSize, false);
   
   const N3 = grid.gridSize ** 3;
   const ratio = freqEnergy / (realEnergy * N3);
@@ -264,7 +264,7 @@ function checkParseval(psys) {
  * @param {number} height
  * @param {boolean} isReal - true for real (RGBA32F), false for complex (RG32F)
  */
-function computeTextureEnergy(psys, texture, width, height, isReal) {
+async function computeTextureEnergy(psys, texture, width, height, isReal) {
   const gl = psys.gl;
   
   const fbo = gl.createFramebuffer();
@@ -301,7 +301,7 @@ function computeTextureEnergy(psys, texture, width, height, isReal) {
  * Check plane wave spectrum peak
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
-function checkPlaneWavePeak(psys) {
+async function checkPlaneWavePeak(psys) {
   const gl = psys.gl;
   
   if (!psys.pmDensitySpectrum) {
@@ -352,7 +352,7 @@ function checkPlaneWavePeak(psys) {
  * Check Hermitian symmetry: F(-k) = F*(k)
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
-function checkHermitianSymmetry(psys) {
+async function checkHermitianSymmetry(psys) {
   const gl = psys.gl;
   
   if (!psys.pmDensitySpectrum) {
@@ -452,7 +452,7 @@ function getTexelIndex(kx, ky, kz, gridSize, slicesPerRow, textureWidth) {
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<VerificationResult[]>}
  */
-export function verifyPoisson(psys) {
+export async function verifyPoisson(psys) {
   const results = [];
   
   // Check 1: DC zero (φ̂(0) = 0)
@@ -463,7 +463,7 @@ export function verifyPoisson(psys) {
       details: { error: 'Property not initialized' }
     });
   } else {
-    const dcResult = checkDCZero(psys, psys.pmPotentialSpectrum.texture);
+    const dcResult = await checkDCZero(psys, psys.pmPotentialSpectrum.texture);
     results.push({
       passed: dcResult.passed,
       message: `DC zero: |DC|=${dcResult.magnitude.toExponential(3)}`,
@@ -479,7 +479,7 @@ export function verifyPoisson(psys) {
       details: { error: 'Properties not initialized' }
     });
   } else {
-    const poissonResult = checkPoissonOnPlaneWave(psys, [1, 0, 0], 
+    const poissonResult = await checkPoissonOnPlaneWave(psys, [1, 0, 0], 
       psys.pmDensitySpectrum.texture, psys.pmPotentialSpectrum.texture);
     results.push({
       passed: poissonResult.passed,
@@ -489,7 +489,7 @@ export function verifyPoisson(psys) {
   }
   
   // Check 3: Green's function test (NEW)
-  const greensResult = checkGreensFunction(psys);
+  const greensResult = await checkGreensFunction(psys);
   results.push({
     passed: greensResult.passed,
     message: `Green's function: ${greensResult.passed ? 'PASS' : 'FAIL'} (max error=${(greensResult.maxError * 100).toFixed(2)}%)`,
@@ -505,7 +505,7 @@ export function verifyPoisson(psys) {
  * 
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
-function checkGreensFunction(psys) {
+async function checkGreensFunction(psys) {
   const gl = psys.gl;
   const N = psys.octreeGridSize || 64;
   const G = psys.options.gravityStrength || 1.0;
@@ -548,7 +548,7 @@ function checkGreensFunction(psys) {
   let maxError = 0;
   
   for (const sample of samples) {
-    const potential = readVoxel(psys, psys._pmDebugState.tempPotentialGrid, 
+    const potential = await readVoxel(psys, psys._pmDebugState.tempPotentialGrid, 
       sample.voxel[0], sample.voxel[1], sample.voxel[2]);
     
     const cellSize = boxSize / N;
@@ -573,7 +573,7 @@ function checkGreensFunction(psys) {
 /**
  * Read a single voxel value from a 3D grid texture
  */
-function readVoxel(psys, texture, ix, iy, iz) {
+async function readVoxel(psys, texture, ix, iy, iz) {
   const gl = psys.gl;
   const N = psys.octreeGridSize || 64;
   const slicesPerRow = psys.octreeSlicesPerRow || 8;
@@ -608,11 +608,11 @@ function readVoxel(psys, texture, ix, iy, iz) {
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<VerificationResult[]>}
  */
-export function verifyGradient(psys) {
+export async function verifyGradient(psys) {
   const results = [];
   
   // Check 1: Gradient operator accuracy (i·k multiplication)
-  const gradResult = checkGradientOperator(psys);
+  const gradResult = await checkGradientOperator(psys);
   results.push({
     passed: gradResult.passed,
     message: `Gradient operator: error=${gradResult.error.toExponential(3)}`,
@@ -620,7 +620,7 @@ export function verifyGradient(psys) {
   });
   
   // Check 2: Analytical force direction (NEW)
-  const directionResult = checkForceDirection(psys);
+  const directionResult = await checkForceDirection(psys);
   results.push({
     passed: directionResult.passed,
     message: `Force direction: ${directionResult.passed ? 'PASS' : 'FAIL'} (max angle=${directionResult.maxAngleDeg.toFixed(2)}°)`,
@@ -628,7 +628,7 @@ export function verifyGradient(psys) {
   });
   
   // Check 3: Force Hermitian symmetry (NEW)
-  const hermitianResult = checkForceHermitian(psys);
+  const hermitianResult = await checkForceHermitian(psys);
   results.push({
     passed: hermitianResult.passed,
     message: `Force Hermitian: max error=${hermitianResult.maxError.toExponential(3)}`,
@@ -641,12 +641,12 @@ export function verifyGradient(psys) {
 /**
  * Check gradient operator accuracy
  */
-function checkGradientOperator(psys) {
+async function checkGradientOperator(psys) {
   // Simple check: verify gradient produces non-zero output
   const gl = psys.gl;
   const forceX = psys.pmForceSpectrum.x;
   
-  const energy = computeTextureEnergy(psys, forceX.texture, forceX.width, forceX.height, false);
+  const energy = await computeTextureEnergy(psys, forceX.texture, forceX.width, forceX.height, false);
   
   const passed = energy > 1e-10;
   const error = passed ? 0 : 1.0;
@@ -662,7 +662,7 @@ function checkGradientOperator(psys) {
  * 
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
-function checkForceDirection(psys) {
+async function checkForceDirection(psys) {
   const gl = psys.gl;
   const N = psys.octreeGridSize || 64;
   const bounds = psys.options.worldBounds || { min: [-50, -50, -50], max: [50, 50, -50] };
@@ -687,11 +687,11 @@ function checkForceDirection(psys) {
   computeGradient(psys, boxSize);
   
   // Read force spectra and check dominant direction
-  const forceXEnergy = computeTextureEnergy(psys, psys.pmForceSpectrum.x.texture, 
+  const forceXEnergy = await computeTextureEnergy(psys, psys.pmForceSpectrum.x.texture, 
     psys.pmForceSpectrum.x.width, psys.pmForceSpectrum.x.height, false);
-  const forceYEnergy = computeTextureEnergy(psys, psys.pmForceSpectrum.y.texture,
+  const forceYEnergy = await computeTextureEnergy(psys, psys.pmForceSpectrum.y.texture,
     psys.pmForceSpectrum.y.width, psys.pmForceSpectrum.y.height, false);
-  const forceZEnergy = computeTextureEnergy(psys, psys.pmForceSpectrum.z.texture,
+  const forceZEnergy = await computeTextureEnergy(psys, psys.pmForceSpectrum.z.texture,
     psys.pmForceSpectrum.z.width, psys.pmForceSpectrum.z.height, false);
   
   // For k=[1,0,0], expect force primarily in X direction
@@ -726,7 +726,7 @@ function checkForceDirection(psys) {
  * 
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
-function checkForceHermitian(psys) {
+async function checkForceHermitian(psys) {
   const gl = psys.gl;
   const N = psys.octreeGridSize;
   const slicesPerRow = psys.octreeSlicesPerRow || 8;
@@ -797,14 +797,14 @@ function checkForceHermitian(psys) {
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<VerificationResult[]>}
  */
-export function verifyFFTInverse(psys) {
+export async function verifyFFTInverse(psys) {
   const results = [];
   
   // SKIP Check 1: checkRealOutput checks stale force grids, not verifier-generated data
   // This test is not relevant for FFT inverse verification and may corrupt GL state
   
   // Check 1: FFT roundtrip (RENUMBERED)
-  const roundtripResult = checkFFTRoundtrip(psys);
+  const roundtripResult = await checkFFTRoundtrip(psys);
   results.push({
     passed: roundtripResult.passed,
     message: `FFT roundtrip: RMS=${roundtripResult.rmsError.toExponential(3)}, max=${roundtripResult.maxError.toExponential(3)}`,
@@ -812,7 +812,7 @@ export function verifyFFTInverse(psys) {
   });
   
   // Check 2: FFT normalization (RENUMBERED)
-  const normResult = checkFFTNormalization(psys);
+  const normResult = await checkFFTNormalization(psys);
   results.push({
     passed: normResult.passed,
     message: `FFT normalization: ratio=${normResult.ratio.toFixed(6)}`,
@@ -825,7 +825,7 @@ export function verifyFFTInverse(psys) {
 /**
  * Check real-valued output
  */
-function checkRealOutput(psys) {
+async function checkRealOutput(psys) {
   const gl = psys.gl;
   
   // Check one of the force grids (should be real-valued)
@@ -863,7 +863,7 @@ function checkRealOutput(psys) {
  * 
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
-function checkFFTRoundtrip(psys) {
+async function checkFFTRoundtrip(psys) {
   const gl = psys.gl;
   const N = psys.octreeGridSize || 64;
   
@@ -959,7 +959,7 @@ function checkFFTRoundtrip(psys) {
  * 
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
-function checkFFTNormalization(psys) {
+async function checkFFTNormalization(psys) {
   const gl = psys.gl;
   const N = psys.octreeGridSize || 64;
   
@@ -1077,11 +1077,11 @@ function checkFFTNormalization(psys) {
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<VerificationResult[]>}
  */
-export function verifySampling(psys) {
+export async function verifySampling(psys) {
   const results = [];
   
   // Check 1: Zero net force (momentum conservation)
-  const netForceResult = checkZeroNetForce(psys);
+  const netForceResult = await checkZeroNetForce(psys);
   results.push({
     passed: netForceResult.passed,
     message: `Zero net force: |F|=${netForceResult.netForceMag.toExponential(3)}`,
@@ -1089,7 +1089,7 @@ export function verifySampling(psys) {
   });
   
   // Check 2: Trilinear interpolation (NEW)
-  const interpResult = checkTrilinearInterpolation(psys);
+  const interpResult = await checkTrilinearInterpolation(psys);
   results.push({
     passed: interpResult.passed,
     message: `Trilinear interpolation: max error=${interpResult.maxError.toExponential(3)}`,
@@ -1097,7 +1097,7 @@ export function verifySampling(psys) {
   });
   
   // Check 3: Force symmetry (NEW)
-  const symmetryResult = checkForceSymmetry(psys);
+  const symmetryResult = await checkForceSymmetry(psys);
   results.push({
     passed: symmetryResult.passed,
     message: `Force symmetry: error=${(symmetryResult.error * 100).toFixed(2)}%`,
@@ -1110,7 +1110,7 @@ export function verifySampling(psys) {
 /**
  * Check zero net force
  */
-function checkZeroNetForce(psys) {
+async function checkZeroNetForce(psys) {
   const gl = psys.gl;
   
   // Sum all force vectors
@@ -1150,7 +1150,7 @@ function checkZeroNetForce(psys) {
  * 
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
-function checkTrilinearInterpolation(psys) {
+async function checkTrilinearInterpolation(psys) {
   const gl = psys.gl;
   const N = psys.octreeGridSize || 64;
   
@@ -1221,7 +1221,7 @@ function checkTrilinearInterpolation(psys) {
  * 
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
-function checkForceSymmetry(psys) {
+async function checkForceSymmetry(psys) {
   const gl = psys.gl;
   const N = psys.octreeGridSize || 64;
   
@@ -1242,8 +1242,8 @@ function checkForceSymmetry(psys) {
   
   // Read forces at both particle positions
   // (Simplified: read from force grid at voxel centers)
-  const forceA = readVoxel(psys, psys.pmForceGrids.x, pointA[0], pointA[1], pointA[2]);
-  const forceB = readVoxel(psys, psys.pmForceGrids.x, pointB[0], pointB[1], pointB[2]);
+  const forceA = await readVoxel(psys, psys.pmForceGrids.x, pointA[0], pointA[1], pointA[2]);
+  const forceB = await readVoxel(psys, psys.pmForceGrids.x, pointB[0], pointB[1], pointB[2]);
   
   // Check F_A ≈ -F_B
   const error = Math.abs(forceA + forceB) / Math.max(Math.abs(forceA), Math.abs(forceB), 1e-10);
@@ -1271,16 +1271,16 @@ function checkForceSymmetry(psys) {
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<Object>}
  */
-export function runAllPipelineVerifiers(psys) {
+export async function runAllPipelineVerifiers(psys) {
   console.log('[PM Verifiers] Starting comprehensive verification...');
   
   const results = {
-    pm_deposit: verifyDeposit(psys),
-    pm_fft_forward: verifyFFTForward(psys),
-    pm_poisson: verifyPoisson(psys),
-    pm_gradient: verifyGradient(psys),
-    pm_fft_inverse: verifyFFTInverse(psys),
-    pm_sample: verifySampling(psys)
+    pm_deposit: await verifyDeposit(psys),
+    pm_fft_forward: await verifyFFTForward(psys),
+    pm_poisson: await verifyPoisson(psys),
+    pm_gradient: await verifyGradient(psys),
+    pm_fft_inverse: await verifyFFTInverse(psys),
+    pm_sample: await verifySampling(psys)
   };
   
   // Summary

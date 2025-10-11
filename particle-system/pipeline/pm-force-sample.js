@@ -9,6 +9,10 @@
 
 import forceSampleVert from '../shaders/force-sample.vert.js';
 import forceSampleFrag from '../shaders/force-sample.frag.js';
+import { depositParticlesToGrid } from './pm-deposit.js';
+import { forwardFFT, inverseFFTToReal } from './pm-fft.js';
+import { solvePoissonFFT } from './pm-poisson.js';
+import { computeGradient } from './pm-gradient.js';
 
 /**
  * Initialize force sampling resources
@@ -167,23 +171,11 @@ export function sampleForcesAtParticles(psys, forceGridX, forceGridY, forceGridZ
 /**
  * Complete PM/FFT force computation pipeline
  * 
- * Note: This function requires dynamic imports since we can't use static imports
- * for circular dependency reasons. Call it like:
- * 
- * const { computePMForcesAsync } = await import('./pm-force-sample.js');
- * await computePMForcesAsync(psys);
- * 
  * @param {import('../particle-system.js').ParticleSystem} psys
  */
-export async function computePMForcesAsync(psys) {
+export function computePMForces(psys) {
   // Initialize force grid textures if needed
   initForceGridTextures(psys);
-  
-  // Dynamic imports to avoid circular dependencies
-  const { depositParticlesToGrid } = await import('./pm-deposit.js');
-  const { forwardFFT, inverseFFTToReal } = await import('./pm-fft.js');
-  const { solvePoissonFFT } = await import('./pm-poisson.js');
-  const { computeGradient } = await import('./pm-gradient.js');
   
   // Step 1: Deposit particles to grid
   depositParticlesToGrid(psys);

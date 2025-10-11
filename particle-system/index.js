@@ -3,6 +3,14 @@
 import { ParticleSystemMonopole } from './particle-system-monopole.js';
 import { ParticleSystemQuadrupole } from './particle-system-quadrupole.js';
 import { ParticleSystemSpectral } from './particle-system-spectral.js';
+import { quickDiagnostic, runAllTests } from './pm-debug/test-runner.js';
+import { pmDebugInit, pmDebugRunSingle, pmSnapshotStore, pmSnapshotLoad, pmSnapshotDispose } from './pm-debug/index.js';
+import { listSnapshots } from './pm-debug/snapshot.js';
+import * as pmMetrics from './pm-debug/metrics.js';
+import * as pmOverlay from './pm-debug/overlay.js';
+import * as pmSynthetic from './pm-debug/synthetic.js';
+import * as pmTestRunner from './pm-debug/test-runner.js';
+import * as pipelineDebug from './pipeline/debug/index.js';
 
 /**
  * Create a GPU-accelerated N-body simulation
@@ -132,30 +140,15 @@ export function particleSystem({
     springStrength
   });
   
-  // Initialize asynchronously (internal - user doesn't need to await)
+  // Initialize synchronously
   system.init();
   
   // Base API common to all methods
   const baseAPI = {
-    // Async initialization (wait for system to be ready)
-    ready: async () => {
-      // System is initialized synchronously in init(), but we provide this
-      // for compatibility with async initialization patterns
-      return new Promise((/** @type {any} */ resolve) => {
-        if (system.isInitialized) {
-          resolve();
-        } else {
-          // Poll for initialization (should be immediate)
-          const checkInit = () => {
-            if (system.isInitialized) {
-              resolve();
-            } else {
-              setTimeout(checkInit, 10);
-            }
-          };
-          checkInit();
-        }
-      });
+    // Check initialization status (synchronous)
+    ready: () => {
+      // System is initialized synchronously in init()
+      return system.isInitialized;
     },
     
     // Step simulation forward (main loop call)
@@ -210,19 +203,17 @@ export function particleSystem({
       pmDebug: {
         /**
          * Run quick diagnostic on PM/FFT pipeline
-         * @returns {Promise<{massResult: any, poissonResult: any}>}
+         * @returns {{massResult: any, poissonResult: any}}
          */
-        quickDiag: async () => {
-          const { quickDiagnostic } = await import('./pm-debug/test-runner.js');
+        quickDiag: () => {
           return quickDiagnostic(spectralSystem);
         },
         
         /**
          * Run all PM/FFT tests
-         * @returns {Promise<{massConservation: any, dcZero: any, poissonEquation: any}>}
+         * @returns {{massConservation: any, dcZero: any, poissonEquation: any}}
          */
-        runAllTests: async () => {
-          const { runAllTests } = await import('./pm-debug/test-runner.js');
+        runAllTests: () => {
           return runAllTests(spectralSystem);
         },
         
@@ -230,8 +221,7 @@ export function particleSystem({
          * Initialize PM debug system
          * @param {any} config - Debug configuration
          */
-        init: async (config) => {
-          const { pmDebugInit } = await import('./pm-debug/index.js');
+        init: (config) => {
           return pmDebugInit(spectralSystem, config);
         },
         
@@ -241,8 +231,7 @@ export function particleSystem({
          * @param {any=} source - Source spec
          * @param {any=} sink - Sink spec
          */
-        runStage: async (stage, source, sink) => {
-          const { pmDebugRunSingle } = await import('./pm-debug/index.js');
+        runStage: (stage, source, sink) => {
           return pmDebugRunSingle(spectralSystem, stage, source, sink);
         },
         
@@ -254,27 +243,23 @@ export function particleSystem({
            * @param {string} key
            * @param {import('./pm-debug/types.js').PMStageID} atStage
            */
-          store: async (key, atStage) => {
-            const { pmSnapshotStore } = await import('./pm-debug/index.js');
+          store: (key, atStage) => {
             return pmSnapshotStore(spectralSystem, key, atStage);
           },
           /**
            * @param {string} key
            * @param {import('./pm-debug/types.js').PMStageID} forStage
            */
-          load: async (key, forStage) => {
-            const { pmSnapshotLoad } = await import('./pm-debug/index.js');
+          load: (key, forStage) => {
             return pmSnapshotLoad(spectralSystem, key, forStage);
           },
           /**
            * @param {string} key
            */
-          dispose: async (key) => {
-            const { pmSnapshotDispose } = await import('./pm-debug/index.js');
+          dispose: (key) => {
             return pmSnapshotDispose(spectralSystem, key);
           },
-          list: async () => {
-            const { listSnapshots } = await import('./pm-debug/snapshot.js');
+          list: () => {
             return listSnapshots(spectralSystem);
           }
         },
@@ -284,16 +269,16 @@ export function particleSystem({
          */
         modules: {
           get metrics() {
-            return import('./pm-debug/metrics.js');
+            return pmMetrics;
           },
           get overlay() {
-            return import('./pm-debug/overlay.js');
+            return pmOverlay;
           },
           get synthetic() {
-            return import('./pm-debug/synthetic.js');
+            return pmSynthetic;
           },
           get testRunner() {
-            return import('./pm-debug/test-runner.js');
+            return pmTestRunner;
           }
         }
       }
@@ -321,8 +306,7 @@ export function particleSystem({
       
       // Direct access to debug utilities (advanced usage)
       _debug: () => {
-        // Lazy-load debug modules only when accessed
-        return import('./pipeline/debug/index.js');
+        return pipelineDebug;
       },
     };
   }

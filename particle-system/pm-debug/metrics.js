@@ -17,9 +17,9 @@
  * Compares total mass in grid vs. particle textures
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys 
- * @returns {Promise<{passed: boolean, gridMass: number, particleMass: number, error: number}>}
+ * @returns {{passed: boolean, gridMass: number, particleMass: number, error: number}}
  */
-export async function checkMassConservation(psys) {
+export function checkMassConservation(psys) {
   const gl = psys.gl;
   
   // Get the PM grid
@@ -77,13 +77,13 @@ export async function checkMassConservation(psys) {
  * 
  * @param {import('../particle-system.js').ParticleSystem} psys 
  * @param {WebGLTexture} spectrumTexture - Complex spectrum (RG32F)
- * @returns {Promise<{passed: boolean, dcReal: number, dcImag: number, magnitude: number}>}
+ * @returns {{passed: boolean, dcReal: number, dcImag: number, magnitude: number}}
  */
-export async function checkDCZero(psys, spectrumTexture) {
+export function checkDCZero(psys, spectrumTexture) {
   const gl = psys.gl;
   
   // Read single texel at (0,0) which corresponds to k=0
-  const dcValue = await readPixel(psys, spectrumTexture, 0, 0);
+  const dcValue = readPixel(psys, spectrumTexture, 0, 0);
   const dcReal = dcValue[0];
   const dcImag = dcValue[1];
   const magnitude = Math.sqrt(dcReal * dcReal + dcImag * dcImag);
@@ -104,9 +104,9 @@ export async function checkDCZero(psys, spectrumTexture) {
  * @param {WebGLTexture} roundtripTexture 
  * @param {number} width 
  * @param {number} height 
- * @returns {Promise<{passed: boolean, rmsError: number, maxError: number}>}
+ * @returns {{passed: boolean, rmsError: number, maxError: number}}
  */
-export async function checkFFTInverseIdentity(psys, originalTexture, roundtripTexture, width, height) {
+export function checkFFTInverseIdentity(psys, originalTexture, roundtripTexture, width, height) {
   const gl = psys.gl;
   
   // Compute difference texture
@@ -141,7 +141,7 @@ export async function checkFFTInverseIdentity(psys, originalTexture, roundtripTe
   gl.bindVertexArray(null);
   
   // Sum squared errors
-  const sumSqError = await sumTexture(psys, diffTexture, width, height, 0); // red channel
+  const sumSqError = sumTexture(psys, diffTexture, width, height, 0); // red channel
   const rmsError = Math.sqrt(sumSqError / (width * height));
   
   // Get max error (requires additional pass or readback)
@@ -166,9 +166,9 @@ export async function checkFFTInverseIdentity(psys, originalTexture, roundtripTe
  * @param {[number, number, number]} k - Wave vector
  * @param {WebGLTexture} rhoSpectrum 
  * @param {WebGLTexture} phiSpectrum 
- * @returns {Promise<{passed: boolean, error: number}>}
+ * @returns {{passed: boolean, error: number}}
  */
-export async function checkPoissonOnPlaneWave(psys, k, rhoSpectrum, phiSpectrum) {
+export function checkPoissonOnPlaneWave(psys, k, rhoSpectrum, phiSpectrum) {
   const gl = psys.gl;
   
   // Read mode k from both spectra
@@ -183,8 +183,8 @@ export async function checkPoissonOnPlaneWave(psys, k, rhoSpectrum, phiSpectrum)
   const texX = sliceCol * gridSize + kx;
   const texY = sliceRow * gridSize + ky;
   
-  const rhoK = await readPixel(psys, rhoSpectrum, texX, texY);
-  const phiK = await readPixel(psys, phiSpectrum, texX, texY);
+  const rhoK = readPixel(psys, rhoSpectrum, texX, texY);
+  const phiK = readPixel(psys, phiSpectrum, texX, texY);
   
   // Compute expected: φ̂ = -4πG ρ̂ / k²
   const G = psys.options.gravityStrength || 1.0;
@@ -221,9 +221,9 @@ export async function checkPoissonOnPlaneWave(psys, k, rhoSpectrum, phiSpectrum)
  * @param {number} width 
  * @param {number} height 
  * @param {number} channel - 0=R, 1=G, 2=B, 3=A
- * @returns {Promise<number>}
+ * @returns {number}
  */
-async function sumTexture(psys, texture, width, height, channel) {
+function sumTexture(psys, texture, width, height, channel) {
   const gl = psys.gl;
   
   // Create temporary reduction pyramid
@@ -284,9 +284,9 @@ async function sumTexture(psys, texture, width, height, channel) {
  * @param {WebGLTexture} texture 
  * @param {number} x 
  * @param {number} y 
- * @returns {Promise<Float32Array>}
+ * @returns {Float32Array}
  */
-async function readPixel(psys, texture, x, y) {
+function readPixel(psys, texture, x, y) {
   const gl = psys.gl;
   
   const fbo = gl.createFramebuffer();
@@ -366,11 +366,11 @@ function getOrCreateMetricsProgram(psys) {
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMCheckSpec} checks 
  */
-export async function runAllMetrics(psys, stage, checks) {
+export function runAllMetrics(psys, stage, checks) {
   const results = {};
   
   if (checks.checkMassConservation) {
-    results.massConservation = await checkMassConservation(psys);
+    results.massConservation = checkMassConservation(psys);
   }
   
   // Add other checks as implemented

@@ -191,7 +191,7 @@ export class ParticleSystemQuadrupole {
     dbgCheckFBO(this.gl, tag);
   }
 
-  async init() {
+  init() {
     let finished = false;
     try {
       this.checkWebGL2Support();
@@ -214,7 +214,7 @@ export class ParticleSystemQuadrupole {
       
       // Initialize external force modules
       for (const module of this.externalForceModules) {
-        await module.init(this.gl, {
+        module.init(this.gl, {
           positionTextures: this.positionTextures.textures,
           textureWidth: this.textureWidth,
           textureHeight: this.textureHeight,
@@ -833,12 +833,12 @@ export class ParticleSystemQuadrupole {
    * Register an external force module
    * @param {{init: Function, accumulate: Function, dispose: Function}} module
    */
-  async registerForceModule(module) {
+  registerForceModule(module) {
     if (!this.externalForceModules.includes(module)) {
       this.externalForceModules.push(module);
       // Initialize module if particle system is already initialized
       if (this.isInitialized) {
-        await module.init(this.gl, {
+        module.init(this.gl, {
           positionTextures: this.positionTextures.textures,
           textureWidth: this.textureWidth,
           textureHeight: this.textureHeight,
