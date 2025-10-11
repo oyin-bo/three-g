@@ -10,7 +10,7 @@ precision highp sampler2DArray;
 
 // 3D isotropic octree traversal with Barnes-Hut + Quadrupoles (Plan C)
 // Implements improved MAC and quadrupole force evaluation
-// Occupancy masking: ${useOccupancyMasks ? 'ENABLED' : 'DISABLED'}
+// Occupancy masking: ${useOccupancyMasks ? "ENABLED" : "DISABLED"}
 
 uniform sampler2D u_particlePositions;
 
@@ -21,19 +21,27 @@ uniform sampler2DArray u_levelsA0;  // A0: monopole moments [Σ(m·x), Σ(m·y),
 uniform sampler2DArray u_levelsA1;  // A1: second moments [Σ(m·x²), Σ(m·y²), Σ(m·z²), Σ(m·xy)]
 uniform sampler2DArray u_levelsA2;  // A2: second moments [Σ(m·xz), Σ(m·yz), 0, 0]
 
-${useOccupancyMasks ? `
+${
+  useOccupancyMasks
+    ? `
 // Occupancy mask textures (binary masks indicating which voxels contain mass)
 // Packed: 32 voxels per texel (RGBA8 = 4 channels × 8 bits = 32 bits)
 uniform sampler2DArray u_occupancyMasks;  // One mask per level
-` : ''}
+`
+    : ""
+}
 
 uniform float u_theta;
 uniform int u_numLevels;
 uniform float u_cellSizes[8];
 uniform float u_gridSizes[8];
 uniform float u_slicesPerRow[8];
-${useOccupancyMasks ? `uniform int u_maskWidths[8];  // Occupancy mask texture width per level
-` : ''}uniform vec2 u_texSize;
+${
+  useOccupancyMasks
+    ? `uniform int u_maskWidths[8];  // Occupancy mask texture width per level
+`
+    : ""
+}uniform vec2 u_texSize;
 uniform int u_particleCount;
 uniform vec3 u_worldMin;
 uniform vec3 u_worldMax;
@@ -58,7 +66,9 @@ vec4 sampleLevelA2(int level, ivec2 coord) {
   return texelFetch(u_levelsA2, ivec3(coord, level), 0);
 }
 
-${useOccupancyMasks ? `
+${
+  useOccupancyMasks
+    ? `
 // Check if voxel contains mass using occupancy mask
 // Returns true if the voxel is occupied, false if empty
 bool isVoxelOccupied(int level, ivec3 voxelCoord) {
@@ -90,7 +100,9 @@ bool isVoxelOccupied(int level, ivec3 voxelCoord) {
   int bitMask = 1 << bitInChannel;
   return (byteValue & bitMask) != 0;
 }
-` : ''}
+`
+    : ""
+}
 
 // Convert 3D voxel coordinate to 2D texture coordinate
 ivec2 voxelToTexel(ivec3 voxelCoord, float gridSize, float slicesPerRow) {
@@ -150,13 +162,14 @@ vec3 computeQuadrupoleAcceleration(
   
   // MODIFIED GRAVITY: threshold-based repulsion to prevent collapse
   // If d >= eps: normal attraction (monopole + quadrupole)
-  // If d < eps: linear repulsion to prevent particles from collapsing
+  // If d < eps: strong repulsion with 1/r^2 falloff (like inverse gravity)
   if (d < eps) {
-    // Linear repulsion inside softening radius
-    // Force magnitude increases linearly as particles get closer
-    float repulsionStrength = M0 / (eps * eps * eps);
+    // Strong repulsion inside softening radius using inverse-square law
+    // This ensures particles strongly repel when very close
     vec3 rNorm = r / max(d, 1e-10);
-    return -repulsionStrength * d * rNorm;  // Negative sign = repulsion
+    float d2 = d * d;
+    float repulsionStrength = M0 / max(d2, eps * eps * 0.01);  // Capped at 1% of eps^2
+    return -repulsionStrength * rNorm;  // Negative sign = repulsion
   }
   
   // Normal attraction outside softening radius
@@ -221,9 +234,10 @@ void main() {
           } else {
             // Monopole only (fallback) with threshold repulsion
             if (d < eps) {
-              float repulsionStrength = M0 / (eps * eps * eps);
               vec3 rNorm = r / max(d, 1e-10);
-              totalForce -= repulsionStrength * d * rNorm;
+              float d2 = d * d;
+              float repulsionStrength = M0 / max(d2, eps * eps * 0.01);
+              totalForce -= repulsionStrength * rNorm;
             } else {
               float r2 = dot(r, r) + eps * eps;
               float invR3 = pow(r2, -1.5);
@@ -256,12 +270,16 @@ void main() {
             continue;
           }
           
-${useOccupancyMasks ? `          // Occupancy mask check (skip empty voxels)
+${
+  useOccupancyMasks
+    ? `          // Occupancy mask check (skip empty voxels)
           if (!isVoxelOccupied(level, neighborVoxel)) {
             continue;
           }
           
-` : ''}          ivec2 texCoord = voxelToTexel(neighborVoxel, gridSize, slicesPerRow);
+`
+    : ""
+}          ivec2 texCoord = voxelToTexel(neighborVoxel, gridSize, slicesPerRow);
           vec4 A0 = sampleLevelA0(level, texCoord);
           float M0 = A0.a;
           if (M0 <= 0.0) { continue; }
@@ -282,10 +300,17 @@ ${useOccupancyMasks ? `          // Occupancy mask check (skip empty voxels)
               vec3 M1 = A0.rgb;
               totalForce += computeQuadrupoleAcceleration(r, M0, M1, A1, A2, eps);
             } else {
-              // Monopole only (fallback)
-              float r2 = dot(r, r) + eps * eps;
-              float invR3 = pow(r2, -1.5);
-              totalForce += M0 * r * invR3;
+              // Monopole only (fallback) with threshold repulsion
+              if (d < eps) {
+                vec3 rNorm = r / max(d, 1e-10);
+                float d2 = d * d;
+                float repulsionStrength = M0 / max(d2, eps * eps * 0.01);
+                totalForce -= repulsionStrength * rNorm;
+              } else {
+                float r2 = dot(r, r) + eps * eps;
+                float invR3 = pow(r2, -1.5);
+                totalForce += M0 * r * invR3;
+              }
             }
           }
           // If not accepted, rely on finer levels or L0 near-field
@@ -315,12 +340,16 @@ ${useOccupancyMasks ? `          // Occupancy mask check (skip empty voxels)
             continue;
           }
           
-${useOccupancyMasks ? `          // Occupancy mask check for L0
+${
+  useOccupancyMasks
+    ? `          // Occupancy mask check for L0
           if (!isVoxelOccupied(0, neighborVoxel)) {
             continue;
           }
           
-` : ''}          ivec2 texCoord = voxelToTexel(neighborVoxel, gridSize, slicesPerRow);
+`
+    : ""
+}          ivec2 texCoord = voxelToTexel(neighborVoxel, gridSize, slicesPerRow);
           vec4 A0 = sampleLevelA0(0, texCoord);
           float M0 = A0.a;
           if (M0 <= 0.0) { continue; }
@@ -331,9 +360,10 @@ ${useOccupancyMasks ? `          // Occupancy mask check for L0
           
           // Threshold-based gravity for L0 near-field
           if (d < eps) {
-            float repulsionStrength = M0 / (eps * eps * eps);
             vec3 rNorm = r / max(d, 1e-10);
-            totalForce -= repulsionStrength * d * rNorm;
+            float d2 = d * d;
+            float repulsionStrength = M0 / max(d2, eps * eps * 0.01);
+            totalForce -= repulsionStrength * rNorm;
           } else {
             float r2 = dot(r, r) + eps * eps;
             float invR3 = pow(r2, -1.5);
