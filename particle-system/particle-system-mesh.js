@@ -114,7 +114,7 @@ export class ParticleSystemMesh {
     this.colorTexture = null;
     /** @type {{velIntegrate?: WebGLProgram, posIntegrate?: WebGLProgram}} */
     this.programs = {};
-    /** @type {{deposit?: WebGLProgram}} */
+    /** @type {Record<string, WebGLProgram>} */
     this.meshPrograms = {};
     this.quadVAO = null;
     this.particleVAO = null;
@@ -127,6 +127,11 @@ export class ParticleSystemMesh {
     this.pmGrid = null;
     this.pmGridFramebuffer = null;
     this.pmForceTexture = null;
+    this.meshSpectrum = null;
+    this.meshDensitySpectrum = null;
+    this.meshPotentialSpectrum = null;
+    this.meshForceSpectrum = null;
+    this.meshForceGrids = null;
 
     this.profiler = null;
     if (this.options.enableProfiling) {
@@ -371,6 +376,45 @@ export class ParticleSystemMesh {
       }
     });
     this.meshPrograms = {};
+
+    if (this.meshSpectrum) {
+      gl.deleteTexture(this.meshSpectrum.texture);
+      gl.deleteTexture(this.meshSpectrum.pingPong);
+      gl.deleteFramebuffer(this.meshSpectrum.framebuffer);
+      gl.deleteFramebuffer(this.meshSpectrum.pingPongFBO);
+      this.meshSpectrum = null;
+    }
+
+    if (this.meshDensitySpectrum) {
+      gl.deleteTexture(this.meshDensitySpectrum.texture);
+      gl.deleteFramebuffer(this.meshDensitySpectrum.framebuffer);
+      this.meshDensitySpectrum = null;
+    }
+
+    if (this.meshPotentialSpectrum) {
+      gl.deleteTexture(this.meshPotentialSpectrum.texture);
+      gl.deleteFramebuffer(this.meshPotentialSpectrum.framebuffer);
+      this.meshPotentialSpectrum = null;
+    }
+
+    if (this.meshForceSpectrum) {
+      for (const axis of Object.values(this.meshForceSpectrum)) {
+        if (axis) {
+          gl.deleteTexture(axis.texture);
+          gl.deleteFramebuffer(axis.framebuffer);
+        }
+      }
+      this.meshForceSpectrum = null;
+    }
+
+    if (this.meshForceGrids) {
+      for (const tex of Object.values(this.meshForceGrids)) {
+        if (tex) {
+          gl.deleteTexture(tex);
+        }
+      }
+      this.meshForceGrids = null;
+    }
 
     if (this.profiler) {
       this.profiler.dispose();

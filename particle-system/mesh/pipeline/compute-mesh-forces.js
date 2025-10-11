@@ -1,5 +1,7 @@
 // @ts-check
 
+import { meshDepositMass } from './deposit.js';
+
 /**
  * Placeholder mesh force computation.
  *
@@ -11,7 +13,9 @@
  */
 export function computeMeshForces(psys) {
   const gl = psys.gl;
-  // For now, clear the force texture to ensure integrator has defined values.
+  meshDepositMass(psys);
+
+  // TODO: Implement remaining Plan B pipeline stages here.
   if (psys.forceTexture) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, psys.forceTexture.framebuffer);
     gl.viewport(0, 0, psys.textureWidth, psys.textureHeight);
