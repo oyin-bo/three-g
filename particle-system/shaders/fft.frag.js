@@ -2,12 +2,12 @@
 
 /**
  * FFT shader for 3D Fourier transforms
- * 
+ *
  * Implements Cooley-Tukey radix-2 FFT for WebGL
  * Operates on complex data stored as RG (real, imaginary)
  */
 
-export default /* glsl */`#version 300 es
+export default /* glsl */ `#version 300 es
 precision highp float;
 
 in vec2 v_uv;
@@ -86,23 +86,14 @@ void main() {
   int partnerOffset = isOdd ? -halfStage : halfStage;
   int partnerIdx = idx + partnerOffset;
   
-  // Build the 3D coordinates for both current and partner
-  // CRITICAL: Reconstruct currentVoxel from idx to ensure consistency
-  ivec3 currentVoxel = voxel;
+  // Build the 3D coordinate for the partner
   ivec3 partnerVoxel = voxel;
-  if (u_axis == 0) {
-    currentVoxel.x = idx;
-    partnerVoxel.x = partnerIdx;
-  } else if (u_axis == 1) {
-    currentVoxel.y = idx;
-    partnerVoxel.y = partnerIdx;
-  } else {
-    currentVoxel.z = idx;
-    partnerVoxel.z = partnerIdx;
-  }
+  if (u_axis == 0) partnerVoxel.x = partnerIdx;
+  else if (u_axis == 1) partnerVoxel.y = partnerIdx;
+  else partnerVoxel.z = partnerIdx;
   
-  // Read both values using reconstructed voxel coordinates
-  vec2 currentUV = voxelToTexCoord(currentVoxel, u_gridSize, u_slicesPerRow);
+  // Read current value at this fragment's position and partner value
+  vec2 currentUV = v_uv;
   vec2 partnerUV = voxelToTexCoord(partnerVoxel, u_gridSize, u_slicesPerRow);
   
   vec4 current = texture(u_inputTexture, currentUV);
@@ -112,7 +103,7 @@ void main() {
   vec2 partnerComplex = partner.rg;
   
   // Compute twiddle factor
-  // For Cooley-Tukey DIT: W_N^(k * 2^stage) where N is grid size, k is pairIndex
+  // Cooley-Tukey DIT: W_N^(k * 2^stage) where k = pairIndex
   float twiddleSign = (u_inverse == 1) ? 1.0 : -1.0;
   float twiddleK = float(pairIndex * halfStage);
   vec2 w = twiddle(twiddleK, u_gridSize, twiddleSign);
