@@ -89,7 +89,6 @@ export class ParticleSystemMonopole {
     };
     
     // Internal state
-    this.isInitialized = false;
     this.frameCount = 0;
     
     // GPU resources
@@ -161,7 +160,6 @@ export class ParticleSystemMonopole {
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.SCISSOR_TEST);
       
-      this.isInitialized = true;
       finished = true;
     } finally {
       if (!finished)
@@ -317,9 +315,7 @@ export class ParticleSystemMonopole {
   }
 
   step() {
-    if (!this.isInitialized) return;
-    
-    // Update profiler
+    // Update profiler (collect completed query results)
     if (this.profiler) {
       this.profiler.update();
     }
@@ -474,6 +470,5 @@ export class ParticleSystemMonopole {
       this.profiler = null;
     }
     
-    this.isInitialized = false;
   }
 }

@@ -99,7 +99,6 @@ export class ParticleSystemQuadrupole {
     };
     
     // Internal state
-    this.isInitialized = false;
     this.frameCount = 0;
     
     // GPU resources
@@ -234,7 +233,6 @@ export class ParticleSystemQuadrupole {
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.SCISSOR_TEST);
       
-      this.isInitialized = true;
       finished = true;
     } finally {
       if (!finished)
@@ -630,8 +628,6 @@ export class ParticleSystemQuadrupole {
   }
 
   step() {
-    if (!this.isInitialized) return;
-    
     // Update profiler (collect completed query results)
     if (this.profiler) {
       this.profiler.update();
@@ -834,12 +830,12 @@ export class ParticleSystemQuadrupole {
    * Register an external force module
    * @param {{init: Function, accumulate: Function, dispose: Function}} module
    */
-  async registerForceModule(module) {
+  registerForceModule(module) {
     if (!this.externalForceModules.includes(module)) {
       this.externalForceModules.push(module);
-      // Initialize module if particle system is already initialized
-      if (this.isInitialized) {
-        await module.init(this.gl, {
+      // Initialize module immediately if textures already initialized
+      if (this.positionTextures) {
+        module.init(this.gl, {
           positionTextures: this.positionTextures.textures,
           textureWidth: this.textureWidth,
           textureHeight: this.textureHeight,
@@ -974,8 +970,6 @@ export class ParticleSystemQuadrupole {
    * Execute step with debug routing (Plan C staging)
    */
   step_Debug() {
-    if (!this.isInitialized) return;
-    
     // Update profiler if enabled
     if (this.profiler) {
       this.profiler.update();
@@ -1076,6 +1070,5 @@ export class ParticleSystemQuadrupole {
     this.externalForceModules = [];
     this.laplacianModule = null;
     
-    this.isInitialized = false;
   }
 }

@@ -88,7 +88,6 @@ export class ParticleSystemSpectral {
     };
 
     // Internal state
-    this.isInitialized = false;
     this.frameCount = 0;
 
     // GPU resources
@@ -168,7 +167,6 @@ export class ParticleSystemSpectral {
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.SCISSOR_TEST);
 
-      this.isInitialized = true;
       finished = true;
     } finally {
       if (!finished)
@@ -268,8 +266,6 @@ export class ParticleSystemSpectral {
   }
 
   step() {
-    if (!this.isInitialized) return;
-
     // Update profiler (collect completed query results)
     if (this.profiler) {
       this.profiler.update();
@@ -375,6 +371,5 @@ export class ParticleSystemSpectral {
       this.profiler = null;
     }
 
-    this.isInitialized = false;
   }
 }

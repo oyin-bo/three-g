@@ -76,7 +76,6 @@ export class LaplacianForceModule {
     // VAOs
     this.quadVAO = null;
 
-    this.isInitialized = false;
   }
 
   /**
@@ -112,7 +111,6 @@ export class LaplacianForceModule {
     // Create geometry
     this.createGeometry();
 
-    this.isInitialized = true;
   }
 
   /**
@@ -642,8 +640,6 @@ export class LaplacianForceModule {
    * }} ctx
    */
   accumulate(ctx) {
-    if (!this.isInitialized) return;
-
     const gl = this.gl;
     const positionTex = ctx.positionTextures.textures[ctx.currentIndex];
 
