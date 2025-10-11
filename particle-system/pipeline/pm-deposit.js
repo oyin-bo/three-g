@@ -13,7 +13,7 @@ import pmDepositFragSrc from '../shaders/pm-deposit.frag.js';
 /**
  * Create PM deposit program
  * 
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {WebGLProgram}
  */
 export function createPMDepositProgram(psys) {
@@ -29,7 +29,7 @@ export function createPMDepositProgram(psys) {
 /**
  * Deposit particles onto PM grid
  * 
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 export function depositParticlesToGrid(psys) {
   const gl = psys.gl;
