@@ -2,6 +2,8 @@
 
 Purpose: drive particle-system diagnostics and verification scripts through the `serve.js` REPL channel. The REPL replaces the legacy mini HTTP harness, letting you queue JavaScript directly into any open demo page and receive results over the same HTTP request (ideal for `curl`, scripts, or ad-hoc debugging).
 
+> NOTE: Assume http://localhost:8302/ is already running. No need to start or stop it, or interfere with its running.
+
 ## Prerequisites
 
 - Node.js 18+
