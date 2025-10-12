@@ -25,7 +25,7 @@ import {
   createPingPongTextures,
   createGeometry,
   uploadTextureData,
-  createProgram,
+  createProgram as createGLProgram,
   calculateParticleTextureDimensions,
   checkWebGL2Support
 } from './utils/common.js';
@@ -111,6 +111,28 @@ export class ParticleSystemSpectral {
     this.pmGridFramebuffer = null;
     /** @type {WebGLProgram|null} */
     this.pmDepositProgram = null;
+    /** @type {WebGLProgram|null} */
+    this.pmFFTProgram = null;
+    /** @type {{texture: WebGLTexture, framebuffer: WebGLFramebuffer, pingPong: WebGLTexture, pingPongFBO: WebGLFramebuffer, gridSize: number, textureSize: number, width: number, height: number}|null} */
+    this.pmSpectrum = null;
+    /** @type {{texture: WebGLTexture, framebuffer: WebGLFramebuffer, gridSize: number, textureSize: number, width: number, height: number}|null} */
+    this.pmDensitySpectrum = null;
+    /** @type {WebGLProgram|null} */
+    this.pmPoissonProgram = null;
+    /** @type {{texture: WebGLTexture, framebuffer: WebGLFramebuffer, gridSize: number, textureSize: number}|null} */
+    this.pmPotentialSpectrum = null;
+    /** @type {WebGLProgram|null} */
+    this.pmGradientProgram = null;
+    /** @type {{x:{texture:WebGLTexture,framebuffer:WebGLFramebuffer},y:{texture:WebGLTexture,framebuffer:WebGLFramebuffer},z:{texture:WebGLTexture,framebuffer:WebGLFramebuffer},gridSize?:number,textureSize?:number}|null} */
+    this.pmForceSpectrum = null;
+    /** @type {{x: WebGLTexture, y: WebGLTexture, z: WebGLTexture, textureSize:number}|null} */
+    this.pmForceGrids = null;
+    /** @type {WebGLProgram|null} */
+    this.pmForceSampleProgram = null;
+    /** @type {WebGLTexture|null} */
+    this.pmForceTexture = null;
+    /** @type {WebGLFramebuffer|null} */
+    this.pmForceFBO = null;
     this.particleCount = particleCount;
 
     // GPU Profiler (created only if enabled)
@@ -204,8 +226,18 @@ export class ParticleSystemSpectral {
   createShaderPrograms() {
     const gl = this.gl;
 
-    this.programs.velIntegrate = createProgram(gl, fsQuadVert, velIntegrateFrag);
-    this.programs.posIntegrate = createProgram(gl, fsQuadVert, posIntegrateFrag);
+    this.programs.velIntegrate = createGLProgram(gl, fsQuadVert, velIntegrateFrag);
+    this.programs.posIntegrate = createGLProgram(gl, fsQuadVert, posIntegrateFrag);
+  }
+
+  /**
+   * Compile a WebGL program using common helper (mirrors tree-code systems).
+   * @param {string} vertexSource
+   * @param {string} fragmentSource
+   * @returns {WebGLProgram}
+   */
+  createProgram(vertexSource, fragmentSource) {
+    return createGLProgram(this.gl, vertexSource, fragmentSource);
   }
 
   createTextures() {

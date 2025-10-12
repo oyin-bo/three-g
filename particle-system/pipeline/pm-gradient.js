@@ -14,7 +14,7 @@ import fsQuadVert from '../shaders/fullscreen.vert.js';
 
 /**
  * Initialize gradient/force resources
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 export function initGradient(psys) {
   const gl = psys.gl;
@@ -77,7 +77,7 @@ export function computeGradient(psys, boxSize = null) {
   
   // Calculate box size from world bounds if not provided
   if (boxSize === null) {
-    const bounds = psys.worldBounds;
+    const bounds = psys.options?.worldBounds;
     if (bounds) {
       const dx = bounds.max[0] - bounds.min[0];
       const dy = bounds.max[1] - bounds.min[1];

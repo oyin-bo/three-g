@@ -21,6 +21,9 @@ uniform float u_gridSize;
 uniform float u_slicesPerRow;
 uniform float u_gravitationalConstant;  // 4πG
 uniform float u_boxSize;  // Physical size of simulation box
+uniform int u_useDiscrete;         // 1 = use discrete k_eff for Laplacian
+uniform int u_deconvolveOrder;     // 0=none, 1=NGP, 2=CIC, 3=TSC
+uniform float u_gaussianSigma;     // >0 enables Gaussian long-range filter
 
 const float PI = 3.14159265359;
 const float TWO_PI = 6.28318530718;
@@ -35,39 +38,68 @@ ivec3 texCoordToVoxel(vec2 uv, float gridSize, float slicesPerRow) {
   return ivec3(ix, iy, iz);
 }
 
+// Safe sinc(x) = sin(x)/x
+float sinc(float x) {
+  return (abs(x) < 1e-8) ? 1.0 : (sin(x) / x);
+}
+
 void main() {
   ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
   int N = int(u_gridSize);
+  float L = u_boxSize;
+  float d = L / u_gridSize; // grid spacing
   
   // Read density spectrum (complex)
   vec2 rho_k = texture(u_densitySpectrum, v_uv).rg;
-  
-  // Compute wave vector k (in units of 2π/L where L is box size)
-  // FFT convention: k ranges from 0 to N-1, interpret as 0 to N/2-1, then -N/2 to -1
-  vec3 k;
-  k.x = float(voxel.x <= N/2 ? voxel.x : voxel.x - N);
-  k.y = float(voxel.y <= N/2 ? voxel.y : voxel.y - N);
-  k.z = float(voxel.z <= N/2 ? voxel.z : voxel.z - N);
-  
-  // Scale to physical wave vector: k_phys = 2π * k_grid / L
-  k *= TWO_PI / u_boxSize;
-  
-  // Compute k² (magnitude squared)
-  float k_squared = dot(k, k);
-  
+
+  // Wave indices on [-N/2, N/2)
+  vec3 kg;
+  kg.x = float(voxel.x <= N/2 ? voxel.x : voxel.x - N);
+  kg.y = float(voxel.y <= N/2 ? voxel.y : voxel.y - N);
+  kg.z = float(voxel.z <= N/2 ? voxel.z : voxel.z - N);
+
+  // Optional deconvolution of assignment window
+  if (u_deconvolveOrder > 0) {
+    // Use grid-index based window: W = Π_i sinc(π k_i/N)^{order}
+    float px = pow(sinc(PI * kg.x / u_gridSize), float(u_deconvolveOrder));
+    float py = pow(sinc(PI * kg.y / u_gridSize), float(u_deconvolveOrder));
+    float pz = pow(sinc(PI * kg.z / u_gridSize), float(u_deconvolveOrder));
+    float W = max(1e-6, px * py * pz);
+    rho_k /= W;
+  }
+
+  // Compute k^2
+  float k2;
+  if (u_useDiscrete == 1) {
+    // Discrete Laplacian eigenvalue: k_eff^2 = sum_i (2/Δ sin(π k_i/N))^2
+    float sx = sin(PI * kg.x / u_gridSize);
+    float sy = sin(PI * kg.y / u_gridSize);
+    float sz = sin(PI * kg.z / u_gridSize);
+    float c = 2.0 / d;
+    k2 = (c*c) * (sx*sx + sy*sy + sz*sz);
+  } else {
+    // Continuous
+    vec3 kphys = kg * (TWO_PI / L);
+    k2 = dot(kphys, kphys);
+  }
+
   // Poisson equation in Fourier space: φ(k) = -4πG * ρ(k) / k²
   // Handle DC component (k=0) separately - set to zero (no monopole)
   vec2 phi_k;
-  if (k_squared < 1e-10) {
-    // DC component: set to zero (mean field subtraction)
+  if (k2 < 1e-12) {
     phi_k = vec2(0.0, 0.0);
   } else {
-    // Solve Poisson equation
-    float factor = -u_gravitationalConstant / k_squared;
+    float factor = -u_gravitationalConstant / k2;
     phi_k = rho_k * factor;
   }
+
+  // Optional Gaussian long-range filter (TreePM split)
+  if (u_gaussianSigma > 0.0) {
+    float k2_cont = dot(kg * (TWO_PI / L), kg * (TWO_PI / L));
+    float g = exp(-0.5 * k2_cont * (u_gaussianSigma * u_gaussianSigma));
+    phi_k *= g;
+  }
   
-  // Output potential spectrum (complex)
   outColor = vec4(phi_k, 0.0, 0.0);
 }
 `;

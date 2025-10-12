@@ -12,7 +12,7 @@ import fsQuadVert from '../shaders/fullscreen.vert.js';
 
 /**
  * Initialize Poisson solver resources
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 export function initPoissonSolver(psys) {
   const gl = psys.gl;
@@ -55,7 +55,7 @@ export function initPoissonSolver(psys) {
  * @param {number} gravitationalConstant - 4πG (default: use system value)
  * @param {number} boxSize - Physical size of simulation box (default: use world bounds)
  */
-export function solvePoissonFFT(psys, gravitationalConstant = null, boxSize = null) {
+export function solvePoissonFFT(psys, gravitationalConstant, boxSize) {
   initPoissonSolver(psys);
   
   const gl = psys.gl;
@@ -65,15 +65,15 @@ export function solvePoissonFFT(psys, gravitationalConstant = null, boxSize = nu
   const slicesPerRow = psys.pmGrid.slicesPerRow;
   
   // Calculate gravitational constant (4πG)
-  if (gravitationalConstant === null) {
+  if (gravitationalConstant === undefined || gravitationalConstant === null) {
     // Use system gravity strength: G_eff = gravityStrength * dt²
     const G = psys.options.gravityStrength || 0.0003;
     gravitationalConstant = 4.0 * Math.PI * G;
   }
   
   // Calculate box size from world bounds
-  if (boxSize === null) {
-    const bounds = psys.worldBounds;
+  if (boxSize === undefined || boxSize === null) {
+    const bounds = psys.options.worldBounds;
     if (bounds) {
       const dx = bounds.max[0] - bounds.min[0];
       const dy = bounds.max[1] - bounds.min[1];
@@ -104,8 +104,14 @@ export function solvePoissonFFT(psys, gravitationalConstant = null, boxSize = nu
   gl.useProgram(program);
   
   // Bind input (density spectrum from FFT)
+  const densityTex = psys.pmDensitySpectrum?.texture || psys.pmSpectrum?.texture;
+  if (!densityTex) {
+    console.error('[PM Poisson] Missing density spectrum texture');
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return;
+  }
   gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, psys.pmSpectrum.texture);
+  gl.bindTexture(gl.TEXTURE_2D, densityTex);
   gl.uniform1i(gl.getUniformLocation(program, 'u_densitySpectrum'), 0);
   
   // Set uniforms
@@ -113,6 +119,15 @@ export function solvePoissonFFT(psys, gravitationalConstant = null, boxSize = nu
   gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), slicesPerRow);
   gl.uniform1f(gl.getUniformLocation(program, 'u_gravitationalConstant'), gravitationalConstant);
   gl.uniform1f(gl.getUniformLocation(program, 'u_boxSize'), boxSize);
+
+  // Extended controls per spec
+  const useDiscrete = psys.options?.poissonUseDiscrete ?? 1; // default discrete k_eff
+  const assign = psys.options?.assignment || 'CIC';
+  const deconvOrder = assign === 'TSC' ? 3 : assign === 'NGP' ? 1 : 2;
+  const gaussianSigma = psys.options?.treePMSigma || 0.0;
+  gl.uniform1i(gl.getUniformLocation(program, 'u_useDiscrete'), useDiscrete ? 1 : 0);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_deconvolveOrder'), deconvOrder);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_gaussianSigma'), gaussianSigma);
   
   // Draw fullscreen quad
   gl.bindVertexArray(psys.quadVAO);

@@ -151,7 +151,10 @@ export function particleSystem({
     debugSkipQuadtree,
     enableProfiling,
     edges,
-    springStrength
+    springStrength,
+    assignment: 'CIC',
+    poissonUseDiscrete: 1,
+    treePMSigma: 0.0
   });
   
   // Initialize synchronously (throws if setup fails)
@@ -210,7 +213,7 @@ export function particleSystem({
       get pmGrid() { return spectralSystem.pmGrid; },
       get pmGridFramebuffer() { return spectralSystem.pmGridFramebuffer; },
       get pmDepositProgram() { return spectralSystem.pmDepositProgram; },
-      get pmForceTexture() { return spectralSystem.forceTexture; }, // PM force texture
+      get pmForceTexture() { return spectralSystem.pmForceTexture; }, // PM force texture
       gl: gl, // Expose GL context for debugging/testing
       
       // PM Debug API (Plan A staging)

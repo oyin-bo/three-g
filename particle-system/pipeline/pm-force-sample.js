@@ -12,7 +12,7 @@ import forceSampleFrag from '../shaders/force-sample.frag.js';
 
 /**
  * Initialize force sampling resources
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 export function initForceSampling(psys) {
   const gl = psys.gl;

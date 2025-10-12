@@ -63,7 +63,13 @@ export function depositParticlesToGrid(psys) {
   gl.useProgram(program);
   
   // Set uniforms
-  const positionTexture = psys.positionTextures.getCurrentTexture();
+  const positionTexture = psys.positionTextures?.getCurrentTexture?.();
+  if (!positionTexture) {
+    console.error('[PM Deposit] Position texture unavailable');
+    gl.disable(gl.BLEND);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return;
+  }
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, positionTexture);
   gl.uniform1i(gl.getUniformLocation(program, 'u_positionTexture'), 0);
@@ -86,11 +92,26 @@ export function depositParticlesToGrid(psys) {
   gl.uniform3f(gl.getUniformLocation(program, 'u_worldMax'), bounds.max[0], bounds.max[1], bounds.max[2]);
   
   // Deposition parameters
-  gl.uniform1f(gl.getUniformLocation(program, 'u_particleSize'), 1.0); // NGP: 1 pixel
-  gl.uniform1i(gl.getUniformLocation(program, 'u_depositionScheme'), 0); // 0 = NGP
+  gl.uniform1f(gl.getUniformLocation(program, 'u_particleSize'), 1.0);
+  const assignment = psys.options.assignment === 'NGP' ? 0 : 1; // default CIC (1)
+  gl.uniform1i(gl.getUniformLocation(program, 'u_assignment'), assignment);
   
-  // Draw particles as points
-  gl.drawArrays(gl.POINTS, 0, psys.particleCount);
+  gl.bindVertexArray(psys.particleVAO);
+  if (assignment === 1) {
+    const offsets = [
+      [0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0],
+      [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]
+    ];
+    const offsetLoc = gl.getUniformLocation(program, 'u_cellOffset');
+    for (const offset of offsets) {
+      gl.uniform3f(offsetLoc, offset[0], offset[1], offset[2]);
+      gl.drawArrays(gl.POINTS, 0, psys.particleCount);
+    }
+  } else {
+    gl.uniform3f(gl.getUniformLocation(program, 'u_cellOffset'), 0, 0, 0);
+    gl.drawArrays(gl.POINTS, 0, psys.particleCount);
+  }
+  gl.bindVertexArray(null);
   
   // Cleanup
   gl.disable(gl.BLEND);
