@@ -22,20 +22,30 @@ const MIME = {
 };
 
 // ---------- pages + jobs ----------
-const PAGES = new Map(); // name -> { name, url, last, state, queue: Job[], current: Job|null }
+/** @typedef {{ id:string, code:string, res: import('node:http').ServerResponse|null, done:boolean, timer: NodeJS.Timeout|null, page:any, source:'http'|'file', fragment:string|null, snippet:string, requestedAt:number, startedAt:number|null, finishedAt:number|null }} Job */
+
+const PAGES = new Map(); // name -> { name, url, last, state, queue: Job[], current: Job|null, lastOutcome: any, pendingPoll: any }
 let NEXT_JOB_ID = 1;
 const JOB_TIMEOUT_MS = 60000;
 const JOB_TIMERS = new Map();
+/** Long-poll wait for page fetches */
 const POLL_WAIT_MS = 10000;
 
-const fileView = { header: [], body: [], footer: [], text: '' };
-let activeFileJob = null;
+/** File view model */
+const fileView = /** @type {{ header: string[]; body: string[]; footer: string[]; text: string }} */ ({ header: [], body: [], footer: [], text: '' });
+/** Currently executing file-job (only one at a time) */
+let activeFileJob = /** @type {Job|null} */(null);
+/** Debounced file-read timer */
 let debugReadTimer;
+/** Periodic header refresh handle */
 let headerInterval;
+/** Name of the last page that completed (pins first line) */
 let lastCompletedPageName = null;
 
+/* ---------------- boot ---------------- */
 initFileHarness();
 
+/* ---------------- utils ---------------- */
 function getRawParam(reqUrl, key) {
   const qAt = reqUrl.indexOf('?');
   if (qAt === -1) return null;
@@ -47,32 +57,73 @@ function getRawParam(reqUrl, key) {
   return null;
 }
 
+/* ---------------- file harness ---------------- */
 function initFileHarness() {
+  // Ensure debug.js exists so fs.watch can attach and the harness is "on".
+  try { if (!existsSync(DEBUG_FILE)) writeFileSync(DEBUG_FILE, '', 'utf8'); } catch { }
   initializeDebugFileState();
-  refreshDebugFile(true);
+  refreshDebugFile(false);
   try {
     watch(DEBUG_FILE, scheduleDebugRead);
   } catch {
+    // If fs.watch can't attach, we still poll the file below.
   }
-  headerInterval = setInterval(() => refreshDebugFile(false), DEBUG_HEADER_INTERVAL_MS);
+  // Periodic header refresh AND poll for external edits, even if watch misses them.
+  headerInterval = setInterval(() => {
+    refreshDebugFile(false);
+    scheduleDebugRead();
+  }, DEBUG_HEADER_INTERVAL_MS);
 }
 
 function initializeDebugFileState() {
   if (existsSync(DEBUG_FILE)) {
     try {
-      fileView.text = readFileSync(DEBUG_FILE, 'utf8');
+      const text = readFileSync(DEBUG_FILE, 'utf8');
+      fileView.text = text;
+      const normalized = text.replace(/\r\n/g, '\n');
+      const lines = normalized.split('\n');
+      if (lines.length && lines[lines.length - 1] === '') lines.pop();
+      const header = [];
+      const body = [];
+      const footer = [];
+      let section = 'header';
+      for (const line of lines) {
+        if (section === 'header') {
+          if (!line.trim()) { section = 'body'; continue; }
+          header.push(line);
+        } else if (section === 'body') {
+          if (!line.trim()) { section = 'footer'; continue; }
+          body.push(line);
+        } else {
+          footer.push(line);
+        }
+      }
+      fileView.header = header;
+      fileView.body = body;
+      fileView.footer = footer;
     } catch {
       fileView.text = '';
+      fileView.header = [];
+      fileView.body = [];
+      fileView.footer = [];
     }
   } else {
     fileView.text = '';
+    fileView.header = [];
+    fileView.body = [];
+    fileView.footer = [];
   }
 }
 
 function refreshDebugFile(force) {
   const header = buildHeaderLines();
   const fileMissing = !existsSync(DEBUG_FILE);
-  if (fileMissing) return;
+  if (fileMissing) return; // created at init; safe to bail here
+  // If we have a body already, only update header once an outcome line appears.
+  if (fileView.body.length) {
+    const hasOutcomeLine = header.some((line) => /\b(completed|failed)\b/.test(line));
+    if (!hasOutcomeLine) return;
+  }
   if (!force && arraysEqual(header, fileView.header)) return;
   writeDebugFile(header, fileView.body, fileView.footer);
 }
@@ -116,29 +167,30 @@ function scheduleDebugRead() {
 
 function handleDebugFileChange(text) {
   const normalized = text.replace(/\r\n/g, '\n');
+  fileView.text = text;
   const lines = normalized.split('\n');
   const header = fileView.header;
-  let matchesHeader = lines.length >= header.length;
-  if (matchesHeader) {
-    for (let i = 0; i < header.length; i += 1) {
-      if (lines[i] !== header[i]) { matchesHeader = false; break; }
+  let index = 0;
+  let headerIndex = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line.trim()) { index += 1; continue; }
+    if (headerIndex < header.length && line === header[headerIndex]) {
+      headerIndex += 1;
+      index += 1;
+      continue;
     }
+    if (line.startsWith('//')) {
+      const fragment = line.slice(2).trim();
+      const codeLines = lines.slice(index + 1);
+      handleFileRequest(fragment, codeLines.join('\n'));
+      return;
+    }
+    break;
   }
-  if (!matchesHeader) {
-    refreshDebugFile(true);
-    return;
-  }
-  let index = header.length;
-  while (index < lines.length && !lines[index].trim()) index += 1;
-  if (index >= lines.length) return;
-  const first = lines[index];
-  if (!first.startsWith('//')) {
-    refreshDebugFile(true);
-    return;
-  }
-  const fragment = first.slice(2).trim();
-  const code = lines.slice(index + 1).join('\n');
-  handleFileRequest(fragment, code);
+
+  refreshDebugFile(true);
 }
 
 function handleFileRequest(fragment, code) {
@@ -155,18 +207,9 @@ function handleFileRequest(fragment, code) {
     return;
   }
 
-  resetCompletionStates();
-  fileView.body = [];
-  fileView.footer = [];
-
   const job = createJob({ code, page, source: 'file', fragment });
   activeFileJob = job;
   queuePageJob(page, job);
-}
-
-function resetCompletionStates() {
-  lastCompletedPageName = null;
-  for (const page of PAGES.values()) page.lastOutcome = null;
 }
 
 function findPageByFragment(fragment) {
@@ -177,6 +220,7 @@ function findPageByFragment(fragment) {
   return null;
 }
 
+/* ---------------- job pipeline ---------------- */
 function createJob(options) {
   return {
     id: String(NEXT_JOB_ID++),
@@ -214,8 +258,7 @@ function handleJobTimeout(job) {
       try {
         job.res.writeHead(504, { 'Content-Type': 'text/plain; charset=utf-8' });
         job.res.end('timeout');
-      } catch {
-      }
+      } catch { }
     }
     completeJob(job, { ok: false, error: 'timeout', timeout: true, httpAlreadySent: true });
     return;
@@ -226,12 +269,23 @@ function handleJobTimeout(job) {
 function dispatchJobToPage(page, job, res) {
   page.current = job;
   page.state = 'executing';
+  page.lastOutcome = null;
+  lastCompletedPageName = null;
+
+  if (job.source === 'file') {
+    fileView.body = [];
+    fileView.footer = [];
+  }
+
   job.startedAt = Date.now();
+
   if (page.pendingPoll && page.pendingPoll.res !== res) {
     clearTimeout(page.pendingPoll.timer);
     page.pendingPoll = null;
   }
+
   refreshDebugFile(true);
+
   res.writeHead(200, {
     'Content-Type': MIME['.js'] || 'application/javascript',
     'x-job-id': job.id,
@@ -243,6 +297,7 @@ function dispatchJobToPage(page, job, res) {
 function completeJob(job, outcome) {
   if (job.done) return;
   job.done = true;
+
   if (JOB_TIMERS.has(job.id)) {
     clearTimeout(JOB_TIMERS.get(job.id));
     JOB_TIMERS.delete(job.id);
@@ -251,6 +306,7 @@ function completeJob(job, outcome) {
     clearTimeout(job.timer);
     job.timer = null;
   }
+
   const page = job.page;
   if (page) {
     const idx = page.queue.indexOf(job);
@@ -259,8 +315,10 @@ function completeJob(job, outcome) {
     if (page.state === 'executing') page.state = 'idle';
     flushPendingPoll(page);
   }
+
   job.finishedAt = Date.now();
   const duration = job.startedAt ? job.finishedAt - job.startedAt : 0;
+
   if (page) {
     page.lastOutcome = {
       status: outcome.ok ? 'ok' : 'error',
@@ -270,6 +328,7 @@ function completeJob(job, outcome) {
     };
     lastCompletedPageName = page.name;
   }
+
   if (job.source === 'http') {
     if (!outcome.httpAlreadySent && job.res) {
       try {
@@ -281,18 +340,19 @@ function completeJob(job, outcome) {
           job.res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
           job.res.end(String(outcome.error));
         }
-      } catch {
-      }
+      } catch { }
     }
     job.res = null;
     refreshDebugFile(true);
     return;
   }
+
+  // file source
   activeFileJob = null;
   if (outcome.ok) {
-    writeDebugFile(buildHeaderLines(), buildResultBody(outcome.value, job), []);
+    writeDebugFile(buildHeaderLines(), buildResultBody(outcome.value), []);
   } else {
-    writeDebugFile(buildHeaderLines(), buildErrorBody(outcome.error, job), []);
+    writeDebugFile(buildHeaderLines(), buildErrorBody(outcome.error), []);
   }
 }
 
@@ -307,6 +367,7 @@ function flushPendingPoll(page) {
   }
 }
 
+/* ---------------- header + formatting ---------------- */
 function buildHeaderLines() {
   const pages = Array.from(PAGES.values());
   if (!pages.length) return [];
@@ -387,20 +448,17 @@ function formatNumber(value) {
   }
 }
 
-function buildResultBody(value, job) {
+function buildResultBody(value) {
   const json = JSON.stringify(value, null, 2) || 'null';
   const lines = json.split('\n');
   const body = [`var result = ${lines[0] || ''}`];
   for (let i = 1; i < lines.length; i += 1) body.push(lines[i]);
-  body.push(`// finished=${new Date(job.finishedAt).toISOString()} duration=${formatNumber(job.startedAt ? job.finishedAt - job.startedAt : 0)}ms`);
   return body;
 }
 
-function buildErrorBody(error, job) {
+function buildErrorBody(error) {
   const text = error && typeof error === 'object' && error.stack ? String(error.stack) : String(error);
-  const body = text.split('\n');
-  body.push(`// finished=${new Date(job.finishedAt).toISOString()} duration=${formatNumber(job.startedAt ? job.finishedAt - job.startedAt : 0)}ms`);
-  return body;
+  return text.split('\n');
 }
 
 function arraysEqual(a, b) {
@@ -411,7 +469,8 @@ function arraysEqual(a, b) {
   return true;
 }
 
-// ---- injected to clients and executed ----
+/* ---------------- client injection ---------------- */
+// Injected into .html files served by this server; long-polls /serve.js for work and POSTs results back.
 async function inject() {
   console.log('injected>>>');
   // stable per-tab name: <normalized-title>-<5..19>-<word>-<HH:MM:SS>
@@ -501,8 +560,8 @@ async function inject() {
     }
   }
 }
-// ----------------------------------------------------------------
 
+/* ---------------- server ---------------- */
 createServer((req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
@@ -591,24 +650,8 @@ createServer((req, res) => {
         res.end('No page matches name fragment: ' + qName);
         return;
       }
-      const job = {
-        id: String(NEXT_JOB_ID++),
-        code: qEval,
-        res, done: false, timer: null
-      };
-      page.queue.push(job);
-      flushPendingPoll(page);
-
-      job.timer = setTimeout(() => {
-        if (job.done) return;
-        job.done = true;
-        const i = page.queue.indexOf(job);
-        if (i >= 0) page.queue.splice(i, 1);
-        try {
-          res.writeHead(504, { 'Content-Type': 'text/plain; charset=utf-8' });
-          res.end('timeout');
-        } catch { }
-      }, JOB_TIMEOUT_MS);
+      const job = createJob({ code: qEval, page, res, source: 'http' });
+      queuePageJob(page, job);
       return;
     }
 
@@ -640,31 +683,8 @@ createServer((req, res) => {
           res.end('empty body');
           return;
         }
-
-        const job = {
-          id: String(NEXT_JOB_ID++),
-          code,
-          res, done: false, timer: null
-        };
-        page.queue.push(job);
-        flushPendingPoll(page);
-
-        job.timer = setTimeout(() => {
-          if (job.done) return;
-          job.done = true;
-          const i = page.queue.indexOf(job);
-          if (i >= 0) page.queue.splice(i, 1);
-          try {
-            res.writeHead(504, { 'Content-Type': 'text/plain; charset=utf-8' });
-            res.end('timeout');
-          } catch { }
-        }, JOB_TIMEOUT_MS);
-
-        if (page.pendingPoll) {
-          try { page.pendingPoll.res.writeHead(200, { 'Content-Type': MIME['.js'] || 'application/javascript' }); page.pendingPoll.res.end(''); } catch { }
-          clearTimeout(page.pendingPoll.timer);
-          page.pendingPoll = null;
-        }
+        const job = createJob({ code, page, res, source: 'http' });
+        queuePageJob(page, job);
       });
       return;
     }
@@ -725,24 +745,13 @@ createServer((req, res) => {
         if (page) {
           page.last = Date.now();
           const job = page.current;
-          if (job && !job.done && job.res) {
-            job.done = true;
-            clearTimeout(job.timer);
-            try {
-              if (payload && payload.ok) {
-                const v = payload.value === undefined ? null : payload.value;
-                job.res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-                job.res.end(JSON.stringify(v));
-              } else {
-                const msg = payload?.error?.stack || payload?.error?.message || 'error';
-                job.res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-                job.res.end(String(msg));
-              }
-            } catch { }
-          }
-          if (page.current === job) {
-            page.current = null;
-            page.state = 'idle';
+          if (job && !job.done) {
+            if (payload && payload.ok) {
+              completeJob(job, { ok: true, value: payload.value });
+            } else {
+              const msg = payload?.error?.stack || payload?.error?.message || 'error';
+              completeJob(job, { ok: false, error: msg });
+            }
           }
         }
 
