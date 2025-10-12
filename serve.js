@@ -3,12 +3,13 @@
 
 import { createServer } from 'node:http';
 import { readFileSync, createReadStream, existsSync, writeFileSync, watch } from 'node:fs';
-import { join, normalize, extname } from 'node:path';
+import { join, normalize, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PORT = Number(process.env.PORT) || 8302;
 const __filename = fileURLToPath(import.meta.url);
-const ROOT = normalize(join(__filename, '..'));
+const __dirname = dirname(__filename);
+const ROOT = normalize(join(__dirname));
 
 const DEBUG_FILE = join(ROOT, 'debug.js');
 const DEBUG_SNIPPET_LIMIT = 50;
@@ -28,18 +29,12 @@ const PAGES = new Map(); // name -> { name, url, last, state, queue: Job[], curr
 let NEXT_JOB_ID = 1;
 const JOB_TIMEOUT_MS = 60000;
 const JOB_TIMERS = new Map();
-/** Long-poll wait for page fetches */
 const POLL_WAIT_MS = 10000;
 
-/** File view model */
 const fileView = /** @type {{ header: string[]; body: string[]; footer: string[]; text: string }} */ ({ header: [], body: [], footer: [], text: '' });
-/** Currently executing file-job (only one at a time) */
 let activeFileJob = /** @type {Job|null} */(null);
-/** Debounced file-read timer */
 let debugReadTimer;
-/** Periodic header refresh handle */
 let headerInterval;
-/** Name of the last page that completed (pins first line) */
 let lastCompletedPageName = null;
 
 /* ---------------- boot ---------------- */
@@ -59,16 +54,10 @@ function getRawParam(reqUrl, key) {
 
 /* ---------------- file harness ---------------- */
 function initFileHarness() {
-  // Ensure debug.js exists so fs.watch can attach and the harness is "on".
   try { if (!existsSync(DEBUG_FILE)) writeFileSync(DEBUG_FILE, '', 'utf8'); } catch { }
   initializeDebugFileState();
   refreshDebugFile(false);
-  try {
-    watch(DEBUG_FILE, scheduleDebugRead);
-  } catch {
-    // If fs.watch can't attach, we still poll the file below.
-  }
-  // Periodic header refresh AND poll for external edits, even if watch misses them.
+  try { watch(DEBUG_FILE, scheduleDebugRead); } catch { }
   headerInterval = setInterval(() => {
     refreshDebugFile(false);
     scheduleDebugRead();
@@ -83,43 +72,25 @@ function initializeDebugFileState() {
       const normalized = text.replace(/\r\n/g, '\n');
       const lines = normalized.split('\n');
       if (lines.length && lines[lines.length - 1] === '') lines.pop();
-      const header = [];
-      const body = [];
-      const footer = [];
+      const header = [], body = [], footer = [];
       let section = 'header';
       for (const line of lines) {
-        if (section === 'header') {
-          if (!line.trim()) { section = 'body'; continue; }
-          header.push(line);
-        } else if (section === 'body') {
-          if (!line.trim()) { section = 'footer'; continue; }
-          body.push(line);
-        } else {
-          footer.push(line);
-        }
+        if (section === 'header') { if (!line.trim()) { section = 'body'; continue; } header.push(line); }
+        else if (section === 'body') { if (!line.trim()) { section = 'footer'; continue; } body.push(line); }
+        else { footer.push(line); }
       }
-      fileView.header = header;
-      fileView.body = body;
-      fileView.footer = footer;
+      fileView.header = header; fileView.body = body; fileView.footer = footer;
     } catch {
-      fileView.text = '';
-      fileView.header = [];
-      fileView.body = [];
-      fileView.footer = [];
+      fileView.text = ''; fileView.header = []; fileView.body = []; fileView.footer = [];
     }
   } else {
-    fileView.text = '';
-    fileView.header = [];
-    fileView.body = [];
-    fileView.footer = [];
+    fileView.text = ''; fileView.header = []; fileView.body = []; fileView.footer = [];
   }
 }
 
 function refreshDebugFile(force) {
   const header = buildHeaderLines();
-  const fileMissing = !existsSync(DEBUG_FILE);
-  if (fileMissing) return; // created at init; safe to bail here
-  // If we have a body already, only update header once an outcome line appears.
+  if (!existsSync(DEBUG_FILE)) return;
   if (fileView.body.length) {
     const hasOutcomeLine = header.some((line) => /\b(completed|failed)\b/.test(line));
     if (!hasOutcomeLine) return;
@@ -134,14 +105,8 @@ function writeDebugFile(header, body, footer) {
   fileView.footer = footer.slice();
   const sections = [];
   sections.push(...header);
-  if (body.length) {
-    if (sections.length) sections.push('');
-    sections.push(...body);
-  }
-  if (footer.length) {
-    if (sections.length) sections.push('');
-    sections.push(...footer);
-  }
+  if (body.length) { if (sections.length) sections.push(''); sections.push(...body); }
+  if (footer.length) { if (sections.length) sections.push(''); sections.push(...footer); }
   const text = sections.join('\n');
   const output = text ? `${text}\n` : '';
   if (output === fileView.text) return;
@@ -154,12 +119,7 @@ function scheduleDebugRead() {
   debugReadTimer = setTimeout(() => {
     debugReadTimer = undefined;
     let text = '';
-    try {
-      text = readFileSync(DEBUG_FILE, 'utf8');
-    } catch {
-      initializeDebugFileState();
-      return;
-    }
+    try { text = readFileSync(DEBUG_FILE, 'utf8'); } catch { initializeDebugFileState(); return; }
     if (text === fileView.text) return;
     handleDebugFileChange(text);
   }, DEBUG_FILE_DEBOUNCE_MS);
@@ -170,17 +130,12 @@ function handleDebugFileChange(text) {
   fileView.text = text;
   const lines = normalized.split('\n');
   const header = fileView.header;
-  let index = 0;
-  let headerIndex = 0;
+  let index = 0, headerIndex = 0;
 
   while (index < lines.length) {
     const line = lines[index];
     if (!line.trim()) { index += 1; continue; }
-    if (headerIndex < header.length && line === header[headerIndex]) {
-      headerIndex += 1;
-      index += 1;
-      continue;
-    }
+    if (headerIndex < header.length && line === header[headerIndex]) { headerIndex += 1; index += 1; continue; }
     if (line.startsWith('//')) {
       const fragment = line.slice(2).trim();
       const codeLines = lines.slice(index + 1);
@@ -189,23 +144,16 @@ function handleDebugFileChange(text) {
     }
     break;
   }
-
   refreshDebugFile(true);
 }
 
 function handleFileRequest(fragment, code) {
-  if (!fragment) {
-    writeDebugFile(buildHeaderLines(), [`// page not found for "${fragment}"`], []);
-    return;
-  }
+  if (!fragment) { writeDebugFile(buildHeaderLines(), [`// page not found for "${fragment}"`], []); return; }
   if (!code.trim()) return;
   if (activeFileJob && !activeFileJob.done) return;
 
   const page = findPageByFragment(fragment);
-  if (!page) {
-    writeDebugFile(buildHeaderLines(), [`// page not found for "${fragment}"`], []);
-    return;
-  }
+  if (!page) { writeDebugFile(buildHeaderLines(), [`// page not found for "${fragment}"`], []); return; }
 
   const job = createJob({ code, page, source: 'file', fragment });
   activeFileJob = job;
@@ -214,9 +162,7 @@ function handleFileRequest(fragment, code) {
 
 function findPageByFragment(fragment) {
   const needle = fragment.toLowerCase();
-  for (const page of PAGES.values()) {
-    if (page.name.toLowerCase().includes(needle)) return page;
-  }
+  for (const page of PAGES.values()) if (page.name.toLowerCase().includes(needle)) return page;
   return null;
 }
 
@@ -233,7 +179,7 @@ function createJob(options) {
     fragment: options.fragment || null,
     snippet: formatSnippet(options.code),
     requestedAt: Date.now(),
-    startedAt: null,
+    startedAt: null,     // set when HTTP response finishes (bytes flushed)
     finishedAt: null
   };
 }
@@ -249,17 +195,9 @@ function queuePageJob(page, job) {
 
 function handleJobTimeout(job) {
   if (job.done) return;
-  if (JOB_TIMERS.has(job.id)) {
-    clearTimeout(JOB_TIMERS.get(job.id));
-    JOB_TIMERS.delete(job.id);
-  }
+  if (JOB_TIMERS.has(job.id)) { clearTimeout(JOB_TIMERS.get(job.id)); JOB_TIMERS.delete(job.id); }
   if (job.source === 'http') {
-    if (job.res) {
-      try {
-        job.res.writeHead(504, { 'Content-Type': 'text/plain; charset=utf-8' });
-        job.res.end('timeout');
-      } catch { }
-    }
+    if (job.res) { try { job.res.writeHead(504, { 'Content-Type': 'text/plain; charset=utf-8' }); job.res.end('timeout'); } catch { } }
     completeJob(job, { ok: false, error: 'timeout', timeout: true, httpAlreadySent: true });
     return;
   }
@@ -272,18 +210,12 @@ function dispatchJobToPage(page, job, res) {
   page.lastOutcome = null;
   lastCompletedPageName = null;
 
-  if (job.source === 'file') {
-    fileView.body = [];
-    fileView.footer = [];
-  }
+  if (job.source === 'file') { fileView.body = []; fileView.footer = []; }
 
-  job.startedAt = Date.now();
+  // Measure only the "script delivered → result returned" window.
+  res.once('finish', () => { job.startedAt = Date.now(); refreshDebugFile(true); });
 
-  if (page.pendingPoll && page.pendingPoll.res !== res) {
-    clearTimeout(page.pendingPoll.timer);
-    page.pendingPoll = null;
-  }
-
+  if (page.pendingPoll && page.pendingPoll.res !== res) { clearTimeout(page.pendingPoll.timer); page.pendingPoll = null; }
   refreshDebugFile(true);
 
   res.writeHead(200, {
@@ -298,14 +230,8 @@ function completeJob(job, outcome) {
   if (job.done) return;
   job.done = true;
 
-  if (JOB_TIMERS.has(job.id)) {
-    clearTimeout(JOB_TIMERS.get(job.id));
-    JOB_TIMERS.delete(job.id);
-  }
-  if (job.timer) {
-    clearTimeout(job.timer);
-    job.timer = null;
-  }
+  if (JOB_TIMERS.has(job.id)) { clearTimeout(JOB_TIMERS.get(job.id)); JOB_TIMERS.delete(job.id); }
+  if (job.timer) { clearTimeout(job.timer); job.timer = null; }
 
   const page = job.page;
   if (page) {
@@ -320,15 +246,11 @@ function completeJob(job, outcome) {
   const duration = job.startedAt ? job.finishedAt - job.startedAt : 0;
 
   if (page) {
-    page.lastOutcome = {
-      status: outcome.ok ? 'ok' : 'error',
-      duration,
-      finishedAt: job.finishedAt,
-      timeout: !!outcome.timeout
-    };
+    page.lastOutcome = { status: outcome.ok ? 'ok' : 'error', duration, finishedAt: job.finishedAt, timeout: !!outcome.timeout };
     lastCompletedPageName = page.name;
   }
 
+  // HTTP clients still get their response directly
   if (job.source === 'http') {
     if (!outcome.httpAlreadySent && job.res) {
       try {
@@ -347,12 +269,14 @@ function completeJob(job, outcome) {
     return;
   }
 
-  // file source
+  // FILE MODE: write a small second-header line (snippet) above the body payload.
   activeFileJob = null;
   if (outcome.ok) {
-    writeDebugFile(buildHeaderLines(), buildResultBody(outcome.value), []);
+    const core = buildResultBody(outcome.value);
+    writeDebugFile(buildHeaderLines(), buildIntroLine('result', job.snippet).concat(core), []);
   } else {
-    writeDebugFile(buildHeaderLines(), buildErrorBody(outcome.error), []);
+    const core = buildErrorBody(outcome.error);
+    writeDebugFile(buildHeaderLines(), buildIntroLine('error', job.snippet).concat(core), []);
   }
 }
 
@@ -361,10 +285,7 @@ function flushPendingPoll(page) {
   if (!pending) return;
   if (page.state === 'executing') return;
   const dispatched = pending.dispatch();
-  if (dispatched) {
-    clearTimeout(pending.timer);
-    page.pendingPoll = null;
-  }
+  if (dispatched) { clearTimeout(pending.timer); page.pendingPoll = null; }
 }
 
 /* ---------------- header + formatting ---------------- */
@@ -376,24 +297,16 @@ function buildHeaderLines() {
   const used = new Set();
 
   const executing = pages.find((page) => page.state === 'executing' && page.current);
-  if (executing) {
-    lines.push(formatExecutingLine(executing));
-    used.add(executing.name);
-  } else if (lastCompletedPageName) {
+  if (executing) { lines.push(formatExecutingLine(executing)); used.add(executing.name); }
+  else if (lastCompletedPageName) {
     const pinned = pages.find((page) => page.name === lastCompletedPageName && page.lastOutcome);
-    if (pinned) {
-      lines.push(formatOutcomeLine(pinned));
-      used.add(pinned.name);
-    }
+    if (pinned) { lines.push(formatOutcomeLine(pinned)); used.add(pinned.name); }
   }
 
   for (const page of pages) {
     if (used.has(page.name)) continue;
-    if (page.lastOutcome) {
-      lines.push(formatOutcomeLine(page));
-    } else {
-      lines.push(formatIdleLine(page));
-    }
+    if (page.lastOutcome) lines.push(formatOutcomeLine(page));
+    else lines.push(formatIdleLine(page));
   }
   return lines;
 }
@@ -405,19 +318,23 @@ function formatIdleLine(page) {
 function formatExecutingLine(page) {
   const job = page.current;
   const snippet = job ? job.snippet : '';
-  const started = formatClock(job ? job.startedAt || job.requestedAt : page.last);
-  return `// ${page.name} ${page.url || '-'} ${formatClock(page.last)} executing "${snippet}" job=${job ? job.id : '-'} started=${started}`;
+  const startedTxt = (job && job.startedAt != null) ? formatClock(job.startedAt) : '—';
+  return `// ${page.name} ${page.url || '-'} ${formatClock(page.last)} executing "${snippet}" job=${job ? job.id : '-'} started=${startedTxt}`;
 }
 
 function formatOutcomeLine(page) {
   const info = page.lastOutcome;
   if (!info) return formatIdleLine(page);
   const durationText = formatDuration(info.duration || 0);
-  if (info.status === 'ok') {
-    return `// ${page.name} ${page.url || '-'} ${formatClock(page.last)} completed in ${durationText} (result below)`;
-  }
+  if (info.status === 'ok') return `// ${page.name} ${page.url || '-'} ${formatClock(page.last)} completed in ${durationText} (result below)`;
   const suffix = info.timeout ? '(timeout)' : '(see below)';
   return `// ${page.name} ${page.url || '-'} ${formatClock(page.last)} failed after ${durationText} ${suffix}`;
+}
+
+function buildIntroLine(kind, snippet) {
+  const label = kind === 'result' ? 'eval result for' : 'eval error for';
+  // This line becomes the first line of the BODY; header->(blank)->intro->payload
+  return [`// ${label}: ${snippet}`];
 }
 
 function formatSnippet(code) {
@@ -441,11 +358,7 @@ function formatClock(ms) {
 }
 
 function formatNumber(value) {
-  try {
-    return Number(value).toLocaleString();
-  } catch {
-    return String(value);
-  }
+  try { return Number(value).toLocaleString(); } catch { return String(value); }
 }
 
 function buildResultBody(value) {
@@ -463,23 +376,16 @@ function buildErrorBody(error) {
 
 function arraysEqual(a, b) {
   if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i] !== b[i]) return false;
-  }
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
   return true;
 }
 
 /* ---------------- client injection ---------------- */
-// Injected into .html files served by this server; long-polls /serve.js for work and POSTs results back.
 async function inject() {
   console.log('injected>>>');
-  // stable per-tab name: <normalized-title>-<5..19>-<word>-<HH:MM:SS>
   let name = sessionStorage.getItem('tabName');
   if (!name) {
-    const title = (document.title || 'page')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'page';
+    const title = (document.title || 'page').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'page';
     const n = Math.floor(Math.random() * (19 - 5 + 1)) + 5;
     const words = [
       'mint,nova,ember,zen,lumen,oak,river,kite,moss,nook,sol,vibe',
@@ -497,61 +403,27 @@ async function inject() {
     sessionStorage.setItem('tabName', name);
   }
 
-  const endpoint =
-    '/serve.js' +
-    '?name=' + encodeURIComponent(name) +
-    '&url=' + encodeURIComponent(location.href);
-
+  const endpoint = '/serve.js' + '?name=' + encodeURIComponent(name) + '&url=' + encodeURIComponent(location.href);
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   while (true) {
-    let response;
     try {
-      response = await fetch(endpoint, {
-        headers: {
-          'cache-control': 'no-cache',
-          pragma: 'no-cache'
-        }
-      });
-
+      const response = await fetch(endpoint, { headers: { 'cache-control': 'no-cache', pragma: 'no-cache' } });
       const script = await response.text();
-      const headers = {};
-      response.headers.forEach((value, key) => {
-        headers[key] = value;
-      });
+      const headers = {}; response.headers.forEach((value, key) => { headers[key] = value; });
 
-      if (!script) {
-        await sleep(300);
-        continue;
-      }
+      if (!script) { await sleep(300); continue; }
 
       let payload;
       try {
         const value = await (0, eval)(script);
-        try {
-          payload = JSON.stringify({ ok: true, value });
-        } catch (_err) {
-          payload = JSON.stringify({ ok: true, value: String(value) });
-        }
+        try { payload = JSON.stringify({ ok: true, value }); }
+        catch { payload = JSON.stringify({ ok: true, value: String(value) }); }
       } catch (err) {
-        payload = JSON.stringify({
-          ok: false,
-          error: {
-            message: err?.message || String(err),
-            stack: err?.stack || null
-          }
-        });
+        payload = JSON.stringify({ ok: false, error: { message: err?.message || String(err), stack: err?.stack || null } });
       }
 
-      await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          ...headers,
-          'Content-Type': 'application/json'
-        },
-        body: payload
-      });
-
+      await fetch(endpoint, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: payload });
       await sleep(100);
     } catch (error) {
       console.warn('[injected] fetch failed:', error);
@@ -564,8 +436,6 @@ async function inject() {
 /* ---------------- server ---------------- */
 createServer((req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-
-  // minimal poll endpoint
   if (url.pathname === '/poll') { res.writeHead(204).end(); return; }
 
   let p = url.pathname;
@@ -573,123 +443,78 @@ createServer((req, res) => {
   if (p === '/') p = '/index.html';
 
   const file = join(ROOT, p);
-  if (!existsSync(file)) {
-    return res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
-  }
+  if (!existsSync(file)) return res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
 
-  if (file === __filename) {
-    handlePollServer();
-    return;
-  }
+  if (file === __filename) { handlePollServer(); return; }
 
   const type = MIME[extname(file)] || 'application/octet-stream';
-
   if (extname(file) === '.html') {
-    // inject by coercing the function to string (no multi-line literals)
     res.writeHead(200, { 'Content-Type': type });
-    res.end(readFileSync(file, 'utf8') +
-      '\n<script>\n' +
-      '(function() {\n' +
-      'inject();\n' +
-      inject + '\n' +
-      '})()\n' +
-      '</script>');
+    res.end(readFileSync(file, 'utf8') + '\n<script>\n' + '(function(){inject();\n' + inject + '\n})()\n' + '</script>');
     return;
   }
 
   res.writeHead(200, { 'Content-Type': type });
   createReadStream(file).pipe(res);
 
-  // ---------------- poll server + features ----------------
   function handlePollServer() {
     const sp = url.searchParams;
     const qName = sp.get('name') || '';
     const qUrl = sp.get('url') || '';
-    // keep plus signs in eval
     const qEval = getRawParam(req.url || '', 'eval');
 
     function pageFor(name, href) {
       const now = Date.now();
       let page = PAGES.get(name);
-      if (!page) {
-        page = { name, url: href || '', last: now, state: 'idle', queue: [], current: null, lastOutcome: null, pendingPoll: null };
-        PAGES.set(name, page);
-      } else if (!('pendingPoll' in page)) {
-        page.pendingPoll = null;
-      }
+      if (!page) { page = { name, url: href || '', last: now, state: 'idle', queue: [], current: null, lastOutcome: null, pendingPoll: null }; PAGES.set(name, page); }
+      else if (!('pendingPoll' in page)) page.pendingPoll = null;
       if (href) page.url = href;
       page.last = now;
       return page;
     }
 
-    // A) Listing: GET /serve.js (no params)
+    // A) List active tabs
     if (req.method === 'GET' && !qEval && !qName && !qUrl) {
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       const lines = [];
-      for (const [name, p] of PAGES) {
-        lines.push(`${name}\t${p.url || '-'}\t${new Date(p.last).toISOString()}\t${p.state}`);
-      }
+      for (const [name, p] of PAGES) lines.push(`${name}\t${p.url || '-'}\t${new Date(p.last).toISOString()}\t${p.state}`);
       res.end(lines.join('\n') + (lines.length ? '\n' : ''));
       return;
     }
 
-    // B) Admin: queue eval (REQUIRES name; lax/partial match; first match wins)
+    // B) Admin GET eval
     if (req.method === 'GET' && qEval != null) {
-      if (!qName) {
-        res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('eval requires &name=<id-fragment>');
-        return;
-      }
+      if (!qName) { res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('eval requires &name=<id-fragment>'); return; }
       const needle = qName.toLowerCase();
       let page = null;
-      for (const [name, p] of PAGES) {
-        if (name.toLowerCase().includes(needle)) { page = p; break; }
-      }
-      if (!page) {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('No page matches name fragment: ' + qName);
-        return;
-      }
+      for (const [name, p] of PAGES) { if (name.toLowerCase().includes(needle)) { page = p; break; } }
+      if (!page) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('No page matches name fragment: ' + qName); return; }
       const job = createJob({ code: qEval, page, res, source: 'http' });
       queuePageJob(page, job);
       return;
     }
 
-    // B2) Admin: queue eval via POST body when ?eval=post
+    // B2) Admin POST eval body (?eval=post)
     if (req.method === 'POST' && qEval === 'post') {
-      if (!qName) {
-        res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('eval requires &name=<id-fragment>');
-        return;
-      }
+      if (!qName) { res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('eval requires &name=<id-fragment>'); return; }
       const needle = qName.toLowerCase();
       let page = null;
-      for (const [name, p] of PAGES) {
-        if (name.toLowerCase().includes(needle)) { page = p; break; }
-      }
-      if (!page) {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('No page matches name fragment: ' + qName);
-        return;
-      }
+      for (const [name, p] of PAGES) { if (name.toLowerCase().includes(needle)) { page = p; break; } }
+      if (!page) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('No page matches name fragment: ' + qName); return; }
 
       let body = '';
       req.setEncoding('utf8');
       req.on('data', (chunk) => { body += chunk; });
       req.on('end', () => {
         const code = body || '';
-        if (!code) {
-          res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
-          res.end('empty body');
-          return;
-        }
+        if (!code) { res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('empty body'); return; }
         const job = createJob({ code, page, res, source: 'http' });
         queuePageJob(page, job);
       });
       return;
     }
 
-    // C) Page poll: GET /serve.js?name=...&url=...
+    // C) Page poll
     if (req.method === 'GET' && qName) {
       const page = pageFor(qName, qUrl);
 
@@ -703,31 +528,20 @@ createServer((req, res) => {
 
       if (dispatch()) return;
 
-      if (page.pendingPoll) {
-        try { page.pendingPoll.res.writeHead(200, { 'Content-Type': MIME['.js'] || 'application/javascript' }); page.pendingPoll.res.end(''); } catch { }
-        clearTimeout(page.pendingPoll.timer);
-      }
+      if (page.pendingPoll) { try { page.pendingPoll.res.writeHead(200, { 'Content-Type': MIME['.js'] || 'application/javascript' }); page.pendingPoll.res.end(''); } catch { } clearTimeout(page.pendingPoll.timer); }
 
       const timer = setTimeout(() => {
         page.pendingPoll = null;
-        try {
-          res.writeHead(200, { 'Content-Type': MIME['.js'] || 'application/javascript' });
-          res.end('');
-        } catch { }
+        try { res.writeHead(200, { 'Content-Type': MIME['.js'] || 'application/javascript' }); res.end(''); } catch { }
       }, POLL_WAIT_MS);
 
       page.pendingPoll = { res, timer, dispatch };
-      req.on('close', () => {
-        if (page.pendingPoll && page.pendingPoll.res === res) {
-          clearTimeout(page.pendingPoll.timer);
-          page.pendingPoll = null;
-        }
-      });
+      req.on('close', () => { if (page.pendingPoll && page.pendingPoll.res === res) { clearTimeout(page.pendingPoll.timer); page.pendingPoll = null; } });
       flushPendingPoll(page);
       return;
     }
 
-    // D) Page POSTs result (client response). NOTE: must come AFTER admin POST branch
+    // D) Page POSTs result
     if (req.method === 'POST') {
       let body = '';
       req.setEncoding('utf8');
@@ -736,19 +550,15 @@ createServer((req, res) => {
         const name = sp.get('name') || '';
         const page = name ? PAGES.get(name) : null;
         let payload;
-        try {
-          payload = body ? JSON.parse(body) : null;
-        } catch {
-          payload = { ok: false, error: { message: 'invalid JSON', stack: '' } };
-        }
+        try { payload = body ? JSON.parse(body) : null; }
+        catch { payload = { ok: false, error: { message: 'invalid JSON', stack: '' } }; }
 
         if (page) {
           page.last = Date.now();
           const job = page.current;
           if (job && !job.done) {
-            if (payload && payload.ok) {
-              completeJob(job, { ok: true, value: payload.value });
-            } else {
+            if (payload && payload.ok) completeJob(job, { ok: true, value: payload.value });
+            else {
               const msg = payload?.error?.stack || payload?.error?.message || 'error';
               completeJob(job, { ok: false, error: msg });
             }
@@ -761,11 +571,9 @@ createServer((req, res) => {
       return;
     }
 
-    // Fallback
     res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Bad request');
   }
-  // ---------------------------------------------------------
 }).listen(PORT, () => {
   console.log(`[serve] http://localhost:${PORT}/`);
 });
