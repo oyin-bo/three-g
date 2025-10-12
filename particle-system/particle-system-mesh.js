@@ -133,6 +133,9 @@ export class ParticleSystemMesh {
     this.meshPotentialSpectrum = null;
     this.meshForceSpectrum = null;
     this.meshForceGrids = null;
+    this.meshNearPotentialSpectrum = null;
+    this.meshNearForceSpectrum = null;
+    this.meshNearForceGrids = null;
 
     this.profiler = null;
     if (this.options.enableProfiling) {
@@ -399,6 +402,12 @@ export class ParticleSystemMesh {
       this.meshPotentialSpectrum = null;
     }
 
+    if (this.meshNearPotentialSpectrum) {
+      gl.deleteTexture(this.meshNearPotentialSpectrum.texture);
+      gl.deleteFramebuffer(this.meshNearPotentialSpectrum.framebuffer);
+      this.meshNearPotentialSpectrum = null;
+    }
+
     if (this.meshForceSpectrum) {
       for (const axis of Object.values(this.meshForceSpectrum)) {
         if (axis) {
@@ -409,12 +418,30 @@ export class ParticleSystemMesh {
       this.meshForceSpectrum = null;
     }
 
+    if (this.meshNearForceSpectrum) {
+      for (const axis of Object.values(this.meshNearForceSpectrum)) {
+        if (axis) {
+          gl.deleteTexture(axis.texture);
+          gl.deleteFramebuffer(axis.framebuffer);
+        }
+      }
+      this.meshNearForceSpectrum = null;
+    }
+
     if (this.meshForceGrids) {
       const { x, y, z } = this.meshForceGrids;
       if (x) gl.deleteTexture(x);
       if (y) gl.deleteTexture(y);
       if (z) gl.deleteTexture(z);
       this.meshForceGrids = null;
+    }
+
+    if (this.meshNearForceGrids) {
+      const { x, y, z } = this.meshNearForceGrids;
+      if (x) gl.deleteTexture(x);
+      if (y) gl.deleteTexture(y);
+      if (z) gl.deleteTexture(z);
+      this.meshNearForceGrids = null;
     }
 
     this.pmForceGrids = null;

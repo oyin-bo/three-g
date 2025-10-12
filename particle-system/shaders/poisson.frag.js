@@ -20,10 +20,12 @@ uniform sampler2D u_densitySpectrum;
 uniform float u_gridSize;
 uniform float u_slicesPerRow;
 uniform float u_gravitationalConstant;  // 4πG
-uniform float u_boxSize;  // Physical size of simulation box
-uniform int u_useDiscrete;         // 1 = use discrete k_eff for Laplacian
-uniform int u_deconvolveOrder;     // 0=none, 1=NGP, 2=CIC, 3=TSC
-uniform float u_gaussianSigma;     // >0 enables Gaussian long-range filter
+uniform float u_boxSize;               // Physical size of simulation box
+uniform int u_splitMode;               // 0 = none, 1 = hard cutoff, 2 = Gaussian
+uniform float u_kCut;                  // Cutoff wavenumber (rad / unit length)
+uniform float u_gaussianSigma;         // Sigma for Gaussian split (length)
+uniform int u_deconvolveOrder;         // 0 = none, 1 = NGP, 2 = CIC, 3 = TSC
+uniform int u_useDiscrete;             // 1 = use discrete Laplacian eigenvalue
 
 const float PI = 3.14159265359;
 const float TWO_PI = 6.28318530718;
@@ -38,9 +40,14 @@ ivec3 texCoordToVoxel(vec2 uv, float gridSize, float slicesPerRow) {
   return ivec3(ix, iy, iz);
 }
 
-// Safe sinc(x) = sin(x)/x
+// Safe sinc(x) = sin(x)/x (with series fallback)
 float sinc(float x) {
-  return (abs(x) < 1e-8) ? 1.0 : (sin(x) / x);
+  float ax = abs(x);
+  if (ax < 1e-5) {
+    float x2 = x * x;
+    return 1.0 - x2 / 6.0 + (x2 * x2) / 120.0;
+  }
+  return sin(x) / x;
 }
 
 void main() {
@@ -58,14 +65,16 @@ void main() {
   kg.y = float(voxel.y <= N/2 ? voxel.y : voxel.y - N);
   kg.z = float(voxel.z <= N/2 ? voxel.z : voxel.z - N);
 
-  // Optional deconvolution of assignment window
+  vec2 rhoCorrected = rho_k;
+
+  // Optional deconvolution of assignment window (NGP/CIC/TSC)
   if (u_deconvolveOrder > 0) {
-    // Use grid-index based window: W = Π_i sinc(π k_i/N)^{order}
-    float px = pow(sinc(PI * kg.x / u_gridSize), float(u_deconvolveOrder));
-    float py = pow(sinc(PI * kg.y / u_gridSize), float(u_deconvolveOrder));
-    float pz = pow(sinc(PI * kg.z / u_gridSize), float(u_deconvolveOrder));
-    float W = max(1e-6, px * py * pz);
-    rho_k /= W;
+    float halfCell = 0.5 * d;
+    float wx = pow(max(sinc(kg.x * PI / u_gridSize), 1e-4), float(u_deconvolveOrder));
+    float wy = pow(max(sinc(kg.y * PI / u_gridSize), 1e-4), float(u_deconvolveOrder));
+    float wz = pow(max(sinc(kg.z * PI / u_gridSize), 1e-4), float(u_deconvolveOrder));
+    float window = max(wx * wy * wz, 1e-4);
+    rhoCorrected /= window;
   }
 
   // Compute k^2
@@ -83,23 +92,28 @@ void main() {
     k2 = dot(kphys, kphys);
   }
 
-  // Poisson equation in Fourier space: φ(k) = -4πG * ρ(k) / k²
-  // Handle DC component (k=0) separately - set to zero (no monopole)
-  vec2 phi_k;
-  if (k2 < 1e-12) {
-    phi_k = vec2(0.0, 0.0);
-  } else {
+  vec2 phi_k = vec2(0.0);
+  if (k2 >= 1e-10) {
     float factor = -u_gravitationalConstant / k2;
-    phi_k = rho_k * factor;
+
+    float splitWeight = 1.0;
+    if (u_splitMode == 1 && u_kCut > 0.0) {
+      float kCutSq = u_kCut * u_kCut;
+      splitWeight = k2 <= kCutSq ? 1.0 : 0.0;
+    } else if (u_splitMode == 2 && u_gaussianSigma > 0.0) {
+      float sigma = u_gaussianSigma;
+      splitWeight = exp(-k2 * sigma * sigma);
+    }
+
+    phi_k = rhoCorrected * factor * splitWeight;
   }
 
-  // Optional Gaussian long-range filter (TreePM split)
   if (u_gaussianSigma > 0.0) {
     float k2_cont = dot(kg * (TWO_PI / L), kg * (TWO_PI / L));
     float g = exp(-0.5 * k2_cont * (u_gaussianSigma * u_gaussianSigma));
     phi_k *= g;
   }
-  
+
   outColor = vec4(phi_k, 0.0, 0.0);
 }
 `;

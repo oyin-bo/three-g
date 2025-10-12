@@ -4,7 +4,8 @@ import { meshDepositMass } from './deposit.js';
 import { meshForwardFFT, meshInverseFFTToReal, initMeshForceGrids } from './fft.js';
 import { meshSolvePoisson } from './poisson.js';
 import { meshComputeGradient } from './gradient.js';
-import { sampleForcesAtParticles } from '../../pipeline/pm-force-sample.js';
+import { meshSampleForcesAtParticles } from './force-sample.js';
+import { computeNearFieldCorrection } from './near-field.js';
 
 /**
  * Mesh force computation pipeline (Plan B, without near-field correction yet).
@@ -75,6 +76,10 @@ export function computeMeshForces(psys) {
   }
 
   if (psys.profiler) psys.profiler.begin('mesh_force_sample');
-  sampleForcesAtParticles(psys, forceGrids.x, forceGrids.y, forceGrids.z);
+  meshSampleForcesAtParticles(psys, forceGrids.x, forceGrids.y, forceGrids.z);
+  if (psys.profiler) psys.profiler.end();
+
+  if (psys.profiler) psys.profiler.begin('mesh_near_field');
+  computeNearFieldCorrection(psys);
   if (psys.profiler) psys.profiler.end();
 }

@@ -49,7 +49,15 @@ function initMeshPoisson(psys) {
 /**
  * Solve Poisson equation in Fourier space for mesh pipeline.
  * @param {import('../../particle-system-mesh.js').ParticleSystemMesh} psys
- * @param {{ fourPiG?: number, boxSize?: number }} [options]
+ * @param {{
+ *   fourPiG?: number,
+ *   boxSize?: number,
+ *   splitMode?: 0 | 1 | 2,
+ *   kCut?: number,
+ *   gaussianSigma?: number,
+ *   deconvolveOrder?: 0 | 1 | 2 | 3,
+ *   useDiscrete?: boolean
+ * }} [options]
  */
 export function meshSolvePoisson(psys, options = {}) {
   initMeshPoisson(psys);
@@ -104,6 +112,20 @@ export function meshSolvePoisson(psys, options = {}) {
   gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), pmGrid.slicesPerRow);
   gl.uniform1f(gl.getUniformLocation(program, 'u_gravitationalConstant'), fourPiG);
   gl.uniform1f(gl.getUniformLocation(program, 'u_boxSize'), boxSize);
+
+  const meshConfig = psys.meshConfig || {};
+  const splitMode = options.splitMode ?? (meshConfig.splitSigma > 0 ? 2 : meshConfig.kCut > 0 ? 1 : 0);
+  const kCut = options.kCut ?? meshConfig.kCut ?? 0;
+  const gaussianSigma = options.gaussianSigma ?? meshConfig.splitSigma ?? 0;
+  const assignment = (meshConfig.assignment || 'ngp').toLowerCase();
+  const deconvolveOrder = options.deconvolveOrder ?? (assignment === 'cic' ? 2 : assignment === 'tsc' ? 3 : assignment === 'ngp' ? 1 : 0);
+  const useDiscrete = options.useDiscrete ?? 1;
+
+  gl.uniform1i(gl.getUniformLocation(program, 'u_splitMode'), splitMode);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_kCut'), kCut);
+  gl.uniform1f(gl.getUniformLocation(program, 'u_gaussianSigma'), gaussianSigma);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_deconvolveOrder'), deconvolveOrder);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_useDiscrete'), useDiscrete ? 1 : 0);
 
   gl.bindVertexArray(psys.quadVAO);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);

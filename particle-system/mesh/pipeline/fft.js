@@ -288,9 +288,13 @@ function ensureComplexToRealProgram(psys) {
  * Ensure real-space force grids exist for mesh pipeline.
  * @param {import('../../particle-system-mesh.js').ParticleSystemMesh} psys
  */
-export function initMeshForceGrids(psys) {
-  if (psys.meshForceGrids) {
-    psys.pmForceGrids = psys.meshForceGrids;
+export function initMeshForceGrids(psys, { target = 'far' } = {}) {
+  const prop = target === 'near' ? 'meshNearForceGrids' : 'meshForceGrids';
+
+  if (psys[prop]) {
+    if (target !== 'near') {
+      psys.pmForceGrids = psys[prop];
+    }
     return;
   }
 
@@ -314,15 +318,20 @@ export function initMeshForceGrids(psys) {
     return tex;
   };
 
-  psys.meshForceGrids = {
+  const grids = {
     x: createForceGrid(),
     y: createForceGrid(),
     z: createForceGrid(),
     textureSize: size
   };
 
-  psys.pmForceGrids = psys.meshForceGrids;
-  console.log(`[Mesh FFT] Force grid textures created (${size}x${size} x3)`);
+  psys[prop] = grids;
+  if (target !== 'near') {
+    psys.pmForceGrids = grids;
+    console.log(`[Mesh FFT] Force grid textures created (${size}x${size} x3)`);
+  } else {
+    console.log(`[Mesh FFT] Near-field force grids created (${size}x${size} x3)`);
+  }
 }
 
 /**

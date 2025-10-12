@@ -3,6 +3,7 @@
 import { ParticleSystemMonopole } from './particle-system-monopole.js';
 import { ParticleSystemQuadrupole } from './particle-system-quadrupole.js';
 import { ParticleSystemSpectral } from './particle-system-spectral.js';
+import { ParticleSystemMesh } from './particle-system-mesh.js';
 import { quickDiagnostic, runAllTests } from './pm-debug/test-runner.js';
 import { pmDebugInit, pmDebugRunSingle, pmSnapshotStore, pmSnapshotLoad, pmSnapshotDispose } from './pm-debug/index.js';
 import { listSnapshots } from './pm-debug/snapshot.js';
@@ -24,7 +25,7 @@ import * as pipelineDebug from './pipeline/debug/index.js';
  *   stats: () => any,
  *   beginProfile: (name: any) => void,
  *   endProfile: () => void,
- *   _system: import('./particle-system-quadrupole.js').ParticleSystemQuadrupole | import('./particle-system-monopole.js').ParticleSystemMonopole | import('./particle-system-spectral.js').ParticleSystemSpectral,
+ *   _system: import('./particle-system-quadrupole.js').ParticleSystemQuadrupole | import('./particle-system-monopole.js').ParticleSystemMonopole | import('./particle-system-spectral.js').ParticleSystemSpectral | import('./particle-system-mesh.js').ParticleSystemMesh,
  *   dispose: () => void
  * }} ParticleSystemAPI
  */
@@ -40,7 +41,7 @@ import * as pipelineDebug from './pipeline/debug/index.js';
  *    vx?: number, vy?: number, vz?: number,
  *    mass?: number,
  *    rgb?: number }) => void,
- *   method?: 'quadrupole' | 'monopole' | 'spectral',
+ *   method?: 'quadrupole' | 'monopole' | 'spectral' | 'mesh',
  *   theta?: number,
  *   gravityStrength?: number,
  *   dt?: number,
@@ -52,7 +53,15 @@ import * as pipelineDebug from './pipeline/debug/index.js';
  *   debugSkipQuadtree?: boolean,
  *   enableProfiling?: boolean,
  *   edges?: Iterable<{from: number, to: number, strength: number}>,
- *   springStrength?: number
+ *   springStrength?: number,
+ *   mesh?: {
+ *     assignment?: 'ngp' | 'cic',
+ *     gridSize?: number,
+ *     slicesPerRow?: number,
+ *     kCut?: number,
+ *     splitSigma?: number,
+ *     nearFieldRadius?: number
+ *   }
  * }} options
  * 
  * Method options:
@@ -78,7 +87,8 @@ export function particleSystem({
   debugSkipQuadtree = false,
   enableProfiling = false,
   edges,
-  springStrength = 0.001
+  springStrength = 0.001,
+  mesh: meshConfig
 }) {
   // Compute particle count from positions array (RGBA = 4 components per particle)
   const particleCount = particles.length;
@@ -114,8 +124,13 @@ export function particleSystem({
   let SystemClass;
   let defaultTheta;
   let usePlanA = false;
-  
-  if (method === 'spectral') {
+  const isMeshMethod = method === 'mesh';
+
+  if (isMeshMethod) {
+    SystemClass = ParticleSystemMesh;
+    defaultTheta = 0.5;
+    usePlanA = true;
+  } else if (method === 'spectral') {
     SystemClass = ParticleSystemSpectral;
     defaultTheta = 0.5;
     usePlanA = true;
@@ -132,30 +147,52 @@ export function particleSystem({
   const effectiveTheta = theta !== undefined ? theta : defaultTheta;
   
   // Create system with particle data
-  const system = new SystemClass(gl, {
-    particleCount,
-    particleData: {
-      positions: paddedPositions,
-      velocities: paddedVelocities,
-      colors: paddedColors
-    },
-    // Pass through all configuration parameters
-    theta: effectiveTheta,
-    gravityStrength,
-    dt,
-    softening,
-    damping,
-    maxSpeed,
-    maxAccel,
-    worldBounds,
-    debugSkipQuadtree,
-    enableProfiling,
-    edges,
-    springStrength,
-    assignment: 'CIC',
-    poissonUseDiscrete: 1,
-    treePMSigma: 0.0
-  });
+  let system;
+  if (isMeshMethod) {
+    const meshOptions = {
+      particleCount,
+      particleData: {
+        positions: paddedPositions,
+        velocities: paddedVelocities,
+        colors: paddedColors
+      },
+      gravityStrength,
+      dt,
+      softening,
+      damping,
+      maxSpeed,
+      maxAccel,
+      worldBounds,
+      enableProfiling,
+      mesh: meshConfig
+    };
+    system = new SystemClass(gl, /** @type {any} */ (meshOptions));
+  } else {
+    const treeOptions = {
+      particleCount,
+      particleData: {
+        positions: paddedPositions,
+        velocities: paddedVelocities,
+        colors: paddedColors
+      },
+      theta: effectiveTheta,
+      gravityStrength,
+      dt,
+      softening,
+      damping,
+      maxSpeed,
+      maxAccel,
+      worldBounds,
+      debugSkipQuadtree,
+      enableProfiling,
+      edges,
+      springStrength,
+      assignment: 'CIC',
+      poissonUseDiscrete: 1,
+      treePMSigma: 0.0
+    };
+    system = new SystemClass(gl, /** @type {any} */ (treeOptions));
+  }
   
   // Initialize synchronously (throws if setup fails)
   system.init();

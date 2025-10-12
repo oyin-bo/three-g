@@ -62,6 +62,9 @@ const quadrupoleRadio = /** @type {HTMLInputElement} */ (
 const spectralRadio = /** @type {HTMLInputElement} */ (
   document.getElementById("spectral-radio")
 );
+const meshRadio = /** @type {HTMLInputElement} */ (
+  document.getElementById("mesh-radio")
+);
 const profilerOutput = /** @type {HTMLDivElement} */ (
   document.getElementById("profiler-output")
 );
@@ -70,9 +73,9 @@ const profilerOutput = /** @type {HTMLDivElement} */ (
 const gl = /** @type {WebGL2RenderingContext} */ (renderer.getContext());
 
 let particleCount = 500000;
-const worldBounds = /** @type {const} */ ({
+const worldBounds = /** @type {{ min: [number, number, number], max: [number, number, number] }} */ ({
   min: [-2, -0.1, -2],
-  max: [2, 0.1, 2],
+  max: [2, 0.1, 2]
 });
 
 let profilingEnabled = false;
@@ -81,23 +84,37 @@ let calculationMethod = "quadrupole"; // Default to quadrupole
 let frameCount = 0;
 let lastProfileUpdate = 0;
 
-/** @type {ReturnType<import('./particle-system').particleSystem>} */
-let physics;
-/** @type {any} */
-let m;
+/** @type {ReturnType<typeof particleSystem> | null} */
+let physics = null;
+/** @type {ReturnType<typeof massSpotMesh> | null} */
+let m = null;
 let positionTextureWrappers = /** @type {THREE.ExternalTexture[]} */ ([]);
 let isInitialized = false;
 
 // 4. Animation loop - MUST be set BEFORE recreateAll()
 outcome.animate = () => {
+  if (!physics) {
+    return;
+  }
+
   if (!isInitialized) {
+    if (!m) {
+      return;
+    }
+
+    const meshInstance = m;
+
     const positionTextures = physics.getPositionTextures();
     const positionTexture0 = new THREE.ExternalTexture(positionTextures[0]);
     const positionTexture1 = new THREE.ExternalTexture(positionTextures[1]);
     positionTextureWrappers = [positionTexture0, positionTexture1];
 
-    const colorTexture = new THREE.ExternalTexture(physics.getColorTexture());
-    m.mesh.material.uniforms.u_colorTexture.value = colorTexture;
+    const colorTex = physics.getColorTexture();
+    if (!colorTex) {
+      return;
+    }
+    const colorTexture = new THREE.ExternalTexture(colorTex);
+    meshInstance.mesh.material.uniforms.u_colorTexture.value = colorTexture;
 
     isInitialized = true;
     return;
@@ -107,7 +124,11 @@ outcome.animate = () => {
   renderer.resetState();
 
   const currentIndex = physics.getCurrentIndex();
-  m.mesh.material.uniforms.u_positionTexture.value =
+  const meshInstance = m;
+  if (!meshInstance) {
+    return;
+  }
+  meshInstance.mesh.material.uniforms.u_positionTexture.value =
     positionTextureWrappers[currentIndex];
   positionTextureWrappers[currentIndex].needsUpdate = true;
 
@@ -137,34 +158,51 @@ recreateAll();
   if (
     method === "monopole" ||
     method === "quadrupole" ||
-    method === "spectral"
+    method === "spectral" ||
+    method === "mesh"
   ) {
     calculationMethod = method;
     monopoleRadio.checked = method === "monopole";
     quadrupoleRadio.checked = method === "quadrupole";
     spectralRadio.checked = method === "spectral";
+    meshRadio.checked = method === "mesh";
     console.log("[Demo] Method toggled via DevTools:", method);
     recreateAll();
   } else {
     console.error(
-      '[Demo] Invalid method. Use "monopole", "quadrupole", or "spectral"'
+      '[Demo] Invalid method. Use "monopole", "quadrupole", "spectral", or "mesh"'
     );
   }
 };
 
 // Debug utilities shortcut
 /** @type {any} */ (window).dbg = {
-  mode: (m) => physics && physics.setDebugMode(m),
-  flags: (f) => physics && physics.setDebugFlags(f),
-  step: () => physics && physics.step_Debug(),
+  mode: (mode) => {
+    if (physics && "setDebugMode" in physics) {
+      physics.setDebugMode(mode);
+    }
+  },
+  flags: (flags) => {
+    if (physics && "setDebugFlags" in physics) {
+      physics.setDebugFlags(flags);
+    }
+  },
+  step: () => {
+    if (physics && "step_Debug" in physics) {
+      return physics.step_Debug();
+    }
+    return undefined;
+  },
   _utils: null,
 };
 
 // Lazy-load debug utils
 Object.defineProperty(/** @type {any} */ (window).dbg, "utils", {
   get() {
-    if (!this._utils && physics) {
-      physics._debug().then((u) => {
+    if (!this._utils && physics && "_debug" in physics && typeof physics._debug === "function") {
+      const result = physics._debug();
+      Promise.resolve(result).then((u) => {
+        if (!u) return;
         this._utils = u;
         console.log(
           "[Debug] Utilities loaded. Available functions:",
@@ -178,7 +216,7 @@ Object.defineProperty(/** @type {any} */ (window).dbg, "utils", {
 
 console.log("[Demo] DevTools helpers available:");
 console.log(
-  '  window.setMethod("monopole"|"quadrupole"|"spectral") - Switch calculation method'
+  '  window.setMethod("monopole"|"quadrupole"|"spectral"|"mesh") - Switch calculation method'
 );
 console.log("  window.dbg.mode(mode) - Set debug mode");
 console.log("  window.dbg.flags({...}) - Set debug flags");
@@ -200,10 +238,15 @@ console.log("  4. Access modules: physics.pmDebug.modules.metrics, etc.");
     );
     return null;
   }
+  if (calculationMethod !== "spectral") {
+    console.error('[PM Verifiers] Spectral method is not active. Switch to spectral via setMethod("spectral") before running verifiers.');
+    return null;
+  }
   console.log(
     "[PM Verifiers] Running comprehensive PM/FFT pipeline verification..."
   );
-  const results = await pmVerifiers.runAllPipelineVerifiers(physics._system);
+  const spectralSystem = /** @type {import('./particle-system/particle-system-spectral.js').ParticleSystemSpectral} */ (physics._system);
+  const results = await pmVerifiers.runAllPipelineVerifiers(spectralSystem);
   console.log("[PM Verifiers] Verification complete. Results:", results);
   return results;
 };
@@ -285,7 +328,19 @@ spectralRadio.onchange = () => {
   }
 };
 
+meshRadio.onchange = () => {
+  if (meshRadio.checked) {
+    calculationMethod = "mesh";
+    console.log("[Demo] Switched to Mesh (Plan B)");
+    recreateAll();
+  }
+};
+
 function updateProfilingDisplay() {
+  if (!physics || !m) {
+    return;
+  }
+
   const physicsStats = physics.stats();
   const meshStats = m.stats();
 
@@ -475,7 +530,7 @@ function recreatePhysicsAndMesh() {
     );
   }
 
-  const physics = particleSystem({
+  const baseOptions = /** @type {any} */ ({
     gl,
     particles,
     get: (spot, out) => {
@@ -503,27 +558,46 @@ function recreatePhysicsAndMesh() {
         ((Math.floor(y * 255) & 0xff) << 8) |
         (Math.floor(z * 255) & 0xff);
     },
-    theta: 0.7, // Optimized for performance (was 0.5)
     gravityStrength,
     softening: 0.002,
     dt: 10 / 60,
     damping: 0.002,
     enableProfiling: profilingEnabled,
-    method: /** @type {'quadrupole' | 'monopole' | 'spectral'} */ (
+    method: /** @type {'quadrupole' | 'monopole' | 'spectral' | 'mesh'} */ (
       calculationMethod
     ),
-    edges: edges || undefined,
-    springStrength: 4,
+    worldBounds
   });
 
-  const textureSize = physics.getTextureSize();
+  if (calculationMethod === "mesh") {
+    baseOptions.mesh = {
+      assignment: "cic",
+      gridSize: 128,
+      nearFieldRadius: 2,
+      kCut: 0,
+      splitSigma: 0
+    };
+  } else {
+    baseOptions.theta = 0.7; // Optimized for performance (was 0.5)
+    baseOptions.edges = edges || undefined;
+    baseOptions.springStrength = 4;
+  }
 
-  const m = massSpotMesh({
+  const physics = particleSystem(baseOptions);
+
+  const textureSize = physics.getTextureSize();
+  const positionTexture = physics.getPositionTexture() || physics.getPositionTextures()[0];
+  const colorTexture = physics.getColorTexture();
+  if (!positionTexture || !colorTexture) {
+    throw new Error('[Demo] Particle system did not provide renderable textures.');
+  }
+
+  const meshInstance = massSpotMesh({
     textureMode: true,
     particleCount,
     textures: {
-      position: physics.getPositionTexture(),
-      color: physics.getColorTexture(),
+      position: positionTexture,
+      color: colorTexture,
       size: [textureSize.width, textureSize.height],
     },
     fog: { start: 0.3, gray: 50 },
@@ -531,9 +605,9 @@ function recreatePhysicsAndMesh() {
     gl,
   });
 
-  scene.add(m.mesh);
+  scene.add(meshInstance.mesh);
 
-  return { physics, m };
+  return { physics, m: meshInstance };
 }
 
 /**
