@@ -505,9 +505,9 @@ function recreatePhysicsAndMesh() {
     },
     theta: 0.7, // Optimized for performance (was 0.5)
     gravityStrength,
-    softening: 0.2,
+    softening: 0.002,
     dt: 10 / 60,
-    damping: 0.01,
+    damping: 0.002,
     enableProfiling: profilingEnabled,
     method: /** @type {'quadrupole' | 'monopole' | 'spectral'} */ (
       calculationMethod

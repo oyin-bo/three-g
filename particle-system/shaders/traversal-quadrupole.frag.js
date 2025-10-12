@@ -235,6 +235,12 @@ void main() {
 
     // Sample 3D neighborhood (3×3×3 - 1 = 26 voxels)
     const int R = 1;
+    int parentLevel = level + 1;
+    bool hasParent = (parentLevel < u_numLevels);
+    ivec3 parentVoxel = myVoxel / 2;
+    vec4 acceptedSiblingA0Sum = vec4(0.0);
+    vec4 acceptedSiblingA1Sum = vec4(0.0);
+    vec4 acceptedSiblingA2Sum = vec4(0.0);
     for (int dz = -R; dz <= R; dz++) {
       for (int dy = -R; dy <= R; dy++) {
         for (int dx = -R; dx <= R; dx++) {
@@ -271,20 +277,68 @@ ${
           float delta = length(com - c);
           
           if (d > cellSize / u_theta + delta) {
-            // Accepted: use monopole + quadrupole
             if (u_enableQuadrupoles) {
               vec4 A1 = sampleLevelA1(level, texCoord);
               vec4 A2 = sampleLevelA2(level, texCoord);
               vec3 M1 = A0.rgb;
               totalForce += computeQuadrupoleAcceleration(r, M0, M1, A1, A2, eps);
+              if (hasParent) {
+                ivec3 neighborParent = neighborVoxel / 2;
+                if (all(equal(neighborParent, parentVoxel))) {
+                  acceptedSiblingA0Sum += A0;
+                  acceptedSiblingA1Sum += A1;
+                  acceptedSiblingA2Sum += A2;
+                }
+              }
             } else {
-              // Monopole only (fallback)
               float r2 = dot(r, r) + eps * eps;
               float invR3 = pow(r2, -1.5);
               totalForce += M0 * r * invR3;
+              if (hasParent) {
+                ivec3 neighborParent = neighborVoxel / 2;
+                if (all(equal(neighborParent, parentVoxel))) {
+                  acceptedSiblingA0Sum += A0;
+                }
+              }
             }
           }
           // If not accepted, rely on finer levels or L0 near-field
+        }
+      }
+    }
+
+    if (hasParent) {
+      float parentGridSize = u_gridSizes[parentLevel];
+      float parentSlicesPerRow = u_slicesPerRow[parentLevel];
+      float parentCellSize = u_cellSizes[parentLevel];
+      ivec2 parentTex = voxelToTexel(parentVoxel, parentGridSize, parentSlicesPerRow);
+      ivec2 myTex = voxelToTexel(myVoxel, gridSize, slicesPerRow);
+
+      vec4 A0_parent = sampleLevelA0(parentLevel, parentTex);
+      vec4 A0_child  = sampleLevelA0(level, myTex);
+
+      vec4 A0_res = A0_parent - A0_child - acceptedSiblingA0Sum;
+      if (A0_res.a > 0.0) {
+        vec3 comRes = A0_res.rgb / max(A0_res.a, 1e-6);
+        vec3 rRes = comRes - myPos;
+        float dRes = length(rRes);
+        vec3 cParent = cellCenter(parentLevel, parentVoxel, parentGridSize);
+        float deltaRes = length(comRes - cParent);
+        if (dRes > parentCellSize / u_theta + deltaRes) {
+          if (u_enableQuadrupoles) {
+            vec4 A1_parent = sampleLevelA1(parentLevel, parentTex);
+            vec4 A2_parent = sampleLevelA2(parentLevel, parentTex);
+            vec4 A1_child  = sampleLevelA1(level, myTex);
+            vec4 A2_child  = sampleLevelA2(level, myTex);
+            vec4 A1_res = A1_parent - A1_child - acceptedSiblingA1Sum;
+            vec4 A2_res = A2_parent - A2_child - acceptedSiblingA2Sum;
+            vec3 M1_res = A0_res.rgb;
+            totalForce += computeQuadrupoleAcceleration(rRes, A0_res.a, M1_res, A1_res, A2_res, eps);
+          } else {
+            float r2Res = dot(rRes, rRes) + eps * eps;
+            float invR3Res = pow(r2Res, -1.5);
+            totalForce += A0_res.a * rRes * invR3Res;
+          }
         }
       }
     }

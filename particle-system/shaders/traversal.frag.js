@@ -106,6 +106,10 @@ void main() {
     // Sample full 3D neighborhood (27 voxels - 1 center = 26 voxels)
     // Use all neighbors to avoid anisotropic sampling bias
     const int R = 1;
+    int parentLevel = level + 1;
+    bool hasParent = (parentLevel < u_numLevels) && (level >= 1);
+    ivec3 parentVoxel = myVoxel / 2;
+    vec4 acceptedSiblingA0Sum = vec4(0.0);
     for (int dz = -R; dz <= R; dz++) {
       for (int dy = -R; dy <= R; dy++) {
         for (int dx = -R; dx <= R; dx++) {
@@ -132,13 +136,41 @@ void main() {
           
           // Distance-based theta criterion (isotropic)
           if ((s / max(d, eps)) < u_theta) {
-            // Approximate: use COM with proper gravitational softening
             float dSq = d * d;
             float softSq = eps * eps;
             float denom = dSq + softSq;
             float inv = 1.0 / (denom * sqrt(denom)); // 1 / (d² + eps²)^1.5
             totalForce += delta * m * inv;
+            if (hasParent) {
+              ivec3 neighborParent = neighborVoxel / 2;
+              if (all(equal(neighborParent, parentVoxel))) {
+                acceptedSiblingA0Sum += nodeData;
+              }
+            }
           }
+        }
+      }
+    }
+
+    if (hasParent) {
+      float parentGridSize = u_gridSizes[parentLevel];
+      float parentSlicesPerRow = u_slicesPerRow[parentLevel];
+      float parentCellSize = u_cellSizes[parentLevel];
+      ivec2 parentTex = voxelToTexel(parentVoxel, parentGridSize, parentSlicesPerRow);
+      ivec2 myTex = voxelToTexel(myVoxel, gridSize, slicesPerRow);
+      vec4 A0_parent = sampleLevel(parentLevel, parentTex);
+      vec4 A0_child = sampleLevel(level, myTex);
+      vec4 A0_res = A0_parent - A0_child - acceptedSiblingA0Sum;
+      if (A0_res.a > 0.0) {
+        vec3 comRes = A0_res.rgb / max(A0_res.a, 1e-6);
+        vec3 rRes = comRes - myPos;
+        float dRes = length(rRes);
+        float sParent = parentCellSize;
+        if ((sParent / max(dRes, eps)) < u_theta) {
+          float dSqRes = dRes * dRes;
+          float denomRes = dSqRes + eps * eps;
+          float invRes = 1.0 / (denomRes * sqrt(denomRes));
+          totalForce += rRes * A0_res.a * invRes;
         }
       }
     }
