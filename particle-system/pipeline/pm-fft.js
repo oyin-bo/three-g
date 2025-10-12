@@ -102,28 +102,15 @@ export function initFFT(psys) {
 export function convertRealToComplex(psys) {
   const gl = psys.gl;
   const debugFFT = psys._debugFFT || false;
-  
-  // Simple copy shader: read alpha (mass), write to RG (real, 0)
-  const convertSrc = `#version 300 es
-    precision highp float;
-    in vec2 v_uv;
-    out vec4 outColor;
-    uniform sampler2D u_massGrid;
-    
-    void main() {
-      float mass = texture(u_massGrid, v_uv).a;
-      outColor = vec4(mass, 0.0, 0.0, 0.0);
-    }
-  `;
+    const textureSize = psys.pmGrid.size;
   
   if (!psys._realToComplexProgram) {
-    psys._realToComplexProgram = psys.createProgram(fsQuadVert, convertSrc);
+    configureRealToComplex(psys);
   }
-  
-  const textureSize = psys.pmGrid.size;
-  
+
   gl.bindFramebuffer(gl.FRAMEBUFFER, psys.pmSpectrum.framebuffer);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, psys.pmSpectrum.texture, 0);
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
   
   // Check framebuffer completeness
   const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
@@ -134,6 +121,12 @@ export function convertRealToComplex(psys) {
   }
   
   gl.viewport(0, 0, textureSize, textureSize);
+  gl.disable(gl.DEPTH_TEST);
+  gl.depthMask(false);
+  gl.disable(gl.BLEND);
+  gl.disable(gl.CULL_FACE);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.colorMask(true, true, true, true);
   gl.useProgram(psys._realToComplexProgram);
   
   // Clear any previous GL errors
@@ -158,6 +151,24 @@ export function convertRealToComplex(psys) {
   // Debug: inspect converted spectrum
   if (debugFFT) {
     inspectTexture(gl, psys.pmSpectrum.texture, textureSize, textureSize, 'RG', 'After convertRealToComplex');
+  }
+}
+
+function configureRealToComplex(psys) {
+  const gl = psys.gl;
+
+  if (!psys._realToComplexProgram) {
+    const convertSrc = `#version 300 es
+      precision highp float;
+      in vec2 v_uv;
+      out vec4 outColor;
+      uniform sampler2D u_massGrid;
+      void main() {
+        float mass = texture(u_massGrid, v_uv).a;
+        outColor = vec4(mass, 0.0, 0.0, 0.0);
+      }
+    `;
+    psys._realToComplexProgram = psys.createProgram(fsQuadVert, convertSrc);
   }
 }
 
