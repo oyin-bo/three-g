@@ -127,6 +127,7 @@ export class ParticleSystemMesh {
     this.pmGrid = null;
     this.pmGridFramebuffer = null;
     this.pmForceTexture = null;
+    this.pmForceGrids = null;
     this.meshSpectrum = null;
     this.meshDensitySpectrum = null;
     this.meshPotentialSpectrum = null;
@@ -196,6 +197,7 @@ export class ParticleSystemMesh {
     this.velocityTextures = createPingPongTextures(gl, this.textureWidth, this.textureHeight);
     this.forceTexture = createRenderTexture(gl, this.textureWidth, this.textureHeight);
     this.pmForceTexture = this.forceTexture.texture;
+    this.pmForceFBO = this.forceTexture.framebuffer;
     this.colorTexture = createRenderTexture(gl, this.textureWidth, this.textureHeight, gl.RGBA8, gl.UNSIGNED_BYTE);
   }
 
@@ -408,13 +410,14 @@ export class ParticleSystemMesh {
     }
 
     if (this.meshForceGrids) {
-      for (const tex of Object.values(this.meshForceGrids)) {
-        if (tex) {
-          gl.deleteTexture(tex);
-        }
-      }
+      const { x, y, z } = this.meshForceGrids;
+      if (x) gl.deleteTexture(x);
+      if (y) gl.deleteTexture(y);
+      if (z) gl.deleteTexture(z);
       this.meshForceGrids = null;
     }
+
+    this.pmForceGrids = null;
 
     if (this.profiler) {
       this.profiler.dispose();

@@ -84,15 +84,18 @@ export function initForceGridTextures(psys) {
  * @param {WebGLTexture} forceGridX - Real-space force grid X
  * @param {WebGLTexture} forceGridY - Real-space force grid Y
  * @param {WebGLTexture} forceGridZ - Real-space force grid Z
+ * @param {Object} options - Options for sampling
+ * @param {boolean} options.accumulate - Accumulate forces instead of clearing
  */
-export function sampleForcesAtParticles(psys, forceGridX, forceGridY, forceGridZ) {
+export function sampleForcesAtParticles(psys, forceGridX, forceGridY, forceGridZ, options = {}) {
   initForceSampling(psys);
-  
+
   const gl = psys.gl;
   const program = psys.pmForceSampleProgram;
   const gridSize = psys.pmGrid.gridSize;
   const slicesPerRow = psys.pmGrid.slicesPerRow;
-  
+  const { accumulate = false } = options;
+
   // Bind output framebuffer
   gl.bindFramebuffer(gl.FRAMEBUFFER, psys.pmForceFBO);
   gl.framebufferTexture2D(
@@ -104,12 +107,20 @@ export function sampleForcesAtParticles(psys, forceGridX, forceGridY, forceGridZ
   );
   
   gl.viewport(0, 0, psys.textureWidth, psys.textureHeight);
-  
+
   // Set GL state
-  gl.disable(gl.BLEND);
+  if (accumulate) {
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.blendEquation(gl.FUNC_ADD);
+  } else {
+    gl.disable(gl.BLEND);
+    gl.colorMask(true, true, true, true);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
   gl.disable(gl.DEPTH_TEST);
-  gl.colorMask(true, true, true, true);
-  
+
   gl.useProgram(program);
   
   // Bind particle position texture
@@ -154,13 +165,17 @@ export function sampleForcesAtParticles(psys, forceGridX, forceGridY, forceGridZ
   
   // Draw all particles as points
   gl.drawArrays(gl.POINTS, 0, psys.particleCount);
-  
+
   gl.bindVertexArray(null);
-  
+
+  if (accumulate) {
+    gl.disable(gl.BLEND);
+  }
+
   gl.finish(); // Ensure completion
-  
+
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  
+
   console.log(`[PM Force Sample] Sampled forces for ${psys.particleCount} particles`);
 }
 
