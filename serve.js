@@ -2,13 +2,18 @@
 // @ts-check
 
 import { createServer } from 'node:http';
-import { readFileSync, createReadStream, existsSync } from 'node:fs';
+import { readFileSync, createReadStream, existsSync, writeFileSync, watch } from 'node:fs';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PORT = Number(process.env.PORT) || 8302;
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = normalize(join(__filename, '..'));
+
+const DEBUG_FILE = join(ROOT, 'debug.js');
+const DEBUG_SNIPPET_LIMIT = 50;
+const DEBUG_HEADER_INTERVAL_MS = 1000;
+const DEBUG_FILE_DEBOUNCE_MS = 150;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -20,6 +25,15 @@ const MIME = {
 const PAGES = new Map(); // name -> { name, url, last, state, queue: Job[], current: Job|null }
 let NEXT_JOB_ID = 1;
 const JOB_TIMEOUT_MS = 60000;
+const JOB_TIMERS = new Map();
+
+const fileView = { header: [], body: [], footer: [], text: '' };
+let activeFileJob = null;
+let debugReadTimer;
+let headerInterval;
+let lastCompletedPageName = null;
+
+initFileHarness();
 
 function getRawParam(reqUrl, key) {
   const qAt = reqUrl.indexOf('?');
@@ -30,6 +44,344 @@ function getRawParam(reqUrl, key) {
     if (k === key) return decodeURIComponent(v);
   }
   return null;
+}
+
+function initFileHarness() {
+  ensureDebugFile();
+  refreshDebugFile(true);
+  try {
+    watch(DEBUG_FILE, scheduleDebugRead);
+  } catch {
+  }
+  headerInterval = setInterval(() => refreshDebugFile(false), DEBUG_HEADER_INTERVAL_MS);
+}
+
+function ensureDebugFile() {
+  if (!existsSync(DEBUG_FILE)) {
+    writeFileSync(DEBUG_FILE, '', 'utf8');
+  }
+}
+
+function refreshDebugFile(force) {
+  const header = buildHeaderLines();
+  if (!force && arraysEqual(header, fileView.header)) return;
+  writeDebugFile(header, fileView.body, fileView.footer);
+}
+
+function writeDebugFile(header, body, footer) {
+  fileView.header = header.slice();
+  fileView.body = body.slice();
+  fileView.footer = footer.slice();
+  const sections = [];
+  sections.push(...header);
+  if (body.length) {
+    if (sections.length) sections.push('');
+    sections.push(...body);
+  }
+  if (footer.length) {
+    if (sections.length) sections.push('');
+    sections.push(...footer);
+  }
+  const text = sections.join('\n');
+  const output = text ? `${text}\n` : '';
+  if (output === fileView.text) return;
+  fileView.text = output;
+  writeFileSync(DEBUG_FILE, output, 'utf8');
+}
+
+function scheduleDebugRead() {
+  if (debugReadTimer) clearTimeout(debugReadTimer);
+  debugReadTimer = setTimeout(() => {
+    debugReadTimer = undefined;
+    let text = '';
+    try {
+      text = readFileSync(DEBUG_FILE, 'utf8');
+    } catch {
+      return;
+    }
+    if (text === fileView.text) return;
+    handleDebugFileChange(text);
+  }, DEBUG_FILE_DEBOUNCE_MS);
+}
+
+function handleDebugFileChange(text) {
+  const normalized = text.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  const header = fileView.header;
+  let matchesHeader = lines.length >= header.length;
+  if (matchesHeader) {
+    for (let i = 0; i < header.length; i += 1) {
+      if (lines[i] !== header[i]) { matchesHeader = false; break; }
+    }
+  }
+  if (!matchesHeader) {
+    refreshDebugFile(true);
+    return;
+  }
+  let index = header.length;
+  while (index < lines.length && !lines[index].trim()) index += 1;
+  if (index >= lines.length) return;
+  const first = lines[index];
+  if (!first.startsWith('//')) {
+    refreshDebugFile(true);
+    return;
+  }
+  const fragment = first.slice(2).trim();
+  const code = lines.slice(index + 1).join('\n');
+  handleFileRequest(fragment, code);
+}
+
+function handleFileRequest(fragment, code) {
+  if (!fragment) {
+    writeDebugFile(buildHeaderLines(), [`// page not found for "${fragment}"`], []);
+    return;
+  }
+  if (!code.trim()) return;
+  if (activeFileJob && !activeFileJob.done) return;
+
+  const page = findPageByFragment(fragment);
+  if (!page) {
+    writeDebugFile(buildHeaderLines(), [`// page not found for "${fragment}"`], []);
+    return;
+  }
+
+  resetCompletionStates();
+  fileView.body = [];
+  fileView.footer = [];
+
+  const job = createJob({ code, page, source: 'file', fragment });
+  activeFileJob = job;
+  queuePageJob(page, job);
+}
+
+function resetCompletionStates() {
+  lastCompletedPageName = null;
+  for (const page of PAGES.values()) page.lastOutcome = null;
+}
+
+function findPageByFragment(fragment) {
+  const needle = fragment.toLowerCase();
+  for (const page of PAGES.values()) {
+    if (page.name.toLowerCase().includes(needle)) return page;
+  }
+  return null;
+}
+
+function createJob(options) {
+  return {
+    id: String(NEXT_JOB_ID++),
+    code: options.code,
+    res: options.res || null,
+    done: false,
+    timer: null,
+    page: options.page,
+    source: options.source,
+    fragment: options.fragment || null,
+    snippet: formatSnippet(options.code),
+    requestedAt: Date.now(),
+    startedAt: null,
+    finishedAt: null
+  };
+}
+
+function queuePageJob(page, job) {
+  page.queue.push(job);
+  const timer = setTimeout(() => handleJobTimeout(job), JOB_TIMEOUT_MS);
+  JOB_TIMERS.set(job.id, timer);
+  job.timer = timer;
+  refreshDebugFile(true);
+}
+
+function handleJobTimeout(job) {
+  if (job.done) return;
+  if (JOB_TIMERS.has(job.id)) {
+    clearTimeout(JOB_TIMERS.get(job.id));
+    JOB_TIMERS.delete(job.id);
+  }
+  if (job.source === 'http') {
+    if (job.res) {
+      try {
+        job.res.writeHead(504, { 'Content-Type': 'text/plain; charset=utf-8' });
+        job.res.end('timeout');
+      } catch {
+      }
+    }
+    completeJob(job, { ok: false, error: 'timeout', timeout: true, httpAlreadySent: true });
+    return;
+  }
+  completeJob(job, { ok: false, error: 'timeout', timeout: true });
+}
+
+function dispatchJobToPage(page, job, res) {
+  page.current = job;
+  page.state = 'executing';
+  job.startedAt = Date.now();
+  refreshDebugFile(true);
+  res.writeHead(200, {
+    'Content-Type': MIME['.js'] || 'application/javascript',
+    'x-job-id': job.id,
+    'x-target-name': page.name
+  });
+  res.end(job.code);
+}
+
+function completeJob(job, outcome) {
+  if (job.done) return;
+  job.done = true;
+  if (JOB_TIMERS.has(job.id)) {
+    clearTimeout(JOB_TIMERS.get(job.id));
+    JOB_TIMERS.delete(job.id);
+  }
+  if (job.timer) {
+    clearTimeout(job.timer);
+    job.timer = null;
+  }
+  const page = job.page;
+  if (page) {
+    const idx = page.queue.indexOf(job);
+    if (idx >= 0) page.queue.splice(idx, 1);
+    if (page.current === job) page.current = null;
+    if (page.state === 'executing') page.state = 'idle';
+  }
+  job.finishedAt = Date.now();
+  const duration = job.startedAt ? job.finishedAt - job.startedAt : 0;
+  if (page) {
+    page.lastOutcome = {
+      status: outcome.ok ? 'ok' : 'error',
+      duration,
+      finishedAt: job.finishedAt,
+      timeout: !!outcome.timeout
+    };
+    lastCompletedPageName = page.name;
+  }
+  if (job.source === 'http') {
+    if (!outcome.httpAlreadySent && job.res) {
+      try {
+        if (outcome.ok) {
+          const value = outcome.value === undefined ? null : outcome.value;
+          job.res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          job.res.end(JSON.stringify(value));
+        } else {
+          job.res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+          job.res.end(String(outcome.error));
+        }
+      } catch {
+      }
+    }
+    job.res = null;
+    refreshDebugFile(true);
+    return;
+  }
+  activeFileJob = null;
+  if (outcome.ok) {
+    writeDebugFile(buildHeaderLines(), buildResultBody(outcome.value, job), []);
+  } else {
+    writeDebugFile(buildHeaderLines(), buildErrorBody(outcome.error, job), []);
+  }
+}
+
+function buildHeaderLines() {
+  const pages = Array.from(PAGES.values());
+  if (!pages.length) return [];
+  pages.sort((a, b) => b.last - a.last);
+  const lines = [];
+  const used = new Set();
+
+  const executing = pages.find((page) => page.state === 'executing' && page.current);
+  if (executing) {
+    lines.push(formatExecutingLine(executing));
+    used.add(executing.name);
+  } else if (lastCompletedPageName) {
+    const pinned = pages.find((page) => page.name === lastCompletedPageName && page.lastOutcome);
+    if (pinned) {
+      lines.push(formatOutcomeLine(pinned));
+      used.add(pinned.name);
+    }
+  }
+
+  for (const page of pages) {
+    if (used.has(page.name)) continue;
+    if (page.lastOutcome) {
+      lines.push(formatOutcomeLine(page));
+    } else {
+      lines.push(formatIdleLine(page));
+    }
+  }
+  return lines;
+}
+
+function formatIdleLine(page) {
+  return `// ${page.name} ${page.url || '-'} ${formatClock(page.last)} idle`;
+}
+
+function formatExecutingLine(page) {
+  const job = page.current;
+  const snippet = job ? job.snippet : '';
+  const started = formatClock(job ? job.startedAt || job.requestedAt : page.last);
+  return `// ${page.name} ${page.url || '-'} ${formatClock(page.last)} executing "${snippet}" job=${job ? job.id : '-'} started=${started}`;
+}
+
+function formatOutcomeLine(page) {
+  const info = page.lastOutcome;
+  if (!info) return formatIdleLine(page);
+  const durationText = formatDuration(info.duration || 0);
+  if (info.status === 'ok') {
+    return `// ${page.name} ${page.url || '-'} ${formatClock(page.last)} completed in ${durationText} (result below)`;
+  }
+  const suffix = info.timeout ? '(timeout)' : '(see below)';
+  return `// ${page.name} ${page.url || '-'} ${formatClock(page.last)} failed after ${durationText} ${suffix}`;
+}
+
+function formatSnippet(code) {
+  const inline = code.replace(/\s+/g, ' ').trim();
+  if (inline.length <= DEBUG_SNIPPET_LIMIT) return inline;
+  return `${inline.slice(0, DEBUG_SNIPPET_LIMIT - 1)}…`;
+}
+
+function formatDuration(duration) {
+  if (!duration || duration < 1000) return `${formatNumber(duration || 0)}ms`;
+  const seconds = duration / 1000;
+  return seconds >= 10 ? `${formatNumber(Math.round(duration))}ms` : `${seconds.toFixed(1)}s`;
+}
+
+function formatClock(ms) {
+  const date = new Date(ms);
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
+function formatNumber(value) {
+  try {
+    return Number(value).toLocaleString();
+  } catch {
+    return String(value);
+  }
+}
+
+function buildResultBody(value, job) {
+  const json = JSON.stringify(value, null, 2) || 'null';
+  const lines = json.split('\n');
+  const body = [`var result = ${lines[0] || ''}`];
+  for (let i = 1; i < lines.length; i += 1) body.push(lines[i]);
+  body.push(`// finished=${new Date(job.finishedAt).toISOString()} duration=${formatNumber(job.startedAt ? job.finishedAt - job.startedAt : 0)}ms`);
+  return body;
+}
+
+function buildErrorBody(error, job) {
+  const text = error && typeof error === 'object' && error.stack ? String(error.stack) : String(error);
+  const body = text.split('\n');
+  body.push(`// finished=${new Date(job.finishedAt).toISOString()} duration=${formatNumber(job.startedAt ? job.finishedAt - job.startedAt : 0)}ms`);
+  return body;
+}
+
+function arraysEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 // ---- injected to clients and executed ----
@@ -174,7 +526,7 @@ createServer((req, res) => {
       const now = Date.now();
       let page = PAGES.get(name);
       if (!page) {
-        page = { name, url: href || '', last: now, state: 'idle', queue: [], current: null };
+        page = { name, url: href || '', last: now, state: 'idle', queue: [], current: null, lastOutcome: null };
         PAGES.set(name, page);
       }
       if (href) page.url = href;
