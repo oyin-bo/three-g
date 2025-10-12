@@ -26,6 +26,7 @@ const PAGES = new Map(); // name -> { name, url, last, state, queue: Job[], curr
 let NEXT_JOB_ID = 1;
 const JOB_TIMEOUT_MS = 60000;
 const JOB_TIMERS = new Map();
+const POLL_WAIT_MS = 10000;
 
 const fileView = { header: [], body: [], footer: [], text: '' };
 let activeFileJob = null;
@@ -47,7 +48,7 @@ function getRawParam(reqUrl, key) {
 }
 
 function initFileHarness() {
-  ensureDebugFile();
+  initializeDebugFileState();
   refreshDebugFile(true);
   try {
     watch(DEBUG_FILE, scheduleDebugRead);
@@ -56,14 +57,22 @@ function initFileHarness() {
   headerInterval = setInterval(() => refreshDebugFile(false), DEBUG_HEADER_INTERVAL_MS);
 }
 
-function ensureDebugFile() {
-  if (!existsSync(DEBUG_FILE)) {
-    writeFileSync(DEBUG_FILE, '', 'utf8');
+function initializeDebugFileState() {
+  if (existsSync(DEBUG_FILE)) {
+    try {
+      fileView.text = readFileSync(DEBUG_FILE, 'utf8');
+    } catch {
+      fileView.text = '';
+    }
+  } else {
+    fileView.text = '';
   }
 }
 
 function refreshDebugFile(force) {
   const header = buildHeaderLines();
+  const fileMissing = !existsSync(DEBUG_FILE);
+  if (fileMissing) return;
   if (!force && arraysEqual(header, fileView.header)) return;
   writeDebugFile(header, fileView.body, fileView.footer);
 }
@@ -97,6 +106,7 @@ function scheduleDebugRead() {
     try {
       text = readFileSync(DEBUG_FILE, 'utf8');
     } catch {
+      initializeDebugFileState();
       return;
     }
     if (text === fileView.text) return;
@@ -189,6 +199,7 @@ function queuePageJob(page, job) {
   const timer = setTimeout(() => handleJobTimeout(job), JOB_TIMEOUT_MS);
   JOB_TIMERS.set(job.id, timer);
   job.timer = timer;
+  flushPendingPoll(page);
   refreshDebugFile(true);
 }
 
@@ -216,6 +227,10 @@ function dispatchJobToPage(page, job, res) {
   page.current = job;
   page.state = 'executing';
   job.startedAt = Date.now();
+  if (page.pendingPoll && page.pendingPoll.res !== res) {
+    clearTimeout(page.pendingPoll.timer);
+    page.pendingPoll = null;
+  }
   refreshDebugFile(true);
   res.writeHead(200, {
     'Content-Type': MIME['.js'] || 'application/javascript',
@@ -242,6 +257,7 @@ function completeJob(job, outcome) {
     if (idx >= 0) page.queue.splice(idx, 1);
     if (page.current === job) page.current = null;
     if (page.state === 'executing') page.state = 'idle';
+    flushPendingPoll(page);
   }
   job.finishedAt = Date.now();
   const duration = job.startedAt ? job.finishedAt - job.startedAt : 0;
@@ -277,6 +293,17 @@ function completeJob(job, outcome) {
     writeDebugFile(buildHeaderLines(), buildResultBody(outcome.value, job), []);
   } else {
     writeDebugFile(buildHeaderLines(), buildErrorBody(outcome.error, job), []);
+  }
+}
+
+function flushPendingPoll(page) {
+  const pending = page.pendingPoll;
+  if (!pending) return;
+  if (page.state === 'executing') return;
+  const dispatched = pending.dispatch();
+  if (dispatched) {
+    clearTimeout(pending.timer);
+    page.pendingPoll = null;
   }
 }
 
@@ -526,8 +553,10 @@ createServer((req, res) => {
       const now = Date.now();
       let page = PAGES.get(name);
       if (!page) {
-        page = { name, url: href || '', last: now, state: 'idle', queue: [], current: null, lastOutcome: null };
+        page = { name, url: href || '', last: now, state: 'idle', queue: [], current: null, lastOutcome: null, pendingPoll: null };
         PAGES.set(name, page);
+      } else if (!('pendingPoll' in page)) {
+        page.pendingPoll = null;
       }
       if (href) page.url = href;
       page.last = now;
@@ -568,6 +597,7 @@ createServer((req, res) => {
         res, done: false, timer: null
       };
       page.queue.push(job);
+      flushPendingPoll(page);
 
       job.timer = setTimeout(() => {
         if (job.done) return;
@@ -617,6 +647,7 @@ createServer((req, res) => {
           res, done: false, timer: null
         };
         page.queue.push(job);
+        flushPendingPoll(page);
 
         job.timer = setTimeout(() => {
           if (job.done) return;
@@ -628,6 +659,12 @@ createServer((req, res) => {
             res.end('timeout');
           } catch { }
         }, JOB_TIMEOUT_MS);
+
+        if (page.pendingPoll) {
+          try { page.pendingPoll.res.writeHead(200, { 'Content-Type': MIME['.js'] || 'application/javascript' }); page.pendingPoll.res.end(''); } catch { }
+          clearTimeout(page.pendingPoll.timer);
+          page.pendingPoll = null;
+        }
       });
       return;
     }
@@ -636,21 +673,37 @@ createServer((req, res) => {
     if (req.method === 'GET' && qName) {
       const page = pageFor(qName, qUrl);
 
-      if (page.state !== 'executing' && page.queue.length) {
+      const dispatch = () => {
+        if (page.state === 'executing') return false;
         const job = page.queue.shift();
-        page.current = job;
-        page.state = 'executing';
-        res.writeHead(200, {
-          'Content-Type': MIME['.js'] || 'application/javascript',
-          'x-job-id': job.id,
-          'x-target-name': page.name
-        });
-        res.end(job.code);
-        return;
+        if (!job) return false;
+        dispatchJobToPage(page, job, res);
+        return true;
+      };
+
+      if (dispatch()) return;
+
+      if (page.pendingPoll) {
+        try { page.pendingPoll.res.writeHead(200, { 'Content-Type': MIME['.js'] || 'application/javascript' }); page.pendingPoll.res.end(''); } catch { }
+        clearTimeout(page.pendingPoll.timer);
       }
 
-      res.writeHead(200, { 'Content-Type': MIME['.js'] || 'application/javascript' });
-      res.end('');
+      const timer = setTimeout(() => {
+        page.pendingPoll = null;
+        try {
+          res.writeHead(200, { 'Content-Type': MIME['.js'] || 'application/javascript' });
+          res.end('');
+        } catch { }
+      }, POLL_WAIT_MS);
+
+      page.pendingPoll = { res, timer, dispatch };
+      req.on('close', () => {
+        if (page.pendingPoll && page.pendingPoll.res === res) {
+          clearTimeout(page.pendingPoll.timer);
+          page.pendingPoll = null;
+        }
+      });
+      flushPendingPoll(page);
       return;
     }
 
