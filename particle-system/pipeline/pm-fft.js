@@ -33,7 +33,7 @@ export function initFFT(psys) {
     // Primary spectrum texture
     const spectrumTex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, spectrumTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, textureSize, textureSize, 0, gl.RG, gl.FLOAT, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, textureSize, textureSize, 0, gl.RGBA, gl.FLOAT, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -42,7 +42,7 @@ export function initFFT(psys) {
     // Ping-pong texture for multi-pass FFT
     const pingPongTex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, pingPongTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, textureSize, textureSize, 0, gl.RG, gl.FLOAT, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, textureSize, textureSize, 0, gl.RGBA, gl.FLOAT, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -52,7 +52,33 @@ export function initFFT(psys) {
     
     // Create framebuffers
     const spectrumFBO = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, spectrumFBO);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      spectrumTex,
+      0
+    );
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+
     const pingPongFBO = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, pingPongFBO);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      pingPongTex,
+      0
+    );
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+
+    const spectrumStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (spectrumStatus !== gl.FRAMEBUFFER_COMPLETE) {
+      console.error('[PM FFT] Spectrum framebuffer incomplete:', spectrumStatus);
+    }
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     
     psys.pmSpectrum = {
       texture: spectrumTex,
@@ -147,6 +173,18 @@ export function perform3DFFT(psys, inverse = false) {
   const textureSize = psys.pmGrid.size;
   const slicesPerRow = psys.pmGrid.slicesPerRow;
   const debugFFT = psys._debugFFT || false;
+  const spectrum = psys.pmSpectrum;
+  if (!spectrum) {
+    console.error('[PM FFT] pmSpectrum missing; did initFFT run?');
+    return;
+  }
+
+  const collectSnapshots = Boolean(psys['_collectFFTSnapshots']);
+  if (collectSnapshots) {
+    psys['_fftStageSnapshots'] = [];
+  }
+  const stopConfig = psys['_fftStopAfterStage'] || null;
+  const debugMode = typeof psys['_fftShaderDebugMode'] === 'number' ? psys['_fftShaderDebugMode'] : 0;
   
   const numStages = Math.log2(gridSize); // 6 for 64³ grid
   
@@ -154,7 +192,7 @@ export function perform3DFFT(psys, inverse = false) {
   if (debugFFT) {
     const direction = inverse ? 'INVERSE' : 'FORWARD';
     console.log(`[PM FFT] Starting ${direction} FFT`);
-    inspectTexture(gl, psys.pmSpectrum.texture, textureSize, textureSize, 'RG', `Before ${direction} FFT`);
+    inspectTexture(gl, spectrum.texture, textureSize, textureSize, 'RG', `Before ${direction} FFT`);
   }
   
   gl.useProgram(program);
@@ -180,9 +218,9 @@ export function perform3DFFT(psys, inverse = false) {
       
       // Ping-pong between textures
       const readFromPrimary = (stage % 2 === 0);
-      const readTex = readFromPrimary ? psys.pmSpectrum.texture : psys.pmSpectrum.pingPong;
-      const writeFBO = readFromPrimary ? psys.pmSpectrum.pingPongFBO : psys.pmSpectrum.framebuffer;
-      const writeTex = readFromPrimary ? psys.pmSpectrum.pingPong : psys.pmSpectrum.texture;
+      const readTex = readFromPrimary ? spectrum.texture : spectrum.pingPong;
+      const writeFBO = readFromPrimary ? spectrum.pingPongFBO : spectrum.framebuffer;
+      const writeTex = readFromPrimary ? spectrum.pingPong : spectrum.texture;
       
       gl.bindFramebuffer(gl.FRAMEBUFFER, writeFBO);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, writeTex, 0);
@@ -190,19 +228,35 @@ export function perform3DFFT(psys, inverse = false) {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, readTex);
       gl.uniform1i(gl.getUniformLocation(program, 'u_inputTexture'), 0);
+      gl.uniform1i(gl.getUniformLocation(program, 'u_debugMode'), debugMode);
       
       gl.bindVertexArray(psys.quadVAO);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       gl.bindVertexArray(null);
+
+      if (collectSnapshots) {
+        const label = `FFT axis ${axis} stage ${stage} -> ${writeFBO === spectrum.framebuffer ? 'spectrum' : 'pingPong'}`;
+        const stats = inspectTexture(gl, writeTex, textureSize, textureSize, 'RG', label);
+        psys['_fftStageSnapshots'].push({ axis, stage, target: writeFBO === spectrum.framebuffer ? 'spectrum' : 'pingPong', stats });
+      }
+
+      if (stopConfig && stopConfig.axis === axis && stopConfig.stage === stage) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        return;
+      }
     }
     
     // After all stages, ensure result is in primary texture
     if (numStages % 2 === 1) {
       // Copy from pingPong back to primary
-      copyTexture(gl, psys.pmSpectrum.pingPong, psys.pmSpectrum.texture, textureSize);
+      copyTexture(gl, spectrum.pingPong, spectrum.texture, textureSize);
+      if (collectSnapshots) {
+        const stats = inspectTexture(gl, spectrum.texture, textureSize, textureSize, 'RG', `FFT axis ${axis} final copy`);
+        psys['_fftStageSnapshots'].push({ axis, stage: 'finalCopy', target: 'spectrum', stats });
+      }
     }
   }
-  
+
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   
   const direction = inverse ? 'inverse' : 'forward';
@@ -211,7 +265,7 @@ export function perform3DFFT(psys, inverse = false) {
   // Debug: inspect output
   if (debugFFT) {
     const directionLabel = inverse ? 'INVERSE' : 'FORWARD';
-    inspectTexture(gl, psys.pmSpectrum.texture, textureSize, textureSize, 'RG', `After ${directionLabel} FFT`);
+    inspectTexture(gl, spectrum.texture, textureSize, textureSize, 'RG', `After ${directionLabel} FFT`);
   }
 }
 

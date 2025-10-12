@@ -19,6 +19,7 @@ uniform int u_stage;         // FFT stage (0 to log2(N)-1)
 uniform int u_inverse;       // 0=forward, 1=inverse
 uniform float u_gridSize;    // Grid dimension (e.g., 64)
 uniform float u_slicesPerRow;
+uniform int u_debugMode;     // 0 = normal, 1 = current, 2 = partner
 
 const float PI = 3.14159265359;
 const float TWO_PI = 6.28318530718;
@@ -101,6 +102,16 @@ void main() {
   
   vec2 currentComplex = current.rg;
   vec2 partnerComplex = partner.rg;
+
+  if (u_debugMode == 1) {
+    outColor = vec4(currentComplex, 0.0, 1.0);
+    return;
+  }
+
+  if (u_debugMode == 2) {
+    outColor = vec4(partnerComplex, 0.0, 1.0);
+    return;
+  }
   
   // Compute twiddle factor
   // Cooley-Tukey DIT: W_N^(k * 2^stage) where k = pairIndex
