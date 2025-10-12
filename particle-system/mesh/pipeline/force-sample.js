@@ -60,6 +60,7 @@ export function meshSampleForcesAtParticles(psys, forceGridX, forceGridY, forceG
     psys.pmForceTexture,
     0
   );
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
 
   gl.viewport(0, 0, psys.textureWidth, psys.textureHeight);
 

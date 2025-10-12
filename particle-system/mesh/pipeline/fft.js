@@ -306,7 +306,7 @@ export function initMeshForceGrids(psys, { target = 'far' } = {}) {
 
   const size = grid.size;
 
-  const createForceGrid = () => {
+  const createForceGridTexture = () => {
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, size, size, 0, gl.RGBA, gl.FLOAT, null);
@@ -319,27 +319,30 @@ export function initMeshForceGrids(psys, { target = 'far' } = {}) {
   };
 
   const grids = {
-    x: createForceGrid(),
-    y: createForceGrid(),
-    z: createForceGrid(),
+    x: createForceGridTexture(),
+    y: createForceGridTexture(),
+    z: createForceGridTexture(),
     textureSize: size
   };
 
-  psys[prop] = grids;
-  if (target !== 'near') {
-    psys.pmForceGrids = grids;
-    console.log(`[Mesh FFT] Force grid textures created (${size}x${size} x3)`);
-  } else {
+  if (target === 'near') {
+    const framebuffer = gl.createFramebuffer();
+    psys[prop] = {
+      x: grids.x,
+      y: grids.y,
+      z: grids.z,
+      textureSize: size,
+      framebuffer
+    };
     console.log(`[Mesh FFT] Near-field force grids created (${size}x${size} x3)`);
+    return;
   }
+
+  psys[prop] = grids;
+  psys.pmForceGrids = grids;
+  console.log(`[Mesh FFT] Force grid textures created (${size}x${size} x3)`);
 }
 
-/**
- * Inverse FFT for mesh pipeline: spectrum → real grid texture.
- * @param {import('../../particle-system-mesh.js').ParticleSystemMesh} psys
- * @param {WebGLTexture} inputSpectrum
- * @param {WebGLTexture} outputTexture
- */
 export function meshInverseFFTToReal(psys, inputSpectrum, outputTexture) {
   const gl = psys.gl;
   const meshSpectrum = psys.meshSpectrum;

@@ -2,6 +2,7 @@
 
 export default /* glsl */`#version 300 es
 precision highp float;
+precision highp int;
 
 in float v_mass;
 in vec3 v_worldPos;

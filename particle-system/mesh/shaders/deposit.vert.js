@@ -2,6 +2,7 @@
 
 export default /* glsl */`#version 300 es
 precision highp float;
+precision highp int;
 
 uniform sampler2D u_positionTexture;
 uniform vec2 u_textureSize;

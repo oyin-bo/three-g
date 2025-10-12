@@ -5,6 +5,7 @@ import nearFieldFrag from '../../shaders/near-field.frag.js';
 import forceSampleVert from '../../shaders/force-sample.vert.js';
 import forceSampleFrag from '../../shaders/force-sample.frag.js';
 import { createProgram } from '../../utils/common.js';
+import { initMeshForceGrids } from './fft.js';
 
 /**
  * Ensure near-field programs and buffers exist.
@@ -24,7 +25,6 @@ function initNearFieldResources(psys) {
   }
 
   if (!psys.meshNearForceGrids) {
-    const { initMeshForceGrids } = require('./fft.js');
     initMeshForceGrids(psys, { target: 'near' });
   }
 }
@@ -55,8 +55,6 @@ export function computeNearFieldCorrection(psys) {
   gl.viewport(0, 0, nearGrids.textureSize, nearGrids.textureSize);
   gl.disable(gl.BLEND);
   gl.disable(gl.DEPTH_TEST);
-  gl.clearColor(0, 0, 0, 0);
-  gl.clear(gl.COLOR_BUFFER_BIT);
 
   const program = psys.meshPrograms.nearField;
   gl.useProgram(program);
@@ -74,19 +72,19 @@ export function computeNearFieldCorrection(psys) {
   gl.uniform1i(gl.getUniformLocation(program, 'u_nearFieldRadius'), psys.meshConfig.nearFieldRadius);
 
   gl.bindVertexArray(psys.quadVAO);
-  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
 
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, nearGrids.x, 0);
-  gl.uniform1i(gl.getUniformLocation(program, 'u_component'), 0);
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  const drawComponent = (texture, component) => {
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_component'), component);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  };
 
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, nearGrids.y, 0);
-  gl.uniform1i(gl.getUniformLocation(program, 'u_component'), 1);
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, nearGrids.z, 0);
-  gl.uniform1i(gl.getUniformLocation(program, 'u_component'), 2);
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  drawComponent(nearGrids.x, 0);
+  drawComponent(nearGrids.y, 1);
+  drawComponent(nearGrids.z, 2);
 
   gl.bindVertexArray(null);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
