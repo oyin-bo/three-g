@@ -7,12 +7,16 @@
  * Uses trilinear interpolation for smooth force field
  */
 
-import forceSampleVert from '../shaders/force-sample.vert.js';
-import forceSampleFrag from '../shaders/force-sample.frag.js';
+import forceSampleFrag from './shaders/force-sample.frag.js';
+import forceSampleVert from './shaders/force-sample.vert.js';
+import { depositParticlesToGrid } from './pm-deposit.js';
+import { forwardFFT, inverseFFTToReal } from './pm-fft.js';
+import { computeGradient } from './pm-gradient.js';
+import { solvePoissonFFT } from './pm-poisson.js';
 
 /**
  * Initialize force sampling resources
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 export function initForceSampling(psys) {
   const gl = psys.gl;
@@ -48,7 +52,7 @@ export function initForceSampling(psys) {
 
 /**
  * Create real-space force grid textures (for storing inverse FFT results)
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 export function initForceGridTextures(psys) {
   if (psys.pmForceGrids) return; // Already initialized
@@ -80,7 +84,7 @@ export function initForceGridTextures(psys) {
 
 /**
  * Sample forces from PM grids at particle positions
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {WebGLTexture} forceGridX - Real-space force grid X
  * @param {WebGLTexture} forceGridY - Real-space force grid Y
  * @param {WebGLTexture} forceGridZ - Real-space force grid Z
@@ -181,24 +185,15 @@ export function sampleForcesAtParticles(psys, forceGridX, forceGridY, forceGridZ
 
 /**
  * Complete PM/FFT force computation pipeline
- * 
- * Note: This function requires dynamic imports since we can't use static imports
- * for circular dependency reasons. Call it like:
- * 
+ *
  * const { computePMForcesAsync } = await import('./pm-force-sample.js');
  * await computePMForcesAsync(psys);
  * 
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  */
-export async function computePMForcesAsync(psys) {
+export function computePMForcesAsync(psys) {
   // Initialize force grid textures if needed
   initForceGridTextures(psys);
-  
-  // Dynamic imports to avoid circular dependencies
-  const { depositParticlesToGrid } = await import('./pm-deposit.js');
-  const { forwardFFT, inverseFFTToReal } = await import('./pm-fft.js');
-  const { solvePoissonFFT } = await import('./pm-poisson.js');
-  const { computeGradient } = await import('./pm-gradient.js');
   
   // Step 1: Deposit particles to grid
   depositParticlesToGrid(psys);
@@ -233,7 +228,7 @@ export async function computePMForcesAsync(psys) {
 
 /**
  * Read sampled force for debugging
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {number} particleIndex
  * @returns {{fx: number, fy: number, fz: number, mass: number}}
  */

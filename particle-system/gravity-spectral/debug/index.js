@@ -13,15 +13,15 @@
 import './types.js';
 
 // Pipeline stage implementations (static imports to avoid dynamic overhead)
-import { depositParticlesToGrid } from '../pipeline/pm-deposit.js';
-import { forwardFFT, inverseFFTToReal } from '../pipeline/pm-fft.js';
-import { solvePoissonFFT } from '../pipeline/pm-poisson.js';
-import { computeGradient } from '../pipeline/pm-gradient.js';
-import { initForceGridTextures, sampleForcesAtParticles } from '../pipeline/pm-force-sample.js';
+import { depositParticlesToGrid } from '../pm-deposit.js';
+import { forwardFFT, inverseFFTToReal } from '../pm-fft.js';
+import { solvePoissonFFT } from '../pm-poisson.js';
+import { computeGradient } from '../pm-gradient.js';
+import { initForceGridTextures, sampleForcesAtParticles } from '../pm-force-sample.js';
 
 /**
  * Initialize PM debug system
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {import('./types.js').DebugPMConfig} cfg 
  */
 export function pmDebugInit(psys, cfg) {
@@ -51,7 +51,7 @@ export function pmDebugInit(psys, cfg) {
 
 /**
  * Dispose PM debug system
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  */
 export function pmDebugDispose(psys) {
   if (!psys._pmDebugState) return;
@@ -75,7 +75,7 @@ export function pmDebugDispose(psys) {
 
 /**
  * Run a single stage in isolation
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMSourceSpec=} source 
  * @param {import('./types.js').PMSinkSpec=} sink 
@@ -99,7 +99,7 @@ export async function pmDebugRunSingle(psys, stage, source, sink) {
 
 /**
  * Hook called before a stage in normal pipeline
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {import('./types.js').PMStageID} stage 
  * @returns {import('./types.js').PMSourceSpec | null}
  */
@@ -119,7 +119,7 @@ export function pmDebugBeforeStage(psys, stage) {
 
 /**
  * Hook called after a stage in normal pipeline
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {import('./types.js').PMStageID} stage 
  * @returns {import('./types.js').PMSinkSpec | null}
  */
@@ -143,7 +143,7 @@ export function pmDebugAfterStage(psys, stage) {
 
 /**
  * Provide source for a stage
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMSourceSpec} source 
  */
@@ -162,7 +162,7 @@ async function provideSource(psys, stage, source) {
 
 /**
  * Apply sink after a stage
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMSinkSpec} sink 
  */
@@ -182,7 +182,7 @@ async function applySink(psys, stage, sink) {
 
 /**
  * Run a specific stage (placeholder - will be implemented per stage)
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {import('./types.js').PMStageID} stage 
  */
 function runStage(psys, stage) {
@@ -236,7 +236,7 @@ function runStage(psys, stage) {
 
 /**
  * Initialize debug shader programs
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  */
 function initDebugPrograms(psys) {
   // Placeholder - will create shaders for synthetic sources, overlays, and metrics
@@ -245,7 +245,7 @@ function initDebugPrograms(psys) {
 
 /**
  * Provide synthetic source
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMSyntheticSpec} synth 
  */
@@ -286,7 +286,7 @@ async function provideSyntheticSource(psys, stage, synth) {
 
 /**
  * Provide snapshot source
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {import('./types.js').PMStageID} stage 
  * @param {string} key 
  */
@@ -305,7 +305,7 @@ async function provideSnapshotSource(psys, stage, key) {
 
 /**
  * Capture snapshot
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {import('./types.js').PMStageID} stage 
  * @param {string} key 
  */
@@ -316,7 +316,7 @@ async function captureSnapshot(psys, stage, key) {
 
 /**
  * Render overlay
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMOverlaySpec} view 
  */
@@ -353,7 +353,7 @@ async function renderOverlay(psys, stage, view) {
 
 /**
  * Run metrics
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMCheckSpec} checks 
  */
@@ -369,7 +369,7 @@ async function runMetrics(psys, stage, checks) {
 
 /**
  * Thin wrapper to expose internal provideSource for pipeline hooks
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {import('./types.js').PMStageID} stage
  * @param {import('./types.js').PMSourceSpec} source
  */
@@ -377,7 +377,7 @@ export async function pmDebugProvideSource(psys, stage, source) { return provide
 
 /**
  * Thin wrapper to expose internal applySink for pipeline hooks
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {import('./types.js').PMStageID} stage
  * @param {import('./types.js').PMSinkSpec} sink
  */
@@ -385,7 +385,7 @@ export async function pmDebugApplySink(psys, stage, sink) { return applySink(psy
 
 /**
  * Perform readback
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {import('./types.js').PMStageID} stage 
  * @param {import('./types.js').PMReadbackSpec} buffers 
  */
@@ -454,7 +454,7 @@ function disposeSnapshot(gl, snapshot) {
 
 /**
  * Store a snapshot
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {string} key 
  * @param {import('./types.js').PMStageID} atStage 
  */
@@ -467,7 +467,7 @@ export function pmSnapshotStore(psys, key, atStage) {
 
 /**
  * Load a snapshot
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {string} key 
  * @param {import('./types.js').PMStageID} forStage 
  * @returns {import('./types.js').PMSourceSpec}
@@ -478,7 +478,7 @@ export function pmSnapshotLoad(psys, key, forStage) {
 
 /**
  * Dispose a snapshot
- * @param {import('../particle-system.js').ParticleSystem} psys 
+ * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys 
  * @param {string} key 
  */
 export function pmSnapshotDispose(psys, key) {

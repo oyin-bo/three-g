@@ -9,12 +9,12 @@ html, body {
 
 #controls-panel {
   position: absolute;
-  top: 0.5em;
-  right: 1em;
+  top: 0;
+  right: 0;
   background: rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(2px);
-  border-radius: 0.5em;
-  padding: 0.5em 1em;
+  border-bottom-left-radius: 0.5em;
+  padding: 0.5em 0.5em;
   z-index: 100;
   text-shadow: 0 0 14px black, 1px 0 14px black;
   text-align: right;;
@@ -32,8 +32,12 @@ html, body {
   padding-right: none;
 }
 
-#profiling-toggle {
-  display: flex;
+.toggles {
+  text-align: right;
+}
+
+#profiling-toggle, #graph-force-toggle {
+  display: inline-flex;
   justify-content: end;
   gap: 0.5em;
   margin-top: 0.5em;

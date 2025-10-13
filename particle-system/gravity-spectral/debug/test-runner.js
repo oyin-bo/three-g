@@ -344,7 +344,7 @@ export async function testFullPipeline(psys) {
   console.log('========================================');
   
   // Run with live particles
-  const { computePMForcesSync } = await import('../pipeline/pm-pipeline.js');
+  const { computePMForcesSync } = await import('../spectral/pm-pipeline.js');
   
   console.log('\nRunning full PM/FFT pipeline...');
   computePMForcesSync(psys);

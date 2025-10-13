@@ -11,7 +11,7 @@ import { forwardFFT, inverseFFTToReal } from './pm-fft.js';
 import { solvePoissonFFT } from './pm-poisson.js';
 import { computeGradient } from './pm-gradient.js';
 import { initForceGridTextures, sampleForcesAtParticles } from './pm-force-sample.js';
-import { pmDebugBeforeStage, pmDebugAfterStage, pmDebugProvideSource, pmDebugApplySink } from '../pm-debug/index.js';
+import { pmDebugBeforeStage, pmDebugAfterStage, pmDebugProvideSource, pmDebugApplySink } from './debug/index.js';
 
 /**
  * Run complete PM/FFT pipeline to compute gravitational forces
@@ -26,7 +26,7 @@ import { pmDebugBeforeStage, pmDebugAfterStage, pmDebugProvideSource, pmDebugApp
  * 
  * Result is stored in ctx.pmForceTexture (same format as ctx.forceTexture)
  * 
- * @param {import('../particle-system.js').ParticleSystem} ctx
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} ctx
  */
 export function computePMForcesSync(ctx) {
   const gl = ctx.gl;

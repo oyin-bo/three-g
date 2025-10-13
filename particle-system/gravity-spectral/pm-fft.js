@@ -25,96 +25,12 @@
  * - Round-trip RMSE: typically ~5 (small compared to total mass ~2.4e5)
  */
 
-import fftFrag from '../shaders/fft.frag.js';
 import fsQuadVert from '../shaders/fullscreen.vert.js';
-import { inspectTexture } from '../pm-debug/texture-inspector.js';
-
-/**
- * Initialize FFT resources
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
- */
-export function initFFT(psys) {
-  const gl = psys.gl;
-  
-  // Create FFT program
-  if (!psys.pmFFTProgram) {
-    psys.pmFFTProgram = psys.createProgram(fsQuadVert, fftFrag);
-    console.log('[PM FFT] Program created');
-  }
-  
-  // Create spectrum texture (complex: RG = real, imaginary)
-  if (!psys.pmSpectrum) {
-    const gridSize = psys.pmGrid.gridSize;
-    const textureSize = psys.pmGrid.size;
-    
-    // Primary spectrum texture
-    const spectrumTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, spectrumTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, textureSize, textureSize, 0, gl.RGBA, gl.FLOAT, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    
-    // Ping-pong texture for multi-pass FFT
-    const pingPongTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, pingPongTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, textureSize, textureSize, 0, gl.RGBA, gl.FLOAT, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    
-    // Create framebuffers
-    const spectrumFBO = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, spectrumFBO);
-    gl.framebufferTexture2D(
-      gl.FRAMEBUFFER,
-      gl.COLOR_ATTACHMENT0,
-      gl.TEXTURE_2D,
-      spectrumTex,
-      0
-    );
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-
-    const pingPongFBO = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, pingPongFBO);
-    gl.framebufferTexture2D(
-      gl.FRAMEBUFFER,
-      gl.COLOR_ATTACHMENT0,
-      gl.TEXTURE_2D,
-      pingPongTex,
-      0
-    );
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-
-    const spectrumStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    if (spectrumStatus !== gl.FRAMEBUFFER_COMPLETE) {
-      console.error('[PM FFT] Spectrum framebuffer incomplete:', spectrumStatus);
-    }
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    
-    psys.pmSpectrum = {
-      texture: spectrumTex,
-      framebuffer: spectrumFBO,
-      pingPong: pingPongTex,
-      pingPongFBO: pingPongFBO,
-      gridSize: gridSize,
-      textureSize: textureSize,
-      width: textureSize,
-      height: textureSize
-    };
-    
-    console.log(`[PM FFT] Spectrum textures created (${textureSize}x${textureSize})`);
-  }
-}
+import { inspectTexture } from './debug/texture-inspector.js';
 
 /**
  * Convert real-valued mass grid to complex format (zero imaginary part)
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 export function convertRealToComplex(psys) {
   const gl = psys.gl;
@@ -191,7 +107,7 @@ function configureRealToComplex(psys) {
 
 /**
  * Perform 3D FFT (forward or inverse)
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {boolean} inverse - true for inverse FFT, false for forward
  */
 export function perform3DFFT(psys, inverse = false) {
@@ -322,10 +238,9 @@ function copyTexture(gl, src, dst, size) {
  * Computes the 3D FFT of the mass grid and stores the result in pmDensitySpectrum.
  * The forward transform is unnormalized, so DC mode equals the total mass.
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 export function forwardFFT(psys) {
-  initFFT(psys);
   convertRealToComplex(psys);
   perform3DFFT(psys, false);
   
@@ -388,7 +303,7 @@ export function forwardFFT(psys) {
  * - Parseval's theorem: E_freq = N³·E_real (due to unnormalized forward)
  * - After round-trip: reconstructed energy ≈ E_real (within numerical precision)
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {WebGLTexture} inputSpectrum - Input complex spectrum (RG32F)
  * @param {WebGLTexture} outputReal - Output real-valued texture (RGBA32F, real stored in R and A)
  */

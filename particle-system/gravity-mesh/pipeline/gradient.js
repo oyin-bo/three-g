@@ -1,7 +1,7 @@
 // @ts-check
 
 import fsQuadVert from '../../shaders/fullscreen.vert.js';
-import gradientFrag from '../../shaders/gradient.frag.js';
+import gradientFrag from '../../gravity-spectral/shaders/gradient.frag.js';
 import { createProgram } from '../../utils/common.js';
 
 /**

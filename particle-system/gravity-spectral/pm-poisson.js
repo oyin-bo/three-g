@@ -7,57 +7,13 @@
  * ∇²φ = 4πGρ  →  φ(k) = -4πGρ(k) / k²
  */
 
-import poissonFrag from '../shaders/poisson.frag.js';
-import fsQuadVert from '../shaders/fullscreen.vert.js';
-
-/**
- * Initialize Poisson solver resources
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
- */
-export function initPoissonSolver(psys) {
-  const gl = psys.gl;
-  
-  // Create Poisson program
-  if (!psys.pmPoissonProgram) {
-    psys.pmPoissonProgram = psys.createProgram(fsQuadVert, poissonFrag);
-    console.log('[PM Poisson] Program created');
-  }
-  
-  // Create potential spectrum texture (complex: RG = real, imaginary)
-  if (!psys.pmPotentialSpectrum) {
-    const textureSize = psys.pmGrid.size;
-    
-    const potentialTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, potentialTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, textureSize, textureSize, 0, gl.RG, gl.FLOAT, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    
-    const potentialFBO = gl.createFramebuffer();
-    
-    psys.pmPotentialSpectrum = {
-      texture: potentialTex,
-      framebuffer: potentialFBO,
-      gridSize: psys.pmGrid.gridSize,
-      textureSize: textureSize
-    };
-    
-    console.log(`[PM Poisson] Potential spectrum texture created (${textureSize}x${textureSize})`);
-  }
-}
-
 /**
  * Solve Poisson equation in Fourier space
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {number} gravitationalConstant - 4πG (default: use system value)
  * @param {number} boxSize - Physical size of simulation box (default: use world bounds)
  */
 export function solvePoissonFFT(psys, gravitationalConstant, boxSize) {
-  initPoissonSolver(psys);
-  
   const gl = psys.gl;
   const program = psys.pmPoissonProgram;
   const textureSize = psys.pmGrid.size;
@@ -143,7 +99,7 @@ export function solvePoissonFFT(psys, gravitationalConstant, boxSize) {
 
 /**
  * Read potential spectrum for debugging
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {number} x - Texture x coordinate
  * @param {number} y - Texture y coordinate
  * @returns {{real: number, imag: number, magnitude: number}}

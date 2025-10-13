@@ -6,7 +6,7 @@ import { massSpotMesh } from "./mass-spot-mesh.js";
 import { particleSystem } from "./particle-system/index.js";
 
 // Import PM/FFT pipeline verifiers (statically, not dynamically)
-import * as pmVerifiers from "./particle-system/pm-debug/pm-pipeline-verifiers.js";
+import * as pmVerifiers from "./particle-system/gravity-spectral/debug/pm-pipeline-verifiers.js";
 
 // Import graph generators for force-directed layout
 import {
@@ -84,6 +84,26 @@ let calculationMethod = "quadrupole"; // Default to quadrupole
 let frameCount = 0;
 let lastProfileUpdate = 0;
 
+const originalTitle = document.title;
+const gravityIndex = originalTitle.indexOf("Gravity");
+const titleSuffix = gravityIndex !== -1 ? originalTitle.slice(gravityIndex + "Gravity".length) : "";
+const methodTitleMap = /** @type {Record<'quadrupole' | 'monopole' | 'spectral' | 'mesh', string>} */ ({
+  quadrupole: "Quadrupole",
+  monopole: "Monopole",
+  spectral: "Spectral",
+  mesh: "Mesh",
+});
+
+function updateDocumentTitle(method) {
+  const label = methodTitleMap[method] || method;
+  const formattedLabel = label.charAt(0).toUpperCase() + label.slice(1);
+  if (gravityIndex !== -1) {
+    document.title = `${formattedLabel} Gravity${titleSuffix}`;
+  } else {
+    document.title = `${formattedLabel} Gravity`;
+  }
+}
+
 /** @type {ReturnType<typeof particleSystem> | null} */
 let physics = null;
 /** @type {ReturnType<typeof massSpotMesh> | null} */
@@ -148,6 +168,7 @@ outcome.animate = () => {
   }
 };
 
+updateDocumentTitle(calculationMethod);
 recreateAll();
 
 /** @type {any} */ (window).m = m;
@@ -166,6 +187,7 @@ recreateAll();
     quadrupoleRadio.checked = method === "quadrupole";
     spectralRadio.checked = method === "spectral";
     meshRadio.checked = method === "mesh";
+    updateDocumentTitle(calculationMethod);
     console.log("[Demo] Method toggled via DevTools:", method);
     recreateAll();
   } else {
@@ -245,7 +267,7 @@ console.log("  4. Access modules: physics.pmDebug.modules.metrics, etc.");
   console.log(
     "[PM Verifiers] Running comprehensive PM/FFT pipeline verification..."
   );
-  const spectralSystem = /** @type {import('./particle-system/particle-system-spectral.js').ParticleSystemSpectral} */ (physics._system);
+  const spectralSystem = /** @type {import('./particle-system/gravity-spectral/index.js').ParticleSystemSpectral} */ (physics._system);
   const results = await pmVerifiers.runAllPipelineVerifiers(spectralSystem);
   console.log("[PM Verifiers] Verification complete. Results:", results);
   return results;
@@ -307,6 +329,7 @@ graphForceCheckbox.onchange = () => {
 monopoleRadio.onchange = () => {
   if (monopoleRadio.checked) {
     calculationMethod = "monopole";
+    updateDocumentTitle(calculationMethod);
     console.log("[Demo] Switched to Monopole (1st-order)");
     recreateAll();
   }
@@ -315,6 +338,7 @@ monopoleRadio.onchange = () => {
 quadrupoleRadio.onchange = () => {
   if (quadrupoleRadio.checked) {
     calculationMethod = "quadrupole";
+    updateDocumentTitle(calculationMethod);
     console.log("[Demo] Switched to Quadrupole (2nd-order)");
     recreateAll();
   }
@@ -323,6 +347,7 @@ quadrupoleRadio.onchange = () => {
 spectralRadio.onchange = () => {
   if (spectralRadio.checked) {
     calculationMethod = "spectral";
+    updateDocumentTitle(calculationMethod);
     console.log("[Demo] Switched to Spectral (PM/FFT)");
     recreateAll();
   }
@@ -331,6 +356,7 @@ spectralRadio.onchange = () => {
 meshRadio.onchange = () => {
   if (meshRadio.checked) {
     calculationMethod = "mesh";
+    updateDocumentTitle(calculationMethod);
     console.log("[Demo] Switched to Mesh (Plan B)");
     recreateAll();
   }

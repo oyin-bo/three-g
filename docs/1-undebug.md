@@ -66,7 +66,7 @@ need a zero-copy GPU pipeline; that flow is the rendering path used by
 ```javascript
 {
   gl: WebGL2RenderingContext,    // Required
-  particles?: Array<{ x?: number, y?: number, z?: number, mass?: number, rgb?: number }>,
+  particles?: { x?: number, y?: number, z?: number, mass?: number, rgb?: number }[],
   get?: (spot, out) => void,     // Optional mapper function (mass-spot-mesh style)
   // OR texture-mode (GPU):
   // textures: { position: WebGLTexture, color?: WebGLTexture, size: [w,h] }

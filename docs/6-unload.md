@@ -47,118 +47,48 @@ Mirrors the resource layout of other systems while delegating force computation 
 
 ## API Design
 
-```javascript
-/**
- * Read particle positions and velocities from GPU back to CPU (synchronous).
- * Blocks on gl.readPixels until prior GPU work completes.
- *
- * @param {ParticleSystemAPI} ps - Public particle system API
- * @param {Array<object>} particles - Array of particle objects. Length must match particle count.
- * @param {function} [set] - Optional callback per particle:
- *   ({ particle, index, x, y, z, vx, vy, vz }) => void
- *
- * @throws {Error} If particles length does not match ps.particleCount
- * @throws {Error} If GPU readback fails
- */
-function unload(ps, particles, set) {
-  // Implementation uses API-level access; see Generic Unload section.
-}
+`particleSystem(options)` returns a `ParticleSystemAPI`. The synchronous unload primitive is exposed directly on that returned object:
+
+```ts
+// Part of ParticleSystemAPI
+unload(
+  particles: any[],
+  set?: (payload: {
+    particle: any,
+    index: number,
+    x: number, y: number, z: number,
+    vx: number, vy: number, vz: number
+  }) => void
+): void
 ```
 
 ### Behavior
 
-- **Validates** that `particles.length === ps.particleCount`.
-- Performs **minimal GPU readback**: reads position and velocity textures.
-- Calls `set(data)` for each particle if provided, otherwise mutates `particles[i]` directly with `x, y, z, vx, vy, vz`.
-- **Synchronous**: `gl.readPixels` blocks the CPU until prior rendering finishes. No async/await or Promises.
+- **Validates** that `particles.length` matches `ps.particleCount`.
+- Performs **minimal GPU readback** by sampling the active position and velocity ping-pong textures.
+- Invokes `set({...})` when supplied; otherwise mutates `particles[i]` with `x, y, z, vx, vy, vz` fields.
+- **Synchronous**: `gl.readPixels` blocks until GPU work completes. No async/await or Promises.
 
 ---
 
 ## Implementation Strategy by Method
 
-### Generic Unload (API-level, synchronous)
+### Generic Unload (inline on `ParticleSystemAPI`, synchronous)
 
-The same readback procedure applies to all systems. The unloader can operate at the `ParticleSystemAPI` level without system-specific code if the API provides:
+Every concrete system exposes consistent ping-pong resources (`system.positionTextures`, `system.velocityTextures`, and `system.textureWidth/Height`). The public API already closes over `system`, so the `unload` method can live directly inside the `baseAPI` literal in `particle-system/index.js`.
 
-- `getPositionTextures(): WebGLTexture[]`
-- `getCurrentIndex(): 0|1`
-- `getTextureSize(): {width:number,height:number}`
-- `getVelocityTextures(): WebGLTexture[]`
-- `getGL(): WebGL2RenderingContext`
+- **Validation**: reject arrays whose length does not match `system.options.particleCount` and surface missing texture allocations early.
+- **Readback**: bind a throwaway framebuffer, attach the active position and velocity textures (using the shared `currentIndex`), and issue one `gl.readPixels` per texture into temporary `Float32Array` buffers sized to the texture.
+- **Materialize results**: walk `[0, total)` once, translate the RGBA quads into per-particle `{x,y,z,vx,vy,vz}`, and either call the optional `set(payload)` or mutate `particles[i]` in place.
+- **Cleanup**: restore framebuffer binding to `null` and delete the temporary framebuffer to avoid leaks.
 
-```javascript
-// Pseudocode: synchronous, API-level
-function unload(ps, particles, set) {
-  const gl = ps.getGL();
-  if (!gl) throw new Error('WebGL2 context not available on ParticleSystemAPI');
-
-  const { width, height } = ps.getTextureSize();
-  const N = ps.particleCount;
-  if (!Array.isArray(particles) || particles.length !== N) {
-    throw new Error(`Particle count mismatch: expected ${N}, got ${particles && particles.length}`);
-  }
-
-  const posTextures = ps.getPositionTextures();
-  const velTextures = ps.getVelocityTextures();
-  const idx = ps.getCurrentIndex();
-
-  if (!posTextures || !posTextures[idx] || !velTextures || !velTextures[idx]) {
-    throw new Error('Position/velocity textures not available');
-  }
-
-  // Create a temporary FBO to read from any texture (no need to reuse system FBOs)
-  const fbo = gl.createFramebuffer();
-  const readRGBA32F = (tex, dst) => {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    gl.readBuffer(gl.COLOR_ATTACHMENT0);
-    gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, dst);
-  };
-
-  const posBuffer = new Float32Array(width * height * 4);
-  const velBuffer = new Float32Array(width * height * 4);
-  readRGBA32F(posTextures[idx], posBuffer);
-  readRGBA32F(velTextures[idx], velBuffer);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  gl.deleteFramebuffer(fbo);
-
-  for (let i = 0; i < N; i++) {
-    const b = i * 4;
-    const x = posBuffer[b + 0];
-    const y = posBuffer[b + 1];
-    const z = posBuffer[b + 2];
-    const vx = velBuffer[b + 0];
-    const vy = velBuffer[b + 1];
-    const vz = velBuffer[b + 2];
-    if (set) set({ particle: particles[i], index: i, x, y, z, vx, vy, vz });
-    else {
-      particles[i].x = x; particles[i].y = y; particles[i].z = z;
-      particles[i].vx = vx; particles[i].vy = vy; particles[i].vz = vz;
-    }
-  }
-}
-```
+Because the method remains synchronous and lives alongside other base API members, no helper wrapper (`attachUnload`) is required. Each system class (`particle-system-monopole.js`, `particle-system-quadrupole.js`, `particle-system-spectral.js`, `particle-system-mesh.js`) already satisfies the required surface area, so no additional per-method wiring is needed.
 
 ---
 
 ## Integration into Particle System API
 
-Preferred approach: expose an API-level unloader so callers do not need system-specific knowledge.
-
-1) **Minimal public API additions**:
-
-- `getVelocityTextures(): WebGLTexture[]`
-- `getGL(): WebGL2RenderingContext`
-
-2) **Expose `unload` on the returned API** (synchronous):
-
-```javascript
-// In particle-system/index.js
-const baseAPI = {
-  // ...existing methods...
-  unload: (particles, set) => unload(this, particles, set) // calls Generic Unload above
-};
-```
+The API returned from `particleSystem(...)` includes the `unload` method constructed above. Callers simply invoke `ps.unload(particles, set)` without any knowledge of the underlying method-specific implementation.
 
 ---
 
@@ -216,4 +146,4 @@ console.log(particles[0]); // { x: 1.23, y: 4.56, z: 0.78, vx: 0.01, vy: 0.02, v
 | Spectral   | Position texture | Velocity texture  | Direct readback (2 textures) |
 | Mesh       | Position texture | Velocity texture  | Direct readback (2 textures) |
 
-**Key takeaway**: All current methods persist per‑particle velocities; a single synchronous unloader can read positions and velocities directly. For a clean API‑level implementation, add `getVelocityTextures()` and a public `gl` accessor to the `ParticleSystemAPI`.
+**Key takeaway**: All current methods persist per‑particle velocities; the shared synchronous `unload` method on `ParticleSystemAPI` reads positions and velocities directly while keeping method-specific hooks internal.

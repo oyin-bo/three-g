@@ -1,14 +1,14 @@
 // @ts-check
 
-import fsQuadVert from './shaders/fullscreen.vert.js';
-import velIntegrateFrag from './shaders/vel_integrate.frag.js';
-import posIntegrateFrag from './shaders/pos_integrate.frag.js';
+import fsQuadVert from '../shaders/fullscreen.vert.js';
+import velIntegrateFrag from '../shaders/vel_integrate.frag.js';
+import posIntegrateFrag from '../shaders/pos_integrate.frag.js';
 
 import {
   unbindAllTextures as dbgUnbindAllTextures,
   checkGl as dbgCheckGl,
   checkFBO as dbgCheckFBO
-} from './utils/debug.js';
+} from '../utils/debug.js';
 
 import {
   createRenderTexture,
@@ -18,12 +18,12 @@ import {
   createProgram,
   calculateParticleTextureDimensions,
   checkWebGL2Support
-} from './utils/common.js';
+} from '../utils/common.js';
 
-import { GPUProfiler } from './utils/gpu-profiler.js';
-import { pipelineIntegratePhysics } from './pipeline/index.js';
-import { createPMGrid, createPMGridFramebuffer } from './pm-grid.js';
-import { computeMeshForces } from './mesh/pipeline/compute-mesh-forces.js';
+import { GPUProfiler } from '../utils/gpu-profiler.js';
+import { integratePhysics } from '../utils/integrator.js';
+import { createPMGrid, createPMGridFramebuffer } from '../gravity-spectral/pm-grid.js';
+import { computeMeshForces } from './pipeline/compute-mesh-forces.js';
 
 const DEFAULT_WORLD_BOUNDS = {
   min: [-4, -4, -4],
@@ -269,7 +269,7 @@ export class ParticleSystemMesh {
     // Placeholder for mesh force computation (to be implemented in later steps)
     computeMeshForces(this);
 
-    pipelineIntegratePhysics(this);
+    integratePhysics(this);
 
     this.frameCount++;
   }

@@ -2,8 +2,8 @@
 
 import fsQuadVert from '../../shaders/fullscreen.vert.js';
 import nearFieldFrag from '../../shaders/near-field.frag.js';
-import forceSampleVert from '../../shaders/force-sample.vert.js';
-import forceSampleFrag from '../../shaders/force-sample.frag.js';
+import forceSampleVert from '../../gravity-spectral/shaders/force-sample.vert.js';
+import forceSampleFrag from '../../gravity-spectral/shaders/force-sample.frag.js';
 import { createProgram } from '../../utils/common.js';
 import { initMeshForceGrids } from './fft.js';
 

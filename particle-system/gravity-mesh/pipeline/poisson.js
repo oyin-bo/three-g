@@ -1,7 +1,7 @@
 // @ts-check
 
 import fsQuadVert from '../../shaders/fullscreen.vert.js';
-import poissonFrag from '../../shaders/poisson.frag.js';
+import poissonFrag from '../../gravity-spectral/shaders/poisson.frag.js';
 import { createProgram } from '../../utils/common.js';
 
 /**

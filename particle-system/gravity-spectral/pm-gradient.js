@@ -9,12 +9,12 @@
  * Generates three force spectrum textures (Fx, Fy, Fz)
  */
 
-import gradientFrag from '../shaders/gradient.frag.js';
+import gradientFrag from './shaders/gradient.frag.js';
 import fsQuadVert from '../shaders/fullscreen.vert.js';
 
 /**
  * Initialize gradient/force resources
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('./particle-system-spectral.js).ParticleSystemSpectral} psys
  */
 export function initGradient(psys) {
   const gl = psys.gl;
@@ -63,7 +63,7 @@ export function initGradient(psys) {
 
 /**
  * Compute gradient (force field) from potential spectrum
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {number} boxSize - Physical size of simulation box
  */
 export function computeGradient(psys, boxSize = null) {
@@ -143,7 +143,7 @@ export function computeGradient(psys, boxSize = null) {
 
 /**
  * Read force spectrum for debugging
- * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {number} axis - 0=X, 1=Y, 2=Z
  * @param {number} x - Texture x coordinate
  * @param {number} y - Texture y coordinate

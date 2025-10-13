@@ -17,13 +17,18 @@
 export class LaplacianForceModule {
   /**
    * @param {Iterable<Edge>} edges
+   * @param {WebGL2RenderingContext} gl
    * @param {{
    *   k?: number,
    *   normalized?: boolean,
-   *   shardSize?: number
+   *   shardSize?: number,
+   *   particleCount: number,
+   *   textureWidth: number,
+   *   textureHeight: number,
+   *   disableFloatBlend: boolean
    * }} options
    */
-  constructor(edges, options = {}) {
+  constructor(edges, gl, options) {
     this.edges = Array.from(edges);
     this.options = {
       k: options.k ?? 0.01,
@@ -32,7 +37,7 @@ export class LaplacianForceModule {
     };
 
     // GPU resources
-    this.gl = null;
+    this.gl = gl;
     this.particleCount = 0;
     this.textureWidth = 0;
     this.textureHeight = 0;
@@ -76,24 +81,10 @@ export class LaplacianForceModule {
     // VAOs
     this.quadVAO = null;
 
-  }
-
-  /**
-   * Initialize the module
-   * @param {WebGL2RenderingContext} gl
-   * @param {{
-   *   particleCount: number,
-   *   textureWidth: number,
-   *   textureHeight: number,
-   *   disableFloatBlend: boolean
-   * }} opts
-   */
-  async init(gl, opts) {
-    this.gl = gl;
-    this.particleCount = opts.particleCount;
-    this.textureWidth = opts.textureWidth;
-    this.textureHeight = opts.textureHeight;
-    this.disableFloatBlend = opts.disableFloatBlend;
+    this.particleCount = options.particleCount;
+    this.textureWidth = options.textureWidth;
+    this.textureHeight = options.textureHeight;
+    this.disableFloatBlend = options.disableFloatBlend;
 
     // Build CSR
     this.buildCSR();
@@ -102,6 +93,10 @@ export class LaplacianForceModule {
     this.buildShards();
 
     // Upload to GPU
+    if (!this.gl) {
+      throw new Error('LaplacianForceModule requires a valid WebGL2RenderingContext');
+    }
+
     this.createTextures();
     this.uploadData();
 
@@ -213,6 +208,9 @@ export class LaplacianForceModule {
    */
   createTextures() {
     const gl = this.gl;
+    if (!gl) {
+      throw new Error('createTextures called without WebGL context');
+    }
 
     // Pack colIdx + weight into single RGBA8 texture (memory efficient!)
     // RGBA = [nodeIdx_R, nodeIdx_G, nodeIdx_B, weight_quantized]

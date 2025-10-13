@@ -1,38 +1,74 @@
 // @ts-check
 
-import { ParticleSystemMonopole } from './particle-system-monopole.js';
-import { ParticleSystemQuadrupole } from './particle-system-quadrupole.js';
-import { ParticleSystemSpectral } from './particle-system-spectral.js';
-import { ParticleSystemMesh } from './particle-system-mesh.js';
-import { quickDiagnostic, runAllTests } from './pm-debug/test-runner.js';
-import { pmDebugInit, pmDebugRunSingle, pmSnapshotStore, pmSnapshotLoad, pmSnapshotDispose } from './pm-debug/index.js';
-import { listSnapshots } from './pm-debug/snapshot.js';
-import * as pmMetrics from './pm-debug/metrics.js';
-import * as pmOverlay from './pm-debug/overlay.js';
-import * as pmSynthetic from './pm-debug/synthetic.js';
-import * as pmTestRunner from './pm-debug/test-runner.js';
-import * as pipelineDebug from './pipeline/debug/index.js';
+import { ParticleSystemMesh } from './gravity-mesh/particle-system-mesh.js';
+import { ParticleSystemMonopole } from './gravity-monopole/particle-system-monopole.js';
+import { ParticleSystemQuadrupole } from './gravity-quadrupole/particle-system-quadrupole.js';
+import { ParticleSystemSpectral } from './gravity-spectral/particle-system-spectral.js';
+import * as pipelineDebug from './gravity-quadrupole/debug/index.js';
+import { pmDebugInit, pmDebugRunSingle, pmSnapshotDispose, pmSnapshotLoad, pmSnapshotStore } from './gravity-spectral/debug/index.js';
+import * as pmMetrics from './gravity-spectral/debug/metrics.js';
+import * as pmOverlay from './gravity-spectral/debug/overlay.js';
+import { listSnapshots } from './gravity-spectral/debug/snapshot.js';
+import * as pmSynthetic from './gravity-spectral/debug/synthetic.js';
+import * as pmTestRunner from './gravity-spectral/debug/test-runner.js';
+import { quickDiagnostic, runAllTests } from './gravity-spectral/debug/test-runner.js';
 
-/** @typedef {{
+/**
+ * @typedef {{
  *   compute: () => void,
  *   getPositionTexture: () => WebGLTexture,
  *   getPositionTextures: () => WebGLTexture[],
  *   getCurrentIndex: () => 0 | 1,
  *   getColorTexture: () => WebGLTexture|null,
- *   getTextureSize: () => [number, number],
+ *   getTextureSize: () => { width: number, height: number },
  *   options: object,
  *   particleCount: number,
  *   stats: () => any,
  *   beginProfile: (name: any) => void,
  *   endProfile: () => void,
- *   _system: import('./particle-system-quadrupole.js').ParticleSystemQuadrupole | import('./particle-system-monopole.js').ParticleSystemMonopole | import('./particle-system-spectral.js').ParticleSystemSpectral | import('./particle-system-mesh.js').ParticleSystemMesh,
- *   dispose: () => void
+ *   unload(particles: any[], set?: (payload: {
+ *     particle: any,
+ *     index: number,
+ *     x: number, y: number, z: number,
+ *     vx: number, vy: number, vz: number
+ *   }) => void): void,
+ *   dispose: () => void,
+ *   setDebugMode?: (mode: any) => any,
+ *   setDebugFlags?: (flags: any) => any,
+ *   step_Debug?: () => any,
+ *   _system: import('./gravity-quadrupole/particle-system-quadrupole.js').ParticleSystemQuadrupole | import('./gravity-monopole/particle-system-monopole.js').ParticleSystemMonopole | import('./gravity-spectral/particle-system-spectral.js').ParticleSystemSpectral | import('./gravity-mesh/particle-system-mesh.js').ParticleSystemMesh,
+ *   pmForceTexture?: WebGLTexture,
+ *   pmGrid?: any,
+ *   pmGridFramebuffer?: WebGLFramebuffer,
+ *   pmDepositProgram?: WebGLProgram,
+ *   pmDebug?: {
+ *     quickDiag: () => Promise<any>,
+ *     runAllTests: () => Promise<any>,
+ *     init: (config: any) => any,
+ *     runStage: (stage: import('./gravity-spectral/debug/types.js').PMStageID, source?: any, sink?: any) => any,
+ *     snapshot: {
+ *       store: (key: string, atStage: import('./gravity-spectral/debug/types.js').PMStageID) => any,
+ *       load: (key: string, forStage: import('./gravity-spectral/debug/types.js').PMStageID) => any,
+ *       dispose: (key: string) => any,
+ *       list: () => any
+ *     },
+ *     modules: {
+ *       metrics: typeof import('./gravity-spectral/debug/metrics.js'),
+ *       overlay: typeof import('./gravity-spectral/debug/overlay.js'),
+ *       synthetic: typeof import('./gravity-spectral/debug/synthetic.js'),
+ *       testRunner: typeof import('./gravity-spectral/debug/test-runner.js')
+ *     }
+ *   },
+ *   _debug?: () => typeof import('./pipeline/debug/index.js'),
  * }} ParticleSystemAPI
  */
 
 /**
  * Create a GPU-accelerated N-body simulation
- * 
+ * Methods:
+ * - 'quadrupole' (default): 2nd-order Barnes-Hut tree-code
+ * - 'monopole': 1st-order Barnes-Hut tree-code
+ * - 'spectral': Particle-Mesh with FFT (spectral method)
  * @param {{
  *   gl: WebGL2RenderingContext,
  *   particles: any[],
@@ -63,13 +99,7 @@ import * as pipelineDebug from './pipeline/debug/index.js';
  *     nearFieldRadius?: number
  *   }
  * }} options
- * 
- * Method options:
- * - 'quadrupole' (default): 2nd-order Barnes-Hut tree-code
- * - 'monopole': 1st-order Barnes-Hut tree-code
- * - 'spectral': Particle-Mesh with FFT (spectral method)
- * 
- * @returns Particle system API
+ * @returns {ParticleSystemAPI}
  */
 export function particleSystem({
   gl,
@@ -93,119 +123,127 @@ export function particleSystem({
   // Compute particle count from positions array (RGBA = 4 components per particle)
   const particleCount = particles.length;
 
-  let positionsBuf = new Float32Array(particleCount * 4);
-  let velocitiesBuf = new Float32Array(particleCount * 4);
-  let colorsBuf = new Uint8Array(particleCount * 4);
-
-  populateBuffers();
-    
   // Calculate texture dimensions
   const textureWidth = Math.ceil(Math.sqrt(particleCount));
   const textureHeight = Math.ceil(particleCount / textureWidth);
   const actualTextureSize = textureWidth * textureHeight;
-  
-  // Pad particle data to texture size if needed
-  const paddedPositions = new Float32Array(actualTextureSize * 4);
-  paddedPositions.set(positionsBuf);
 
-  let paddedVelocities = null;
-  if (velocitiesBuf) {
-    paddedVelocities = new Float32Array(actualTextureSize * 4);
-    paddedVelocities.set(velocitiesBuf);
-  }
+  // possibly padded!
+  const positions = new Float32Array(actualTextureSize * 4);
+  const velocities = new Float32Array(actualTextureSize * 4);
+  const colors = new Uint8Array(actualTextureSize * 4);
 
-  let paddedColors = null;
-  if (colorsBuf) {
-    paddedColors = new Uint8Array(actualTextureSize * 4);
-    paddedColors.set(colorsBuf);
-  }
+  populateBuffers({ particles, get, positionsBuf: positions, velocitiesBuf: velocities, colorsBuf: colors });
 
-  // Select implementation based on method
-  let SystemClass;
-  let defaultTheta;
-  let usePlanA = false;
-  const isMeshMethod = method === 'mesh';
-
-  if (isMeshMethod) {
-    SystemClass = ParticleSystemMesh;
-    defaultTheta = 0.5;
-    usePlanA = true;
-  } else if (method === 'spectral') {
-    SystemClass = ParticleSystemSpectral;
-    defaultTheta = 0.5;
-    usePlanA = true;
-  } else if (method === 'monopole') {
-    SystemClass = ParticleSystemMonopole;
-    defaultTheta = 0.65;
-  } else {
-    // Default to quadrupole
-    SystemClass = ParticleSystemQuadrupole;
-    defaultTheta = 0.65;
-  }
-  
-  // Use provided theta or default for the selected method
-  const effectiveTheta = theta !== undefined ? theta : defaultTheta;
-  
-  // Create system with particle data
+  /** @type {ParticleSystemQuadrupole | ParticleSystemMonopole | ParticleSystemSpectral | ParticleSystemMesh} */
   let system;
-  if (isMeshMethod) {
-    const meshOptions = {
-      particleCount,
-      particleData: {
-        positions: paddedPositions,
-        velocities: paddedVelocities,
-        colors: paddedColors
-      },
-      gravityStrength,
-      dt,
-      softening,
-      damping,
-      maxSpeed,
-      maxAccel,
-      worldBounds,
-      enableProfiling,
-      mesh: meshConfig
-    };
-    system = new SystemClass(gl, /** @type {any} */ (meshOptions));
-  } else {
-    const treeOptions = {
-      particleCount,
-      particleData: {
-        positions: paddedPositions,
-        velocities: paddedVelocities,
-        colors: paddedColors
-      },
-      theta: effectiveTheta,
-      gravityStrength,
-      dt,
-      softening,
-      damping,
-      maxSpeed,
-      maxAccel,
-      worldBounds,
-      debugSkipQuadtree,
-      enableProfiling,
-      edges,
-      springStrength,
-      assignment: 'CIC',
-      poissonUseDiscrete: 1,
-      treePMSigma: 0.0
-    };
-    system = new SystemClass(gl, /** @type {any} */ (treeOptions));
+
+  switch (method) {
+    case 'mesh': {
+      system = new ParticleSystemMesh(gl, {
+        particleCount,
+        particleData: {
+          positions,
+          velocities,
+          colors
+        },
+        gravityStrength,
+        dt,
+        softening,
+        damping,
+        maxSpeed,
+        maxAccel,
+        worldBounds,
+        enableProfiling,
+        mesh: meshConfig
+      });
+      break;
+    }
+    case 'spectral': {
+      system = new ParticleSystemSpectral(gl, {
+        particleCount,
+        particleData: {
+          positions,
+          velocities,
+          colors
+        },
+        worldBounds,
+        dt,
+        gravityStrength,
+        softening,
+        damping,
+        maxSpeed,
+        maxAccel,
+        enableProfiling
+      });
+      break;
+    }
+    case 'monopole': {
+      system = new ParticleSystemMonopole(gl, {
+        particleCount,
+        particleData: {
+          positions,
+          velocities,
+          colors
+        },
+        theta: theta !== undefined ? theta : 0.65,
+        gravityStrength,
+        dt,
+        softening,
+        damping,
+        maxSpeed,
+        maxAccel,
+        worldBounds,
+        debugSkipQuadtree,
+        enableProfiling,
+        edges,
+        springStrength,
+        assignment: 'CIC',
+        poissonUseDiscrete: 1,
+        treePMSigma: 0.0
+      });
+      break;
+    }
+    case 'quadrupole':
+    default: {
+      system = new ParticleSystemQuadrupole(gl, {
+        particleCount,
+        particleData: {
+          positions,
+          velocities,
+          colors
+        },
+        theta: theta !== undefined ? theta : 0.65,
+        gravityStrength,
+        dt,
+        softening,
+        damping,
+        maxSpeed,
+        maxAccel,
+        worldBounds,
+        debugSkipQuadtree,
+        enableProfiling,
+        edges,
+        springStrength,
+        assignment: 'CIC',
+        poissonUseDiscrete: 1,
+        treePMSigma: 0.0
+      });
+      break;
+    }
   }
-  
-  // Initialize synchronously (throws if setup fails)
-  system.init();
+
   let disposed = false;
 
   // Base API common to all methods
+  /** @type {ParticleSystemAPI} */
   const baseAPI = {
     // Step simulation forward (main loop call)
     compute: () => {
       if (disposed) return;
       system.step();
     },
-    
+
     // Get GPU textures for rendering (GPU-to-GPU data flow)
     // These return WebGLTexture objects that can be wrapped in THREE.ExternalTexture
     getPositionTexture: () => system.getPositionTexture(),
@@ -213,18 +251,102 @@ export function particleSystem({
     getCurrentIndex: () => system.getCurrentIndex(),          // Returns current ping-pong index (0 or 1)
     getColorTexture: () => system.getColorTexture(),
     getTextureSize: () => system.getTextureSize(),
-    
+
+    unload: (particles, set) => {
+      const expected = system.options.particleCount;
+      if (particles.length !== expected) {
+        throw new Error(`unload expected ${expected} particles, received ${particles.length}`);
+      }
+
+      const gl = system.gl;
+      if (!gl) {
+        throw new Error('WebGL context unavailable for unload');
+      }
+
+      const positionTextures = system.getPositionTextures();
+      const velocityTextures = system.velocityTextures?.textures || [];
+      if (!positionTextures.length || !velocityTextures.length) {
+        throw new Error('Particle textures are not available for unload');
+      }
+
+      const positionIndex = system.getCurrentIndex();
+      const velocityIndex = system.velocityTextures?.currentIndex ?? positionIndex;
+      const positionTexture = positionTextures[positionIndex];
+      const velocityTexture = velocityTextures[velocityIndex];
+      if (!positionTexture || !velocityTexture) {
+        throw new Error('Active particle textures missing during unload');
+      }
+
+      const { width, height } = system.getTextureSize();
+      const totalTexels = width * height;
+      const positionData = new Float32Array(totalTexels * 4);
+      const velocityData = new Float32Array(totalTexels * 4);
+
+      const previousFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+      const tempFramebuffer = gl.createFramebuffer();
+      if (!tempFramebuffer) {
+        throw new Error('Failed to allocate framebuffer for unload');
+      }
+
+      try {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, tempFramebuffer);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, positionTexture, 0);
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, positionData);
+
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, velocityTexture, 0);
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, velocityData);
+      } finally {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, previousFramebuffer);
+        gl.deleteFramebuffer(tempFramebuffer);
+      }
+
+      for (let i = 0; i < expected; i++) {
+        const base = i * 4;
+        const x = positionData[base + 0];
+        const y = positionData[base + 1];
+        const z = positionData[base + 2];
+        const vx = velocityData[base + 0];
+        const vy = velocityData[base + 1];
+        const vz = velocityData[base + 2];
+
+        if (typeof set === 'function') {
+          set({
+            particle: particles[i],
+            index: i,
+            x,
+            y,
+            z,
+            vx,
+            vy,
+            vz
+          });
+        } else {
+          const particle = particles[i];
+          if (particle && typeof particle === 'object') {
+            particle.x = x;
+            particle.y = y;
+            particle.z = z;
+            particle.vx = vx;
+            particle.vy = vy;
+            particle.vz = vz;
+          } else {
+            particles[i] = { x, y, z, vx, vy, vz };
+          }
+        }
+      }
+    },
+
     // Access configuration
     options: system.options,
     particleCount: system.options.particleCount,
-    
+
     // Get profiling statistics (if profiling enabled)
     stats: () => {
       if (disposed) return null;
       if (!system.profiler || !system.profiler.enabled) return null;
       return system.profiler.getAll();
     },
-    
+
     // Custom profiling timers (for profiling rendering, etc.)
     beginProfile: (/** @type {any} */ name) => system.beginProfile(name),
     endProfile: () => system.endProfile(),
@@ -239,7 +361,7 @@ export function particleSystem({
       disposed = true;
     }
   };
-  
+
   // Add method-specific APIs
   if (method === 'spectral') {
     // Spectral method (PM/FFT) specific exports
@@ -251,8 +373,7 @@ export function particleSystem({
       get pmGridFramebuffer() { return spectralSystem.pmGridFramebuffer; },
       get pmDepositProgram() { return spectralSystem.pmDepositProgram; },
       get pmForceTexture() { return spectralSystem.pmForceTexture; }, // PM force texture
-      gl: gl, // Expose GL context for debugging/testing
-      
+
       // PM Debug API (Plan A staging)
       pmDebug: {
         /**
@@ -262,7 +383,7 @@ export function particleSystem({
         quickDiag: () => {
           return quickDiagnostic(spectralSystem);
         },
-        
+
         /**
          * Run all PM/FFT tests
          * @returns {Promise<{massConservation: any, dcZero: any, poissonEquation: any}>}
@@ -270,7 +391,7 @@ export function particleSystem({
         runAllTests: () => {
           return runAllTests(spectralSystem);
         },
-        
+
         /**
          * Initialize PM debug system
          * @param {any} config - Debug configuration
@@ -278,31 +399,31 @@ export function particleSystem({
         init: (config) => {
           return pmDebugInit(spectralSystem, config);
         },
-        
+
         /**
          * Run a single stage in isolation
-         * @param {import('./pm-debug/types.js').PMStageID} stage - Stage ID
+         * @param {import('./gravity-spectral/debug/types.js').PMStageID} stage - Stage ID
          * @param {any=} source - Source spec
          * @param {any=} sink - Sink spec
          */
         runStage: (stage, source, sink) => {
           return pmDebugRunSingle(spectralSystem, stage, source, sink);
         },
-        
+
         /**
          * Snapshot management
          */
         snapshot: {
           /**
            * @param {string} key
-           * @param {import('./pm-debug/types.js').PMStageID} atStage
+           * @param {import('./gravity-spectral/debug/types.js').PMStageID} atStage
            */
           store: (key, atStage) => {
             return pmSnapshotStore(spectralSystem, key, atStage);
           },
           /**
            * @param {string} key
-           * @param {import('./pm-debug/types.js').PMStageID} forStage
+           * @param {import('./gravity-spectral/debug/types.js').PMStageID} forStage
            */
           load: (key, forStage) => {
             return pmSnapshotLoad(spectralSystem, key, forStage);
@@ -317,7 +438,7 @@ export function particleSystem({
             return listSnapshots(spectralSystem);
           }
         },
-        
+
         /**
          * Direct access to debug modules
          */
@@ -357,7 +478,7 @@ export function particleSystem({
           return (/** @type {any} */ (system)).step_Debug();
         }
       },
-      
+
       // Direct access to debug utilities (advanced usage)
       _debug: () => {
         return pipelineDebug;
@@ -365,51 +486,59 @@ export function particleSystem({
     };
   }
 
-  function populateBuffers() {
-    const dummy = {
-      index: 0,
-      x: 0, y: 0, z: 0,
-      vx: 0, vy: 0, vz: 0,
-      mass: 0,
-      rgb: 0
-    };
+}
 
-    for (let i = 0; i < particles.length; i++) {
-      const spot = particles[i] || {};
-      dummy.index = i;
-      dummy.x = spot.x || 0;
-      dummy.y = spot.y || 0;
-      dummy.z = spot.z || 0;
-      dummy.vx = spot.vx || 0;
-      dummy.vy = spot.vy || 0;
-      dummy.vz = spot.vz || 0;
-      dummy.mass = spot.mass || 0;
-      dummy.rgb = spot.rgb || 0;
-      if (typeof get === 'function') get(spot, dummy);
+/**
+ * @param {Pick<Parameters<typeof particleSystem>[0], 'particles' | 'get'> & {
+ *  positionsBuf: Float32Array,
+ *  velocitiesBuf: Float32Array,
+ *  colorsBuf: Uint8Array,
+ * }} _
+ */
+function populateBuffers({ particles, get, positionsBuf, velocitiesBuf, colorsBuf }) {
+  const dummy = {
+    index: 0,
+    x: 0, y: 0, z: 0,
+    vx: 0, vy: 0, vz: 0,
+    mass: 0,
+    rgb: 0
+  };
 
-      const b = i * 4;
-      positionsBuf[b + 0] = dummy.x;
-      positionsBuf[b + 1] = dummy.y;
-      positionsBuf[b + 2] = dummy.z;
-      positionsBuf[b + 3] = dummy.mass;
+  for (let i = 0; i < particles.length; i++) {
+    const spot = particles[i] || {};
+    dummy.index = i;
+    dummy.x = spot.x || 0;
+    dummy.y = spot.y || 0;
+    dummy.z = spot.z || 0;
+    dummy.vx = spot.vx || 0;
+    dummy.vy = spot.vy || 0;
+    dummy.vz = spot.vz || 0;
+    dummy.mass = spot.mass || 0;
+    dummy.rgb = spot.rgb || 0;
+    if (typeof get === 'function') get(spot, dummy);
 
-      velocitiesBuf[b + 0] = dummy.vx;
-      velocitiesBuf[b + 1] = dummy.vy;
-      velocitiesBuf[b + 2] = dummy.vz;
-      velocitiesBuf[b + 3] = 0;
+    const b = i * 4;
+    positionsBuf[b + 0] = dummy.x;
+    positionsBuf[b + 1] = dummy.y;
+    positionsBuf[b + 2] = dummy.z;
+    positionsBuf[b + 3] = dummy.mass;
 
-      let rgbNum = 0;
-      if (Array.isArray(dummy.rgb)) {
-        const c = dummy.rgb;
-        rgbNum = ((c[0] & 0xff) << 16) | ((c[1] & 0xff) << 8) | (c[2] & 0xff);
-      } else {
-        rgbNum = Number(dummy.rgb) || 0;
-      }
+    velocitiesBuf[b + 0] = dummy.vx;
+    velocitiesBuf[b + 1] = dummy.vy;
+    velocitiesBuf[b + 2] = dummy.vz;
+    velocitiesBuf[b + 3] = 0;
 
-      colorsBuf[b + 0] = (rgbNum >> 16) & 0xff;
-      colorsBuf[b + 1] = (rgbNum >> 8) & 0xff;
-      colorsBuf[b + 2] = (rgbNum) & 0xff;
-      colorsBuf[b + 3] = 255;
+    let rgbNum = 0;
+    if (Array.isArray(dummy.rgb)) {
+      const c = dummy.rgb;
+      rgbNum = ((c[0] & 0xff) << 16) | ((c[1] & 0xff) << 8) | (c[2] & 0xff);
+    } else {
+      rgbNum = Number(dummy.rgb) || 0;
     }
+
+    colorsBuf[b + 0] = (rgbNum >> 16) & 0xff;
+    colorsBuf[b + 1] = (rgbNum >> 8) & 0xff;
+    colorsBuf[b + 2] = (rgbNum) & 0xff;
+    colorsBuf[b + 3] = 255;
   }
 }

@@ -28,11 +28,11 @@ import {
 
 import { captureSnapshot, restoreSnapshot } from './snapshot.js';
 
-import { forwardFFT, inverseFFTToReal } from '../pipeline/pm-fft.js';
-import { solvePoissonFFT } from '../pipeline/pm-poisson.js';
-import { computeGradient } from '../pipeline/pm-gradient.js';
-import { sampleForcesAtParticles } from '../pipeline/pm-force-sample.js';
-import { computePMForcesSync } from '../pipeline/pm-pipeline.js';
+import { forwardFFT, inverseFFTToReal } from '../pm-fft.js';
+import { solvePoissonFFT } from '../pm-poisson.js';
+import { computeGradient } from '../pm-gradient.js';
+import { sampleForcesAtParticles } from '../pm-force-sample.js';
+import { computePMForcesSync } from '../pm-pipeline.js';
 
 /**
  * @typedef {Object} VerificationResult
@@ -49,7 +49,7 @@ import { computePMForcesSync } from '../pipeline/pm-pipeline.js';
  * Verify pm_deposit stage
  * Checks: mass conservation, grid bounds, CIC spread heuristic
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<VerificationResult[]>}
  */
 export async function verifyDeposit(psys) {
@@ -84,7 +84,7 @@ export async function verifyDeposit(psys) {
 
 /**
  * Check grid bounds (no negative/NaN values)
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 async function checkGridBounds(psys) {
   const gl = psys.gl;
@@ -133,7 +133,7 @@ async function checkGridBounds(psys) {
 
 /**
  * Check CIC spread heuristic
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 async function checkCICSpread(psys) {
   const gl = psys.gl;
@@ -184,7 +184,7 @@ async function checkCICSpread(psys) {
  * Verify pm_fft_forward stage
  * Checks: Parseval's theorem, plane wave peak, Hermitian symmetry
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<VerificationResult[]>}
  */
 export async function verifyFFTForward(psys) {
@@ -219,7 +219,7 @@ export async function verifyFFTForward(psys) {
 
 /**
  * Check Parseval's theorem
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 async function checkParseval(psys) {
   const gl = psys.gl;
@@ -258,7 +258,7 @@ async function checkParseval(psys) {
 
 /**
  * Compute texture energy (sum of squared magnitudes)
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {WebGLTexture} texture
  * @param {number} width
  * @param {number} height
@@ -299,7 +299,7 @@ async function computeTextureEnergy(psys, texture, width, height, isReal) {
 
 /**
  * Check plane wave spectrum peak
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 async function checkPlaneWavePeak(psys) {
   const gl = psys.gl;
@@ -350,7 +350,7 @@ async function checkPlaneWavePeak(psys) {
 
 /**
  * Check Hermitian symmetry: F(-k) = F*(k)
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 async function checkHermitianSymmetry(psys) {
   const gl = psys.gl;
@@ -449,7 +449,7 @@ function getTexelIndex(kx, ky, kz, gridSize, slicesPerRow, textureWidth) {
  * Verify pm_poisson stage
  * Checks: DC zero, multi-mode Poisson, Green's function
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<VerificationResult[]>}
  */
 export async function verifyPoisson(psys) {
@@ -503,7 +503,7 @@ export async function verifyPoisson(psys) {
  * Check Green's function (point mass 1/r potential)
  * IMPLEMENTATION OF OUTSTANDING CHECK #1
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 async function checkGreensFunction(psys) {
   const gl = psys.gl;
@@ -605,7 +605,7 @@ async function readVoxel(psys, texture, ix, iy, iz) {
  * Verify pm_gradient stage
  * Checks: gradient operator, force direction, force Hermitian
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<VerificationResult[]>}
  */
 export async function verifyGradient(psys) {
@@ -660,7 +660,7 @@ async function checkGradientOperator(psys) {
  * 
  * φ = A·cos(k·r) => F = -∇φ = A·k·sin(k·r)
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 async function checkForceDirection(psys) {
   const gl = psys.gl;
@@ -724,7 +724,7 @@ async function checkForceDirection(psys) {
  * Check force Hermitian symmetry: F̂(-k) = F̂*(k)
  * IMPLEMENTATION OF OUTSTANDING CHECK #3
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 async function checkForceHermitian(psys) {
   const gl = psys.gl;
@@ -794,7 +794,7 @@ async function checkForceHermitian(psys) {
  * Verify pm_fft_inverse stage
  * Checks: real output, FFT roundtrip, normalization
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<VerificationResult[]>}
  */
 export async function verifyFFTInverse(psys) {
@@ -861,7 +861,7 @@ async function checkRealOutput(psys) {
  * Check FFT roundtrip: IFFT(FFT(f)) ≈ f
  * IMPLEMENTATION OF OUTSTANDING CHECK #4
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 async function checkFFTRoundtrip(psys) {
   const gl = psys.gl;
@@ -957,7 +957,7 @@ async function checkFFTRoundtrip(psys) {
  * Check FFT normalization (1/N³ factor)
  * IMPLEMENTATION OF OUTSTANDING CHECK #5
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 async function checkFFTNormalization(psys) {
   const gl = psys.gl;
@@ -1074,7 +1074,7 @@ async function checkFFTNormalization(psys) {
  * Verify pm_sample stage
  * Checks: zero net force, trilinear interpolation, force symmetry
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<VerificationResult[]>}
  */
 export async function verifySampling(psys) {
@@ -1148,7 +1148,7 @@ async function checkZeroNetForce(psys) {
  * Check trilinear interpolation accuracy
  * IMPLEMENTATION OF OUTSTANDING CHECK #6
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 async function checkTrilinearInterpolation(psys) {
   const gl = psys.gl;
@@ -1219,7 +1219,7 @@ async function checkTrilinearInterpolation(psys) {
  * Check force symmetry (Newton's 3rd law)
  * IMPLEMENTATION OF OUTSTANDING CHECK #7
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 async function checkForceSymmetry(psys) {
   const gl = psys.gl;
@@ -1268,7 +1268,7 @@ async function checkForceSymmetry(psys) {
 /**
  * Run all PM/FFT pipeline verifiers
  * 
- * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
+ * @param {import('../spectral/particle-system-spectral.js').ParticleSystemSpectral} psys
  * @returns {Promise<Object>}
  */
 export async function runAllPipelineVerifiers(psys) {

@@ -9,22 +9,22 @@
  */
 
 // Shader sources
-import fsQuadVert from './shaders/fullscreen.vert.js';
-import reductionFrag from './shaders/reduction.frag.js';
-import aggregationVert from './shaders/aggregation.vert.js';
-import aggregationFrag from './shaders/aggregation.frag.js';
-import traversalFrag from './shaders/traversal.frag.js';
-import velIntegrateFrag from './shaders/vel_integrate.frag.js';
-import posIntegrateFrag from './shaders/pos_integrate.frag.js';
+import fsQuadVert from '../shaders/fullscreen.vert.js';
+import reductionFrag from '../shaders/reduction.frag.js';
+import aggregationVert from '../shaders/aggregation.vert.js';
+import aggregationFrag from '../shaders/aggregation.frag.js';
+import traversalFrag from '../shaders/traversal.frag.js';
+import velIntegrateFrag from '../shaders/vel_integrate.frag.js';
+import posIntegrateFrag from '../shaders/pos_integrate.frag.js';
 
 // Pipeline utilities
-import { unbindAllTextures as dbgUnbindAllTextures, checkGl as dbgCheckGl, checkFBO as dbgCheckFBO } from './utils/debug.js';
-import { aggregateParticlesIntoL0 as aggregateL0 } from './pipeline/aggregator.js';
-import { runReductionPass as pyramidReduce } from './pipeline/pyramid.js';
-import { calculateForces as pipelineCalculateForces } from './pipeline/traversal.js';
-import { integratePhysics as pipelineIntegratePhysics } from './pipeline/integrator.js';
-import { updateWorldBoundsFromTexture as pipelineUpdateBounds } from './pipeline/bounds.js';
-import { GPUProfiler } from './utils/gpu-profiler.js';
+import { unbindAllTextures as dbgUnbindAllTextures, checkGl as dbgCheckGl, checkFBO as dbgCheckFBO } from '../utils/debug.js';
+import { aggregateParticlesIntoL0 as aggregateL0 } from '../gravity-quadrupole/aggregator.js';
+import { runReductionPass as pyramidReduce } from '../gravity-quadrupole/pyramid.js';
+import { calculateForces as pipelineCalculateForces } from '../gravity-quadrupole/traversal.js';
+import { integratePhysics as pipelineIntegratePhysics } from '../utils/integrator.js';
+import { updateWorldBoundsFromTexture as pipelineUpdateBounds } from '../utils/bounds.js';
+import { GPUProfiler } from '../utils/gpu-profiler.js';
 
 // Common utilities
 import {
@@ -35,7 +35,7 @@ import {
   createProgram,
   calculateParticleTextureDimensions,
   checkWebGL2Support
-} from './utils/common.js';
+} from '../utils/common.js';
 
 export class ParticleSystemMonopole {
 
@@ -121,6 +121,29 @@ export class ParticleSystemMonopole {
     if (this.options.enableProfiling) {
       this.profiler = new GPUProfiler(gl);
     }
+
+    let finished = false;
+    try {
+      this.checkWebGL2Support();
+      this.calculateTextureDimensions();
+      this.createShaderPrograms();
+      this.createTextures();
+      this.createGeometry_();
+      this.uploadParticleData();
+
+      const gl = this.gl;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.bindVertexArray(null);
+      gl.disable(gl.BLEND);
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.SCISSOR_TEST);
+
+      finished = true;
+    } finally {
+      if (!finished)
+        this.dispose();
+    }
   }
 
   unbindAllTextures() {
@@ -139,32 +162,6 @@ export class ParticleSystemMonopole {
    */
   checkFBO(tag) {
     dbgCheckFBO(this.gl, tag);
-  }
-
-  init() {
-    let finished = false;
-    try {
-      this.checkWebGL2Support();
-      this.calculateTextureDimensions();
-      this.createShaderPrograms();
-      this.createTextures();
-      this.createGeometry_();
-      this.uploadParticleData();
-      
-      // Restore GL state for THREE.js compatibility
-      const gl = this.gl;
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.bindTexture(gl.TEXTURE_2D, null);
-      gl.bindVertexArray(null);
-      gl.disable(gl.BLEND);
-      gl.disable(gl.DEPTH_TEST);
-      gl.disable(gl.SCISSOR_TEST);
-      
-      finished = true;
-    } finally {
-      if (!finished)
-        this.dispose();
-    }
   }
 
   checkWebGL2Support() {

@@ -24,15 +24,17 @@
 <!-- Controls Panel -->
 <div id="controls-panel">
   <input type="text" id="count-input" value="500,000">
-  <label id="profiling-toggle">
-    <span>GPU Profile</span>
-    <input type="checkbox" id="profiling-checkbox">
-  </label>
-  
-  <label id="graph-force-toggle">
-    <span>Graph Forces</span>
-    <input type="checkbox" id="graph-force-checkbox">
-  </label>
+  <div class="toggles">
+    <label id="profiling-toggle">
+      <span>GPU Profile</span>
+      <input type="checkbox" id="profiling-checkbox">
+    </label>
+    
+    <label id="graph-force-toggle">
+      <span>Graph Forces</span>
+      <input type="checkbox" id="graph-force-checkbox">
+    </label>
+  </div>
   
   <div id="method-selector">
     <label class="radio-label">
@@ -45,11 +47,11 @@
     </label>
     <label class="radio-label">
       <input type="radio" id="spectral-radio" name="method" value="spectral">
-      <span>Spectral (PM/FFT)</span>
+      <span>Spectral</span>
     </label>
     <label class="radio-label">
       <input type="radio" id="mesh-radio" name="method" value="mesh">
-      <span>Mesh (Plan B)</span>
+      <span>Mesh</span>
     </label>
   </div>
   

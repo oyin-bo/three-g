@@ -1,7 +1,7 @@
 // @ts-check
 
 import fsQuadVert from '../../shaders/fullscreen.vert.js';
-import fftFrag from '../../shaders/fft.frag.js';
+import fftFrag from '../../gravity-spectral/shaders/fft.frag.js';
 import { createProgram } from '../../utils/common.js';
 
 /**

@@ -1,14 +1,16 @@
+// @ts-check
+
 // Per-stage harnesses for isolated execution
 // Each harness runs a single pipeline stage with explicit setup/teardown
 
 import { aggregateParticlesIntoL0 } from '../aggregator.js';
 import { runReductionPass } from '../pyramid.js';
 import { calculateForces } from '../traversal.js';
-import { integratePhysics } from '../integrator.js';
+import { integratePhysics } from '../../utils/integrator.js';
 
 /**
  * Run aggregation stage in isolation
- * @param {ParticleSystem} ctx - Particle system context
+ * @param {import('../particle-system-quadrupole.js').ParticleSystemQuadrupole} ctx - Particle system context
  */
 export function runAggregationHarness(ctx) {
   const gl = ctx.gl;
@@ -41,7 +43,7 @@ export function runAggregationHarness(ctx) {
 
 /**
  * Run reduction stage in isolation (all levels)
- * @param {ParticleSystem} ctx - Particle system context
+ * @param {import('../particle-system-quadrupole.js').ParticleSystemQuadrupole} ctx - Particle system context
  */
 export function runReductionHarness(ctx) {
   const gl = ctx.gl;
@@ -90,7 +92,7 @@ export function runReductionHarness(ctx) {
 
 /**
  * Run traversal stage in isolation
- * @param {ParticleSystem} ctx - Particle system context
+ * @param {import('../particle-system-quadrupole.js').ParticleSystemQuadrupole} ctx - Particle system context
  */
 export function runTraversalHarness(ctx) {
   const gl = ctx.gl;
@@ -128,7 +130,7 @@ export function runTraversalHarness(ctx) {
 
 /**
  * Run integrator stage in isolation
- * @param {ParticleSystem} ctx - Particle system context
+ * @param {import('../particle-system-quadrupole.js').ParticleSystemQuadrupole} ctx - Particle system context
  */
 export function runIntegratorHarness(ctx) {
   console.log('[Harness] Integration stage starting');
@@ -174,7 +176,7 @@ export function runIntegratorHarness(ctx) {
 
 /**
  * Capture texture to CPU (stub)
- * @param {ParticleSystem} ctx - Context
+ * @param {import('../particle-system-quadrupole.js').ParticleSystemQuadrupole} ctx - Context
  * @param {WebGLTexture} texture - Texture to capture
  * @returns {Float32Array} Captured data
  */
@@ -186,7 +188,7 @@ function captureTexture(ctx, texture) {
 
 /**
  * Restore texture from CPU data (stub)
- * @param {ParticleSystem} ctx - Context
+ * @param {import('../particle-system-quadrupole.js').ParticleSystemQuadrupole} ctx - Context
  * @param {WebGLTexture} texture - Target texture
  * @param {Float32Array} data - Data to restore
  */
