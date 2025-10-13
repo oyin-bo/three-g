@@ -126,6 +126,13 @@ export function analyzeTextureData(pixels, channels = 4, targetChannel = -1) {
 
 /**
  * Analyze complex texture (RG format)
+ * 
+ * Computes statistics for both real and imaginary components,
+ * plus magnitude-based metrics (max, mean, energy).
+ * 
+ * Energy is computed as Σ|z|² = Σ(re² + im²), which is the
+ * correct Parseval energy for complex-valued data.
+ * 
  * @param {Float32Array} pixels - RG format data
  * @returns {Object}
  */
@@ -138,16 +145,23 @@ export function analyzeComplexTexture(pixels) {
   let meanMagnitude = 0;
   let energyMagnitude = 0;
   let count = 0;
+  let nonZeroCount = 0;
+  const threshold = 1e-20;
   
   for (let i = 0; i < pixels.length; i += 2) {
     const re = pixels[i];
     const im = pixels[i + 1];
-    const mag = Math.sqrt(re * re + im * im);
+    const magSq = re * re + im * im;
+    const mag = Math.sqrt(magSq);
     
     maxMagnitude = Math.max(maxMagnitude, mag);
     meanMagnitude += mag;
-    energyMagnitude += mag * mag;
+    energyMagnitude += magSq; // Energy is sum of |z|² = re² + im²
     count++;
+    
+    if (mag > threshold) {
+      nonZeroCount++;
+    }
   }
   
   meanMagnitude /= count;
@@ -158,7 +172,9 @@ export function analyzeComplexTexture(pixels) {
     magnitude: {
       max: maxMagnitude,
       mean: meanMagnitude,
-      energy: energyMagnitude
+      energy: energyMagnitude,
+      nonZeroCount,
+      nonZeroRatio: count > 0 ? nonZeroCount / count : 0
     }
   };
 }
@@ -180,9 +196,10 @@ export function inspectTexture(gl, texture, width, height, format = 'RGBA', labe
   
   if (format === 'RG') {
     const stats = analyzeComplexTexture(pixels);
+    const totalCount = pixels.length / 2;
     console.log(`  Real: min=${stats.real.min.toExponential(3)}, max=${stats.real.max.toExponential(3)}, mean=${stats.real.mean.toExponential(3)}, nonZero=${stats.real.nonZeroCount}`);
     console.log(`  Imag: min=${stats.imag.min.toExponential(3)}, max=${stats.imag.max.toExponential(3)}, mean=${stats.imag.mean.toExponential(3)}, nonZero=${stats.imag.nonZeroCount}`);
-    console.log(`  Magnitude: max=${stats.magnitude.max.toExponential(3)}, mean=${stats.magnitude.mean.toExponential(3)}, energy=${stats.magnitude.energy.toExponential(3)}`);
+    console.log(`  Magnitude: max=${stats.magnitude.max.toExponential(3)}, mean=${stats.magnitude.mean.toExponential(3)}, energy=${stats.magnitude.energy.toExponential(3)}, nonZero=${stats.magnitude.nonZeroCount}/${totalCount} (${(stats.magnitude.nonZeroRatio * 100).toFixed(2)}%)`);
     if (stats.real.hasNaN || stats.imag.hasNaN) console.warn('  ⚠️ Contains NaN values');
     if (stats.real.hasInf || stats.imag.hasInf) console.warn('  ⚠️ Contains Inf values');
     return stats;

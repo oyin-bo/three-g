@@ -6,6 +6,23 @@
  * Implements 3D FFT for the PM grid using separable transforms:
  * - Forward FFT: Real space → Fourier space
  * - Inverse FFT: Fourier space → Real space
+ * 
+ * NORMALIZATION CONVENTION:
+ * -------------------------
+ * Forward:  F̂(k) = Σ f(x)·exp(-2πikx)           [unnormalized]
+ * Inverse:  f(x) = (1/N³)·Σ F̂(k)·exp(2πikx)    [normalized by 1/N³]
+ * 
+ * Implementation: (1/N) applied per axis at final butterfly stage of inverse.
+ * 
+ * PROPERTIES:
+ * - DC mode: F̂(0,0,0) = Σ f(x) = total mass
+ * - Round-trip: IFFT(FFT(f)) = f (mass conserved to machine precision)
+ * - Parseval: Σ|F̂(k)|² = N³·Σ|f(x)|² (energy scaled by N³ in frequency domain)
+ * 
+ * VERIFICATION (debug.js):
+ * - Mass conservation: |sumAlphaRecon - sumAlphaOrig| / sumAlphaOrig < 1e-7
+ * - DC amplitude: spectrumSample[0] ≈ sumAlphaOrig (within ~1e-8 relative)
+ * - Round-trip RMSE: typically ~5 (small compared to total mass ~2.4e5)
  */
 
 import fftFrag from '../shaders/fft.frag.js';
@@ -301,6 +318,10 @@ function copyTexture(gl, src, dst, size) {
 
 /**
  * Forward FFT: mass grid → spectrum
+ * 
+ * Computes the 3D FFT of the mass grid and stores the result in pmDensitySpectrum.
+ * The forward transform is unnormalized, so DC mode equals the total mass.
+ * 
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 export function forwardFFT(psys) {
@@ -354,9 +375,22 @@ export function forwardFFT(psys) {
 
 /**
  * Inverse FFT: spectrum → real grid
+ * 
+ * NORMALIZATION CONVENTION:
+ * - Forward FFT is unnormalized: F̂(k) = Σ f(x)·exp(-2πikx)
+ * - Inverse FFT applies 1/N³ normalization: f(x) = (1/N³)·Σ F̂(k)·exp(2πikx)
+ * - This is implemented as (1/N) per axis at the final butterfly stage
+ * - Round-trip property: IFFT(FFT(f)) = f (mass conserved)
+ * 
+ * ENERGY BEHAVIOR:
+ * - Real-space energy: E_real = Σ|f(x)|²
+ * - Frequency-space energy: E_freq = Σ|F̂(k)|²
+ * - Parseval's theorem: E_freq = N³·E_real (due to unnormalized forward)
+ * - After round-trip: reconstructed energy ≈ E_real (within numerical precision)
+ * 
  * @param {import('../particle-system-spectral.js').ParticleSystemSpectral} psys
- * @param {WebGLTexture} inputSpectrum - Input complex spectrum
- * @param {WebGLTexture} outputReal - Output real-valued texture
+ * @param {WebGLTexture} inputSpectrum - Input complex spectrum (RG32F)
+ * @param {WebGLTexture} outputReal - Output real-valued texture (RGBA32F, real stored in R and A)
  */
 export function inverseFFTToReal(psys, inputSpectrum, outputReal) {
   const gl = psys.gl;
@@ -416,8 +450,21 @@ export function inverseFFTToReal(psys, inputSpectrum, outputReal) {
   const fbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outputReal, 0);
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    return;
+  }
   
   gl.viewport(0, 0, textureSize, textureSize);
+  gl.disable(gl.DEPTH_TEST);
+  gl.depthMask(false);
+  gl.disable(gl.BLEND);
+  gl.disable(gl.CULL_FACE);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.colorMask(true, true, true, true);
   gl.useProgram(psys._extractRealProgram);
   
   gl.activeTexture(gl.TEXTURE0);

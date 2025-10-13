@@ -135,6 +135,8 @@ void main() {
   
   // Normalize if inverse FFT and final stage of each axis
   // For 3D FFT, we normalize by N once per axis (total N³)
+  // Convention: forward unnormalized, inverse applies 1/N³ = (1/N)³
+  // This ensures IFFT(FFT(f)) = f for round-trip consistency
   if (u_inverse == 1 && u_stage == int(log2(u_gridSize)) - 1) {
     result /= u_gridSize;
   }

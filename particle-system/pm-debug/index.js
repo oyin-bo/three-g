@@ -12,6 +12,13 @@
 
 import './types.js';
 
+// Pipeline stage implementations (static imports to avoid dynamic overhead)
+import { depositParticlesToGrid } from '../pipeline/pm-deposit.js';
+import { forwardFFT, inverseFFTToReal } from '../pipeline/pm-fft.js';
+import { solvePoissonFFT } from '../pipeline/pm-poisson.js';
+import { computeGradient } from '../pipeline/pm-gradient.js';
+import { initForceGridTextures, sampleForcesAtParticles } from '../pipeline/pm-force-sample.js';
+
 /**
  * Initialize PM debug system
  * @param {import('../particle-system.js').ParticleSystem} psys 
@@ -179,9 +186,52 @@ async function applySink(psys, stage, sink) {
  * @param {import('./types.js').PMStageID} stage 
  */
 function runStage(psys, stage) {
-  // This will call the appropriate pipeline function for the stage
-  // For now, we'll add placeholders that integrate with existing code
   console.log(`[PM Debug] Running stage: ${stage}`);
+  switch (stage) {
+    case 'pm_deposit': {
+      depositParticlesToGrid(psys);
+      break;
+    }
+    case 'pm_fft_forward': {
+      forwardFFT(psys);
+      break;
+    }
+    case 'pm_poisson': {
+      const G = psys.options.gravityStrength || 0.0003;
+      const bounds = psys.options.worldBounds || { min: [-50, -50, -50], max: [50, 50, 50] };
+      const boxSize = Math.max(
+        bounds.max[0] - bounds.min[0],
+        bounds.max[1] - bounds.min[1],
+        bounds.max[2] - bounds.min[2]
+      );
+      solvePoissonFFT(psys, 4 * Math.PI * G, boxSize);
+      break;
+    }
+    case 'pm_gradient': {
+      const bounds = psys.options.worldBounds || { min: [-50, -50, -50], max: [50, 50, 50] };
+      const boxSize = Math.max(
+        bounds.max[0] - bounds.min[0],
+        bounds.max[1] - bounds.min[1],
+        bounds.max[2] - bounds.min[2]
+      );
+      computeGradient(psys, boxSize);
+      break;
+    }
+    case 'pm_fft_inverse': {
+      initForceGridTextures(psys);
+      inverseFFTToReal(psys, psys.pmForceSpectrum.x.texture, psys.pmForceGrids.x);
+      inverseFFTToReal(psys, psys.pmForceSpectrum.y.texture, psys.pmForceGrids.y);
+      inverseFFTToReal(psys, psys.pmForceSpectrum.z.texture, psys.pmForceGrids.z);
+      break;
+    }
+    case 'pm_sample': {
+      initForceGridTextures(psys);
+      sampleForcesAtParticles(psys, psys.pmForceGrids.x, psys.pmForceGrids.y, psys.pmForceGrids.z);
+      break;
+    }
+    default:
+      console.warn(`[PM Debug] Unknown stage '${stage}', no-op`);
+  }
 }
 
 /**
@@ -316,6 +366,22 @@ async function runMetrics(psys, stage, checks) {
   // Log results
   console.log(`[PM Debug] Metrics results for ${stage}:`, results);
 }
+
+/**
+ * Thin wrapper to expose internal provideSource for pipeline hooks
+ * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('./types.js').PMStageID} stage
+ * @param {import('./types.js').PMSourceSpec} source
+ */
+export async function pmDebugProvideSource(psys, stage, source) { return provideSource(psys, stage, source); }
+
+/**
+ * Thin wrapper to expose internal applySink for pipeline hooks
+ * @param {import('../particle-system.js').ParticleSystem} psys
+ * @param {import('./types.js').PMStageID} stage
+ * @param {import('./types.js').PMSinkSpec} sink
+ */
+export async function pmDebugApplySink(psys, stage, sink) { return applySink(psys, stage, sink); }
 
 /**
  * Perform readback
