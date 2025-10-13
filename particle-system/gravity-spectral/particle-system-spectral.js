@@ -77,12 +77,33 @@ export class ParticleSystemSpectral {
     this.particleData = options.particleData;
     const particleCount = options.particleData.positions.length / 4;
 
+    const inferredBounds = (() => {
+      const positions = options.particleData.positions;
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      for (let i = 0; i < positions.length; i += 4) {
+        const x = positions[i + 0];
+        const y = positions[i + 1];
+        const z = positions[i + 2];
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (z < minZ) minZ = z;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+        if (z > maxZ) maxZ = z;
+      }
+      const marginX = (maxX - minX) * 0.05;
+      const marginY = (maxY - minY) * 0.05;
+      const marginZ = (maxZ - minZ) * 0.05;
+      return {
+        min: [minX - marginX, minY - marginY, minZ - marginZ],
+        max: [maxX + marginX, maxY + marginY, maxZ + marginZ]
+      };
+    })();
+
     this.options = {
       particleCount: particleCount,
-      worldBounds: options.worldBounds || {
-        min: [-4, -4, 0],
-        max: [4, 4, 2]
-      },
+      worldBounds: options.worldBounds || inferredBounds,
       dt: options.dt || 1 / 60,
       gravityStrength: options.gravityStrength || 0.0003,
       softening: options.softening || 0.2,
