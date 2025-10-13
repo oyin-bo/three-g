@@ -385,7 +385,6 @@ async function inject() {
   console.log('injected>>>');
   let name = sessionStorage.getItem('tabName');
   if (!name) {
-    const title = (document.title || 'page').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'page';
     const n = Math.floor(Math.random() * (19 - 5 + 1)) + 5;
     const words = [
       'mint,nova,ember,zen,lumen,oak,river,kite,moss,nook,sol,vibe',
@@ -394,12 +393,8 @@ async function inject() {
       'mist,nest,pebble,quartz,rift,spire,trail,vale,whisper,yarn,zephyr,glow'
     ].join(',').split(',');
     const w = words[Math.floor(Math.random() * words.length)];
-    const t = new Date();
-    const hh = String(t.getHours()).padStart(2, '0');
-    const mm = String(t.getMinutes()).padStart(2, '0');
-    const ss = String(t.getSeconds()).padStart(2, '0');
-    const time = `${hh}:${mm}:${ss}`;
-    name = `${title}-${n}-${w}-${time}`;
+    const time = new Date().toLocaleTimeString();
+    name = `${n}-${w}-${time}`;
     sessionStorage.setItem('tabName', name);
   }
 
