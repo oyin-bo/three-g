@@ -89,7 +89,7 @@ export function initForceGridTextures(psys) {
  * @param {WebGLTexture} forceGridY - Real-space force grid Y
  * @param {WebGLTexture} forceGridZ - Real-space force grid Z
  * @param {Object} options - Options for sampling
- * @param {boolean} options.accumulate - Accumulate forces instead of clearing
+ * @param {boolean} [options.accumulate] - Accumulate forces instead of clearing
  */
 export function sampleForcesAtParticles(psys, forceGridX, forceGridY, forceGridZ, options = {}) {
   initForceSampling(psys);
@@ -109,6 +109,14 @@ export function sampleForcesAtParticles(psys, forceGridX, forceGridY, forceGridZ
     psys.pmForceTexture,
     0
   );
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    console.error('[PM Force Sample] Framebuffer incomplete:', status.toString(16));
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return;
+  }
   
   gl.viewport(0, 0, psys.textureWidth, psys.textureHeight);
 

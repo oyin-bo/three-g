@@ -59,7 +59,7 @@ import { quickDiagnostic, runAllTests } from './gravity-spectral/debug/test-runn
  *       testRunner: typeof import('./gravity-spectral/debug/test-runner.js')
  *     }
  *   },
- *   _debug?: () => typeof import('./pipeline/debug/index.js'),
+ *   _debug?: () => typeof import('./gravity-spectral/debug/index.js'),
  * }} ParticleSystemAPI
  */
 

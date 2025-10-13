@@ -1,16 +1,5 @@
 // @ts-check
 
-/**
- * ParticleSystem Spectral - Particle-Mesh with FFT (Spectral Method)
- * 
- * GPU-accelerated N-body simulation using Particle-Mesh (PM) method with FFT
- * for spectral force computation. Scales well with uniform particle distributions
- * and provides excellent accuracy for smooth density fields.
- * 
- * Uses O(N + M log M) complexity where N is particle count and M is grid size.
- * Fourier-space Poisson solver enables efficient long-range force computation.
- */
-
 // Shader sources
 import fsQuadVert from '../shaders/fullscreen.vert.js';
 import posIntegrateFrag from '../shaders/pos_integrate.frag.js';
@@ -43,6 +32,16 @@ import { createPMDepositProgram } from './pm-deposit.js';
 import { createPMGrid, createPMGridFramebuffer } from './pm-grid.js';
 import { computePMForcesSync } from './pm-pipeline.js';
 
+/**
+ * ParticleSystem Spectral - Particle-Mesh with FFT (Spectral Method)
+ * 
+ * GPU-accelerated N-body simulation using Particle-Mesh (PM) method with FFT
+ * for spectral force computation. Scales well with uniform particle distributions
+ * and provides excellent accuracy for smooth density fields.
+ * 
+ * Uses O(N + M log M) complexity where N is particle count and M is grid size.
+ * Fourier-space Poisson solver enables efficient long-range force computation.
+ */
 export class ParticleSystemSpectral {
 
   /**
@@ -90,7 +89,8 @@ export class ParticleSystemSpectral {
       damping: options.damping || 0.0,
       maxSpeed: options.maxSpeed || 2.0,
       maxAccel: options.maxAccel || 1.0,
-      enableProfiling: options.enableProfiling || false
+      enableProfiling: options.enableProfiling || false,
+      planA: true
     };
 
     // Internal state
@@ -113,34 +113,6 @@ export class ParticleSystemSpectral {
     // PM Debug state (for Plan A debugging)
     /** @type {any} */
     this._pmDebugState = null;
-
-    // // PM pipeline resources (declared up front for tooling clarity)
-    // /** @type {WebGLFramebuffer|null} */
-    // this.pmGridFramebuffer = null;
-    // /** @type {WebGLProgram|null} */
-    // this.pmDepositProgram = null;
-    // /** @type {WebGLProgram|null} */
-    // this.pmFFTProgram = null;
-    // /** @type {{texture: WebGLTexture, framebuffer: WebGLFramebuffer, pingPong: WebGLTexture, pingPongFBO: WebGLFramebuffer, gridSize: number, textureSize: number, width: number, height: number}|null} */
-    // this.pmSpectrum = null;
-    // /** @type {{texture: WebGLTexture, framebuffer: WebGLFramebuffer, gridSize: number, textureSize: number, width: number, height: number}|null} */
-    // this.pmDensitySpectrum = null;
-    // /** @type {WebGLProgram|null} */
-    // this.pmPoissonProgram = null;
-    // /** @type {{texture: WebGLTexture, framebuffer: WebGLFramebuffer, gridSize: number, textureSize: number}|null} */
-    // this.pmPotentialSpectrum = null;
-    // /** @type {WebGLProgram|null} */
-    // this.pmGradientProgram = null;
-    // /** @type {{x:{texture:WebGLTexture,framebuffer:WebGLFramebuffer},y:{texture:WebGLTexture,framebuffer:WebGLFramebuffer},z:{texture:WebGLTexture,framebuffer:WebGLFramebuffer},gridSize:number,textureSize:number}|null} */
-    // this.pmForceSpectrum = null;
-    // /** @type {{x: WebGLTexture, y: WebGLTexture, z: WebGLTexture, textureSize:number}|null} */
-    // this.pmForceGrids = null;
-    // /** @type {WebGLProgram|null} */
-    // this.pmForceSampleProgram = null;
-    // /** @type {WebGLTexture|null} */
-    // this.pmForceTexture = null;
-    // /** @type {WebGLFramebuffer|null} */
-    // this.pmForceFBO = null;
 
     // Verify required WebGL2 capabilities and cache dimensions
     this.checkWebGL2Support();
@@ -341,6 +313,11 @@ export class ParticleSystemSpectral {
       const forceFBO = gl.createFramebuffer();
       if (!forceFBO) throw new Error('Failed to create force framebuffer');
       this.pmForceFBO = forceFBO;
+
+      this.forceTexture = {
+        texture: this.pmForceTexture,
+        framebuffer: this.pmForceFBO
+      };
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.bindTexture(gl.TEXTURE_2D, null);
