@@ -104,29 +104,14 @@ export class ParticleSystemMesh {
     this.frameCount = 0;
 
     // GPU resources
-    /** @type {ReturnType<typeof createPingPongTextures> | null} */
-    this.positionTextures = null;
-    /** @type {ReturnType<typeof createPingPongTextures> | null} */
-    this.velocityTextures = null;
-    /** @type {{texture: WebGLTexture, framebuffer: WebGLFramebuffer} | null} */
-    this.forceTexture = null;
-    /** @type {{texture: WebGLTexture, framebuffer: WebGLFramebuffer} | null} */
-    this.colorTexture = null;
-    /** @type {{velIntegrate?: WebGLProgram, posIntegrate?: WebGLProgram}} */
-    this.programs = {};
     /** @type {Record<string, WebGLProgram>} */
     this.meshPrograms = {};
-    this.quadVAO = null;
-    this.particleVAO = null;
 
     this.textureWidth = 0;
     this.textureHeight = 0;
     this.actualTextureSize = 0;
 
     // Mesh pipeline resources (to be created during init)
-    this.pmGrid = null;
-    this.pmGridFramebuffer = null;
-    this.pmForceTexture = null;
     this.pmForceGrids = null;
     this.meshSpectrum = null;
     this.meshDensitySpectrum = null;
@@ -141,28 +126,42 @@ export class ParticleSystemMesh {
     if (this.options.enableProfiling) {
       this.profiler = new GPUProfiler(gl);
     }
-  }
 
-  /** @returns {void} */
-  init() {
+    this.checkWebGL2Support();
+    this.calculateTextureDimensions();
+
     let finished = false;
     try {
-      this.checkWebGL2Support();
-      this.calculateTextureDimensions();
-      this.createShaderPrograms();
-      this.createTextures();
-      this.createGeometry();
-      this.uploadParticleData();
-      this.initMeshPipeline();
+      this.programs = {
+        velIntegrate: createProgram(this.gl, fsQuadVert, velIntegrateFrag),
+        posIntegrate: createProgram(this.gl, fsQuadVert, posIntegrateFrag)
+      };
 
+      this.positionTextures = createPingPongTextures(this.gl, this.textureWidth, this.textureHeight);
+      this.velocityTextures = createPingPongTextures(this.gl, this.textureWidth, this.textureHeight);
+      this.forceTexture = createRenderTexture(this.gl, this.textureWidth, this.textureHeight);
+      this.pmForceTexture = this.forceTexture.texture;
+      this.pmForceFBO = this.forceTexture.framebuffer;
+      this.colorTexture = createRenderTexture(this.gl, this.textureWidth, this.textureHeight, this.gl.RGBA8, this.gl.UNSIGNED_BYTE);
+  
+      const { quadVAO, particleVAO } = createGeometry(this.gl, this.options.particleCount);
+      this.quadVAO = quadVAO;
+      this.particleVAO = particleVAO;
+
+      this.uploadParticleData();
+
+      const gridSize = this.meshConfig.gridSize;
+      this.pmGrid = createPMGrid(this.gl, gridSize);
+      this.pmGridFramebuffer = createPMGridFramebuffer(this.gl, this.pmGrid.texture);
+
+  
       // Restore GL state for host renderer compatibility
-      const gl = this.gl;
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.bindTexture(gl.TEXTURE_2D, null);
-      gl.bindVertexArray(null);
-      gl.disable(gl.BLEND);
-      gl.disable(gl.DEPTH_TEST);
-      gl.disable(gl.SCISSOR_TEST);
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+      this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+      this.gl.bindVertexArray(null);
+      this.gl.disable(this.gl.BLEND);
+      this.gl.disable(this.gl.DEPTH_TEST);
+      this.gl.disable(this.gl.SCISSOR_TEST);
 
       this.isInitialized = true;
       finished = true;
@@ -184,31 +183,6 @@ export class ParticleSystemMesh {
     this.textureWidth = dims.width;
     this.textureHeight = dims.height;
     this.actualTextureSize = dims.actualSize;
-  }
-
-  /** @returns {void} */
-  createShaderPrograms() {
-    const gl = this.gl;
-    this.programs.velIntegrate = createProgram(gl, fsQuadVert, velIntegrateFrag);
-    this.programs.posIntegrate = createProgram(gl, fsQuadVert, posIntegrateFrag);
-  }
-
-  /** @returns {void} */
-  createTextures() {
-    const gl = this.gl;
-    this.positionTextures = createPingPongTextures(gl, this.textureWidth, this.textureHeight);
-    this.velocityTextures = createPingPongTextures(gl, this.textureWidth, this.textureHeight);
-    this.forceTexture = createRenderTexture(gl, this.textureWidth, this.textureHeight);
-    this.pmForceTexture = this.forceTexture.texture;
-    this.pmForceFBO = this.forceTexture.framebuffer;
-    this.colorTexture = createRenderTexture(gl, this.textureWidth, this.textureHeight, gl.RGBA8, gl.UNSIGNED_BYTE);
-  }
-
-  /** @returns {void} */
-  createGeometry() {
-    const { quadVAO, particleVAO } = createGeometry(this.gl, this.options.particleCount);
-    this.quadVAO = quadVAO;
-    this.particleVAO = particleVAO;
   }
 
   /** @returns {void} */
@@ -248,14 +222,6 @@ export class ParticleSystemMesh {
     uploadTextureData(this.gl, vel0, velData, this.textureWidth, this.textureHeight);
     uploadTextureData(this.gl, vel1, velData, this.textureWidth, this.textureHeight);
     uploadTextureData(this.gl, colorTex, colorData, this.textureWidth, this.textureHeight, this.gl.RGBA, /** @type {number} */ (this.gl.UNSIGNED_BYTE));
-  }
-
-  /** @returns {void} */
-  initMeshPipeline() {
-    const gl = this.gl;
-    const gridSize = this.meshConfig.gridSize;
-    this.pmGrid = createPMGrid(gl, gridSize);
-    this.pmGridFramebuffer = createPMGridFramebuffer(gl, this.pmGrid.texture);
   }
 
   /** @returns {void} */
@@ -335,25 +301,21 @@ export class ParticleSystemMesh {
     if (this.positionTextures) {
       this.positionTextures.textures.forEach(tex => gl.deleteTexture(tex));
       this.positionTextures.framebuffers.forEach(fbo => gl.deleteFramebuffer(fbo));
-      this.positionTextures = null;
     }
 
     if (this.velocityTextures) {
       this.velocityTextures.textures.forEach(tex => gl.deleteTexture(tex));
       this.velocityTextures.framebuffers.forEach(fbo => gl.deleteFramebuffer(fbo));
-      this.velocityTextures = null;
     }
 
     if (this.forceTexture) {
       gl.deleteTexture(this.forceTexture.texture);
       gl.deleteFramebuffer(this.forceTexture.framebuffer);
-      this.forceTexture = null;
     }
 
     if (this.colorTexture) {
       gl.deleteTexture(this.colorTexture.texture);
       gl.deleteFramebuffer(this.colorTexture.framebuffer);
-      this.colorTexture = null;
     }
 
     Object.values(this.programs).forEach(program => {
@@ -367,12 +329,10 @@ export class ParticleSystemMesh {
 
     if (this.pmGrid) {
       gl.deleteTexture(this.pmGrid.texture);
-      this.pmGrid = null;
     }
 
     if (this.pmGridFramebuffer) {
       gl.deleteFramebuffer(this.pmGridFramebuffer);
-      this.pmGridFramebuffer = null;
     }
 
     Object.values(this.meshPrograms).forEach(program => {
