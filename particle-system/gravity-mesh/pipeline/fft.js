@@ -106,10 +106,13 @@ function ensureRealToComplexProgram(psys) {
     in vec2 v_uv;
     out vec4 outColor;
     uniform sampler2D u_massGrid;
+    uniform float u_cellVolume;  // Volume of one grid cell (for mass→density conversion)
 
     void main() {
       float mass = texture(u_massGrid, v_uv).a;
-      outColor = vec4(mass, 0.0, 0.0, 0.0);
+      // Convert mass to density: ρ = m / V
+      float density = mass / u_cellVolume;
+      outColor = vec4(density, 0.0, 0.0, 0.0);
     }
   `;
 
@@ -140,6 +143,24 @@ function convertMeshRealToComplex(psys) {
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, pmGrid.texture);
   gl.uniform1i(gl.getUniformLocation(psys.meshPrograms.realToComplex, 'u_massGrid'), 0);
+
+  // Compute cell volume: V = (boxSize / gridSize)³
+  const bounds = psys.options.worldBounds;
+  const boxSize = bounds ? Math.max(
+    bounds.max[0] - bounds.min[0],
+    bounds.max[1] - bounds.min[1],
+    bounds.max[2] - bounds.min[2]
+  ) : 100.0;
+  const cellSize = boxSize / pmGrid.gridSize;
+  const cellVolume = cellSize * cellSize * cellSize;
+  
+  // Log once for debugging
+  if (!psys._cellVolumeLogged) {
+    console.log(`[Mesh FFT] Cell volume normalization: boxSize=${boxSize.toFixed(3)}, gridSize=${pmGrid.gridSize}, cellVolume=${cellVolume.toExponential(3)}`);
+    psys._cellVolumeLogged = true;
+  }
+  
+  gl.uniform1f(gl.getUniformLocation(psys.meshPrograms.realToComplex, 'u_cellVolume'), cellVolume);
 
   gl.bindVertexArray(psys.quadVAO);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
