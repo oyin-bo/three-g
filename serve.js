@@ -541,14 +541,14 @@ const FileHarness = (() => {
       }
     }
     
-    // Replace header
+    // Replace header and append reply
     const beforeHeader = lines.slice(0, headerEnd > 0 ? lines.findIndex(l => l.startsWith('# Connected pages:')) : 0);
     const afterHeader = lines.slice(headerEnd || 0);
     
     const newLines = [
       ...header,
       '',
-      ...afterHeader.filter(l => l !== ''),  // Remove extra blank lines
+      ...afterHeader,
       '',
       replyHeader,
       '```' + lang,
