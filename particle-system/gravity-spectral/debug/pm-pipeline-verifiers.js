@@ -271,9 +271,10 @@ async function computeTextureEnergy(psys, texture, width, height, isReal) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
   
-  const channels = isReal ? 4 : 2;
-  const pixels = new Float32Array(width * height * channels);
-  gl.readPixels(0, 0, width, height, isReal ? gl.RGBA : gl.RG, gl.FLOAT, pixels);
+  // All textures in the PM pipeline use RGBA32F format
+  // For complex textures: R=real, G=imag, B=unused, A=unused
+  const pixels = new Float32Array(width * height * 4);
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, pixels);
   
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
@@ -286,9 +287,10 @@ async function computeTextureEnergy(psys, texture, width, height, isReal) {
       energy += pixels[i] * pixels[i];
     }
   } else {
+    // Complex texture: R=real, G=imag
     // Sum |complex|² = real² + imag²
-    for (let i = 0; i < pixels.length; i += 2) {
-      const re = pixels[i];
+    for (let i = 0; i < pixels.length; i += 4) {
+      const re = pixels[i + 0];
       const im = pixels[i + 1];
       energy += re * re + im * im;
     }

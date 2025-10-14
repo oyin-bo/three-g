@@ -12,7 +12,7 @@ export default /* glsl */`#version 300 es
 precision highp float;
 
 // Particle data from texture
-uniform sampler2D u_positionTexture;
+uniform sampler2D u_positions;
 uniform vec2 u_textureSize;
 
 // Grid parameters
@@ -40,7 +40,7 @@ void main() {
   vec2 texCoord = (vec2(texX, texY) + 0.5) / u_textureSize;
   
   // Read particle position and mass
-  vec4 posData = texture(u_positionTexture, texCoord);
+  vec4 posData = texture(u_positions, texCoord);
   vec3 worldPos = posData.xyz;
   float mass = posData.w;
   

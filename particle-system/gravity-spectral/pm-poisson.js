@@ -80,13 +80,22 @@ export function solvePoissonFFT(psys, gravitationalConstant, boxSize) {
     worldSize[0], worldSize[1], worldSize[2]
   );
 
-  // Extended controls per spec
-  const useDiscrete = psys.options?.poissonUseDiscrete ?? 1; // default discrete k_eff
-  const assign = psys.options?.assignment || 'CIC';
-  const deconvOrder = assign === 'TSC' ? 3 : assign === 'NGP' ? 1 : 2;
-  const gaussianSigma = psys.options?.treePMSigma || 0.0;
-  gl.uniform1i(gl.getUniformLocation(program, 'u_useDiscrete'), useDiscrete ? 1 : 0);
-  gl.uniform1i(gl.getUniformLocation(program, 'u_deconvolveOrder'), deconvOrder);
+  // --- Shader Controls ---
+
+  // Deconvolution order depends on the mass assignment scheme.
+  // This corrects for the smearing effect of assignment.
+  const assignment = (/** @type {any} */ (psys.options)).assignment || 'CIC';
+  let deconvolveOrder = 2; // Default for CIC
+  if (assignment === 'TSC') deconvolveOrder = 3;
+  if (assignment === 'NGP') deconvolveOrder = 1;
+  gl.uniform1i(gl.getUniformLocation(program, 'u_deconvolveOrder'), deconvolveOrder);
+
+  // Use discrete Laplacian by default, as it's more accurate for grid calculations.
+  const useDiscrete = ((/** @type {any} */ (psys.options)).poissonUseDiscrete === false) ? 0 : 1;
+  gl.uniform1i(gl.getUniformLocation(program, 'u_useDiscrete'), useDiscrete);
+
+  // Gaussian smoothing for Tree-PM hybrid methods.
+  const gaussianSigma = (/** @type {any} */ (psys.options)).treePMSigma || 0.0;
   gl.uniform1f(gl.getUniformLocation(program, 'u_gaussianSigma'), gaussianSigma);
   
   // Draw fullscreen quad

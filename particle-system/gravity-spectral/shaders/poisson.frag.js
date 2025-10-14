@@ -54,9 +54,9 @@ void main() {
   ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
   int N = int(u_gridSize);
   vec3 L = u_worldSize;
-  vec3 d = L / u_gridSize; // grid spacing per axis
-  
-  // Read density spectrum (complex)
+  vec3 d = L / u_gridSize;
+
+  // Read density spectrum
   vec2 rho_k = texture(u_densitySpectrum, v_uv).rg;
 
   // Wave indices on [-N/2, N/2)
@@ -65,61 +65,38 @@ void main() {
   kg.y = float(voxel.y <= N/2 ? voxel.y : voxel.y - N);
   kg.z = float(voxel.z <= N/2 ? voxel.z : voxel.z - N);
 
-  vec2 rhoCorrected = rho_k;
-
-  // Optional deconvolution of assignment window (NGP/CIC/TSC)
+  // 1. Deconvolution of assignment window (NGP/CIC/TSC)
+  // This corrects for the smearing effect of the mass assignment scheme.
   if (u_deconvolveOrder > 0) {
-    float halfCell = 0.5 * d.x;
     float wx = pow(max(sinc(kg.x * PI / u_gridSize), 1e-4), float(u_deconvolveOrder));
     float wy = pow(max(sinc(kg.y * PI / u_gridSize), 1e-4), float(u_deconvolveOrder));
     float wz = pow(max(sinc(kg.z * PI / u_gridSize), 1e-4), float(u_deconvolveOrder));
     float window = max(wx * wy * wz, 1e-4);
-    rhoCorrected /= window;
+    rho_k /= window;
   }
 
-  // Compute k^2
+  // 2. Compute k^2 (squared wavenumber)
   float k2;
   if (u_useDiscrete == 1) {
-    // Discrete Laplacian eigenvalue: k_eff^2 = sum_i (2/Δ sin(π k_i/N))^2
+    // Discrete Laplacian eigenvalue on the grid: k_eff^2 = sum_i (2/Δx_i * sin(π*k_i/N))^2
     float sx = sin(PI * kg.x / u_gridSize);
     float sy = sin(PI * kg.y / u_gridSize);
     float sz = sin(PI * kg.z / u_gridSize);
-    float cx = 2.0 / d.x;
-    float cy = 2.0 / d.y;
-    float cz = 2.0 / d.z;
-    k2 = (cx*cx) * (sx*sx) + (cy*cy) * (sy*sy) + (cz*cz) * (sz*sz);
+    vec3 inv_d = 2.0 / d;
+    vec3 k_eff = inv_d * vec3(sx, sy, sz);
+    k2 = dot(k_eff, k_eff);
   } else {
-    // Continuous
+    // Continuous wavenumber: k_phys^2 = sum_i (2π*k_i/L_i)^2
     vec3 invL = TWO_PI / L;
-    vec3 kphys = kg * invL;
-    k2 = dot(kphys, kphys);
+    vec3 k_phys = kg * invL;
+    k2 = dot(k_phys, k_phys);
   }
 
+  // 3. Solve for potential spectrum: φ(k) = -4πG * ρ(k) / k^2
   vec2 phi_k = vec2(0.0);
-  if (k2 >= 1e-10) {
-    float factor = -u_gravitationalConstant / k2;
-
-    float splitWeight = 1.0;
-    if (u_splitMode == 1 && u_kCut > 0.0) {
-      float kCutSq = u_kCut * u_kCut;
-      splitWeight = k2 <= kCutSq ? 1.0 : 0.0;
-    } else if (u_splitMode == 2 && u_gaussianSigma > 0.0) {
-      float sigma = u_gaussianSigma;
-      splitWeight = exp(-k2 * sigma * sigma);
-    }
-
-    phi_k = rhoCorrected * factor * splitWeight;
-  }
-
-  // Additional Gaussian smoothing (independent of splitMode)
-  // Note: This applies on top of split weight, so if splitMode==2 with same sigma,
-  // the result is smoothed twice. Typically used for Tree-PM hybrid methods.
-  if (u_gaussianSigma > 0.0) {
-    vec3 invL2 = TWO_PI / L;
-    vec3 kphys2 = kg * invL2;
-    float k2_cont = dot(kphys2, kphys2);
-    float g = exp(-0.5 * k2_cont * (u_gaussianSigma * u_gaussianSigma));
-    phi_k *= g;
+  if (k2 >= 1e-10) { // Avoid division by zero at DC (k=0)
+    float green = -u_gravitationalConstant / k2;
+    phi_k = rho_k * green;
   }
 
   outColor = vec4(phi_k, 0.0, 0.0);

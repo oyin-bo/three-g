@@ -54,6 +54,12 @@ export function depositParticlesToGrid(psys) {
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   
+  // Disable depth test and other state that could interfere
+  gl.disable(gl.DEPTH_TEST);
+  gl.depthMask(false);
+  gl.disable(gl.CULL_FACE);
+  gl.disable(gl.SCISSOR_TEST);
+  
   // Enable additive blending for mass accumulation
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE); // Additive blending
@@ -112,6 +118,12 @@ export function depositParticlesToGrid(psys) {
     gl.drawArrays(gl.POINTS, 0, psys.particleCount);
   }
   gl.bindVertexArray(null);
+  
+  // Check for GL errors
+  const err = gl.getError();
+  if (err !== gl.NO_ERROR) {
+    console.error('[PM Deposit] GL error after draw:', err);
+  }
   
   // Cleanup
   gl.disable(gl.BLEND);

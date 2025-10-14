@@ -270,6 +270,11 @@ console.log("  4. Access modules: physics.pmDebug.modules.metrics, etc.");
     "[PM Verifiers] Running comprehensive PM/FFT pipeline verification..."
   );
   const spectralSystem = /** @type {import('./particle-system/gravity-spectral/index.js').ParticleSystemSpectral} */ (physics._system);
+  
+  // Run the pipeline once to populate textures before verification
+  console.log("[PM Verifiers] Running pipeline to populate textures...");
+  physics.compute();
+  
   const results = await pmVerifiers.runAllPipelineVerifiers(spectralSystem);
   console.log("[PM Verifiers] Verification complete. Results:", results);
   return results;

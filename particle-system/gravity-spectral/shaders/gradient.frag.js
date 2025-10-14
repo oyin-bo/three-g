@@ -49,28 +49,30 @@ void main() {
   // Read potential spectrum (complex)
   vec2 phi_k = texture(u_potentialSpectrum, v_uv).rg;
   
-  // Compute wave vector component for selected axis
-  vec3 k;
-  k.x = float(voxel.x <= N/2 ? voxel.x : voxel.x - N);
-  k.y = float(voxel.y <= N/2 ? voxel.y : voxel.y - N);
-  k.z = float(voxel.z <= N/2 ? voxel.z : voxel.z - N);
+  // Compute integer wave vector
+  vec3 kg;
+  kg.x = float(voxel.x <= N/2 ? voxel.x : voxel.x - N);
+  kg.y = float(voxel.y <= N/2 ? voxel.y : voxel.y - N);
+  kg.z = float(voxel.z <= N/2 ? voxel.z : voxel.z - N);
   
   // Scale to physical wave vector: k_phys = 2π * k_grid / L
-  k.x *= TWO_PI / u_worldSize.x;
-  k.y *= TWO_PI / u_worldSize.y;
-  k.z *= TWO_PI / u_worldSize.z;
+  vec3 k_phys = kg * (TWO_PI / u_worldSize);
   
   // Select component for this axis
-  float k_component = (u_axis == 0) ? k.x : ((u_axis == 1) ? k.y : k.z);
+  float k_component = (u_axis == 0) ? k_phys.x : ((u_axis == 1) ? k_phys.y : k_phys.z);
   
   // Compute gradient: F(k) = -i·k·φ(k)
   // For attractive gravity: F = -∇φ
   // In Fourier space: ∇φ(k) = i·k·φ(k), so F(k) = -i·k·φ(k)
-  // Multiplication by -i: (a + bi) * (-i) = b - ai
-  vec2 ik = vec2(0.0, -k_component);  // -i·k as complex number
-  vec2 F_k = complexMul(ik, phi_k);
+  // Multiplication by -i is a rotation: (a + bi) * (-i) = b - ai
+  // So we are calculating -i*k_component, the complex number is (0, -k_component)
+  // F_k = (phi_re, phi_im) * (0, -k_component)
+  // F_k.re = phi_re * 0 - phi_im * (-k_component) = phi_im * k_component
+  // F_k.im = phi_re * (-k_component) + phi_im * 0 = -phi_re * k_component
+  vec2 F_k = vec2(phi_k.y * k_component, -phi_k.x * k_component);
   
   // Output force spectrum for this axis (complex)
   outColor = vec4(F_k, 0.0, 0.0);
 }
+
 `;

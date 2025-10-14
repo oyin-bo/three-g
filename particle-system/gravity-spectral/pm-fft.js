@@ -97,7 +97,7 @@ function configureRealToComplex(psys) {
       out vec4 outColor;
       uniform sampler2D u_massGrid;
       void main() {
-        float mass = texture(u_massGrid, v_uv).a;
+        float mass = texture(u_massGrid, v_uv).r;
         outColor = vec4(mass, 0.0, 0.0, 0.0);
       }
     `;
@@ -368,6 +368,7 @@ export function inverseFFTToReal(psys, inputSpectrum, outputReal) {
   gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
   const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
   if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    console.error('[PM FFT] Framebuffer incomplete for extractReal pass:', status);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.deleteFramebuffer(fbo);
     return;
