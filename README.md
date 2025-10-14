@@ -10,23 +10,25 @@ THREE-g is a dual-module library that brings astrophysical-scale particle simula
 A high-performance particle visualization engine that transforms raw spatial data into luminous cosmic beauty. Whether fed from CPU arrays or GPU textures, it renders hundreds of thousands of glowing particles with atmospheric fog effects—all while maintaining silky-smooth frame rates.
 
 ### 2. **Particle Physics System** (`particleSystem`)
-A GPU-native N-body gravitational simulator with three computational methods:
+A GPU-native N-body gravitational simulator with four computational methods:
 
 - **Quadrupole** (default): 2nd-order Barnes-Hut tree-code with quadrupole moments and improved multipole acceptance criterion (MAC). Provides superior accuracy with better force approximations at distance.
 - **Monopole**: 1st-order Barnes-Hut tree-code using only monopole moments (center of mass). The classic approach with simpler computations.
-- **Spectral** (experimental): Particle-Mesh method with FFT-based Poisson solver. Uses spectral techniques for smooth long-range forces, currently under development.
+- **Mesh**: Hybrid Particle-Mesh method combining FFT-based far-field forces with local near-field corrections. Offers smooth, artifact-free forces with O(N + M log M) complexity.
+- **Spectral** (experimental): Pure Particle-Mesh method with FFT-based Poisson solver. Uses spectral techniques for smooth long-range forces, currently under active development.
 
-All methods compute O(N log N) physics entirely on the GPU. Both physics and particle rendering share GPU resources, avoiding memory bottlenecks.
+All methods compute O(N log N) or better physics entirely on the GPU. Both physics and particle rendering share GPU resources, avoiding memory bottlenecks.
 
 These modules can operate independently or in concert. The **mass spot mesh** is agnostic to its data source—it happily consumes static arrays, procedural generators, or dynamic GPU textures from any GPGPU simulation. The **particle system** produces GPU-resident position and color textures that plug directly into the renderer's texture mode, creating a zero-copy pipeline from physics to pixels.
 
 ## Features
 
 - **massSpotMesh**: Efficient particle rendering with glow effects
-- **particleSystem**: GPU-based O(N log N) gravitational physics with three computational methods:
+- **particleSystem**: GPU-based O(N log N) gravitational physics with four computational methods:
   - **Quadrupole**: 2nd-order Barnes-Hut with improved accuracy
   - **Monopole**: Classic 1st-order Barnes-Hut
-  - **Spectral**: FFT-based Particle-Mesh (experimental)
+  - **Mesh**: Hybrid PM/FFT with near-field correction
+  - **Spectral**: Pure FFT-based Particle-Mesh (experimental)
 - Scales to 200,000+ particles at 10-30 FPS
 - Zero CPU involvement: all computation on GPU
 
@@ -107,7 +109,8 @@ Creates GPU-accelerated Barnes-Hut N-body simulation.
 - `method`: Computation method (optional, default: 'quadrupole')
   - `'quadrupole'`: 2nd-order Barnes-Hut with quadrupole moments
   - `'monopole'`: 1st-order Barnes-Hut with monopole moments only
-  - `'spectral'`: Particle-Mesh with FFT (experimental)
+  - `'mesh'`: Hybrid Particle-Mesh with FFT far-field and local near-field
+  - `'spectral'`: Pure Particle-Mesh with FFT (experimental)
 - `get`: Optional mapper function `(particle, out) => void` for custom data extraction
 - `worldBounds`: Simulation bounds `{ min: [x,y,z], max: [x,y,z] }` (optional)
 - `theta`: Barnes-Hut approximation threshold (default: 0.5 for spectral, 0.65 for tree methods)
@@ -139,6 +142,7 @@ Creates GPU-accelerated Barnes-Hut N-body simulation.
 - `getColorTexture()`: Get particle colors (WebGLTexture, RGBA)
 - `getTextureSize()`: Get texture dimensions `{ width, height }`
 - `getCurrentIndex()`: Get current ping-pong buffer index (0 or 1)
+- `unload(particles, set?)`: Read GPU state back to CPU (see below)
 - `stats()`: Get GPU timing stats if profiling enabled (returns object or null)
 - `dispose()`: Release GPU resources
 
@@ -173,7 +177,7 @@ massSpotMesh({
 
 The integration in `demo.js` reveals the elegant choreography between renderer and physics:
 
-1. **Initialization**: Particle data flows from CPU arrays into the physics system via `particleSystem({ particles, method })`. The method parameter selects between 'monopole', 'quadrupole' (default), or 'spectral' implementations. The system uploads this data to GPU textures during initialization—positions, velocities, colors all transformed into WebGL textures.
+1. **Initialization**: Particle data flows from CPU arrays into the physics system via `particleSystem({ particles, method })`. The method parameter selects between 'monopole', 'quadrupole' (default), 'mesh', or 'spectral' implementations. The system uploads this data to GPU textures during initialization—positions, velocities, colors all transformed into WebGL textures.
 
 2. **GPU-to-GPU Pipeline**: The mass spot mesh is created in texture mode, directly consuming the physics system's position and color textures. No intermediate copies, no CPU readbacks—the renderer samples directly from the physics textures.
 
@@ -196,6 +200,12 @@ Choose the computation method based on your requirements:
   - Simpler force models
   - Debugging and comparison
   - Educational purposes
+
+- **Use 'mesh'** for:
+  - Smooth, artifact-free force fields
+  - Uniform or semi-uniform particle distributions
+  - Scenarios where tree-based stepping artifacts are undesirable
+  - Hybrid PM/tree-code approaches
 
 - **Use 'spectral'** for:
   - Experimental smooth-field physics
@@ -258,9 +268,38 @@ This approach markedly reduces anisotropic errors, allowing higher θ values (mo
 
 **Implementation**: Uses WebGL2 texture arrays (3 arrays of 8 layers each) to reduce texture unit usage and improve cache coherence. Supports occupancy masking to skip empty voxels during traversal.
 
-#### Spectral Method (Particle-Mesh with FFT, experimental)
+#### Mesh Method (Hybrid Particle-Mesh, production-ready)
 
-A fundamentally different approach that replaces the tree traversal with a spectral Poisson solver. Particles are deposited onto a regular 3D grid, and forces are computed via Fast Fourier Transform (FFT):
+A practical hybrid approach that combines the smooth far-field forces of Particle-Mesh methods with accurate local near-field corrections. This TreePM-inspired technique splits the gravitational force into two ranges:
+
+**Far-field (PM/FFT)**:
+1. **Deposit**: Particles → density field ρ(x) on 64³ grid (NGP or CIC interpolation)
+2. **Forward FFT**: ρ(x) → ρ̂(k) (real space → frequency space)
+3. **Split filter**: Apply Gaussian smoothing S(k) = exp(-(k·r_s)²) to separate scales
+4. **Poisson solve**: ρ̂(k) → φ̂(k) using Green's function -4πG/k²·S(k)
+5. **Gradient**: φ̂(k) → ĝ(k) = ik·φ̂(k) (force in frequency space)
+6. **Inverse FFT**: ĝ(k) → g_far(x) (frequency space → real space)
+7. **Sample**: Interpolate g_far(x) at particle positions
+
+**Near-field (local correction)**:
+- Direct summation over neighboring L0 voxels (3×3×3 or 5×5×5 neighborhood)
+- Uses complementary Ewald/Gaussian kernel to avoid double-counting
+- Adds high-frequency force components filtered out by the PM stage
+
+The mesh method eliminates tree traversal entirely, replacing it with FFT convolution (O(M log M) where M = grid size) plus local corrections (O(N·k) where k is neighborhood size, typically 27). This provides smooth, artifact-free forces without the stepping or angular bias that can affect tree methods.
+
+**Key advantages**:
+- No tree construction overhead
+- Naturally smooth forces (no cell-crossing discontinuities)
+- Predictable performance independent of clustering
+- Well-suited for uniform and semi-uniform distributions
+- Production-ready with established PM/TreePM heritage
+
+**Implementation**: Reuses the existing L0 grid infrastructure (same 64³ grid and Z-slice texture mapping as the tree methods), adding FFT pipeline stages and near-field correction passes. The fixed periodic domain ensures consistent FFT semantics.
+
+#### Spectral Method (Pure Particle-Mesh with FFT, experimental)
+
+A research implementation exploring pure spectral techniques without hybrid split. Follows the same PM pipeline as the Mesh method but without the near-field correction stage. This pure-FFT approach:
 
 1. **Deposit**: Particles → density field ρ(x) on 64³ grid (CIC/TSC interpolation)
 2. **Forward FFT**: ρ(x) → ρ̂(k) (real space → frequency space)
@@ -271,7 +310,7 @@ A fundamentally different approach that replaces the tree traversal with a spect
 
 This method provides O(N + M log M) complexity where N is particle count and M is grid size. It excels with smooth, uniform distributions and eliminates the stepping artifacts inherent to tree methods. The spectral approach also naturally smooths short-wavelength noise that can seed numerical instabilities.
 
-**Current status**: The spectral implementation is functional but experimental. It includes a comprehensive debugging infrastructure (`pm-debug/`) with synthetic data generators, validators, and snapshot comparison tools for verifying each pipeline stage.
+**Current status**: The spectral implementation is functional but experimental. It includes a comprehensive debugging infrastructure (`particle-system/gravity-spectral/debug/`) with synthetic data generators, validators, and snapshot comparison tools for verifying each pipeline stage. Active development focuses on accuracy refinement and performance optimization.
 
 ### GPU Implementation Challenges
 
@@ -292,6 +331,8 @@ Translating these algorithms to GPU shaders—where recursion is forbidden and m
 The Barnes-Hut algorithm enabled the first large-scale cosmological simulations in the late 1980s, revealing how dark matter halos form and evolve. Modern variants like Fast Multipole Method (FMM) and tree-particle-mesh (TPM) codes power exascale simulations tracking billions of particles across cosmic epochs. 
 
 The spectral particle-mesh approach, pioneered in the 1970s, became the foundation for modern cosmological codes like GADGET and Enzo when combined with adaptive mesh refinement. The PM method's ability to handle periodic boundary conditions naturally makes it ideal for simulating cosmic structure formation in expanding universes.
+
+The hybrid TreePM method emerged in the 1990s as a practical reconciliation of these two paradigms. By splitting gravitational forces into smooth long-range (handled via FFT) and sharp short-range (handled via direct summation or tree codes) components, TreePM methods like those in GADGET-2 achieved the best of both worlds: FFT efficiency for large-scale structure and high-resolution accuracy for dense clusters. This split-force approach became the workhorse of modern cosmological simulations, enabling studies of galaxy formation from cosmic dawn to the present day.
 
 By bringing these techniques to the browser via GPU shaders, THREE-g democratizes computational approaches that once required supercomputers—now anyone can experiment with gravitational choreography in real-time, right in their web browser.
 
