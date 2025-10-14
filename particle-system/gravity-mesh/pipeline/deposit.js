@@ -51,10 +51,33 @@ export function meshDepositMass(psys) {
   const program = getDepositProgram(psys);
 
   gl.bindFramebuffer(gl.FRAMEBUFFER, psys.pmGridFramebuffer);
+  
+  // CRITICAL: Re-attach texture to framebuffer (may have been detached by other code)
+  gl.framebufferTexture2D(
+    gl.FRAMEBUFFER,
+    gl.COLOR_ATTACHMENT0,
+    gl.TEXTURE_2D,
+    grid.texture,
+    0
+  );
+  
+  const fbStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (fbStatus !== gl.FRAMEBUFFER_COMPLETE) {
+    console.error(`[Mesh Deposit] Framebuffer incomplete: ${fbStatus}`);
+    return;
+  }
+  
   gl.viewport(0, 0, grid.size, grid.size);
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
+  // CRITICAL: Ensure writes are enabled  
+  gl.disable(gl.DEPTH_TEST);
+  gl.depthMask(false);
+  gl.colorMask(true, true, true, true);
+  gl.disable(gl.CULL_FACE);
+  gl.disable(gl.SCISSOR_TEST);
+  
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE);
   gl.blendEquation(gl.FUNC_ADD);

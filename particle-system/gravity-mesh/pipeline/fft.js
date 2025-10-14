@@ -374,6 +374,8 @@ export function meshInverseFFTToReal(psys, inputSpectrum, outputTexture) {
   gl.viewport(0, 0, textureSize, textureSize);
   gl.disable(gl.BLEND);
   gl.disable(gl.DEPTH_TEST);
+  gl.colorMask(true, true, true, true);
+  gl.depthMask(false);
 
   gl.useProgram(psys.meshPrograms.extractReal);
 
