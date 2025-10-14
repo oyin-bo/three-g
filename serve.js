@@ -239,7 +239,7 @@ const Jobs = (() => {
     res.end(job.code);
   }
 
-  /** @param {Job} job @param {{ ok:boolean, value?:any, error?:any, timeout?:boolean, httpAlreadySent?:boolean }} outcome */
+  /** @param {Job} job @param {{ ok:boolean, value?:any, error?:any, timeout?:boolean, httpAlreadySent?:boolean, errors?:any[] }} outcome */
   function complete(job, outcome) {
     if (job.done) return;
     job.done = true;
@@ -265,17 +265,31 @@ const Jobs = (() => {
       Pages.markLastCompleted(page.name);
     }
 
+    const errors = outcome.errors || [];
+
     // HTTP: send reply unless already sent (timeout branch).
     if (job.source === 'http') {
       if (!outcome.httpAlreadySent && job.res) {
         try {
           if (outcome.ok) {
             const v = outcome.value === undefined ? null : outcome.value;
+            let result = JSON.stringify(v);
+            // Prepend errors as comment block if any
+            if (errors.length > 0) {
+              const errorBlock = '/*\n' + errors.join('\n---\n') + '\n*/\n';
+              result = errorBlock + result;
+            }
             job.res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-            job.res.end(JSON.stringify(v));
+            job.res.end(result);
           } else {
+            let errorText = String(outcome.error);
+            // Append errors as comment block if any
+            if (errors.length > 0) {
+              const errorBlock = '\n/*\n' + errors.join('\n---\n') + '\n*/';
+              errorText = errorText + errorBlock;
+            }
             job.res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-            job.res.end(String(outcome.error));
+            job.res.end(errorText);
           }
         } catch { }
       }
@@ -285,7 +299,7 @@ const Jobs = (() => {
     }
 
     // FILE MODE: write intro + payload body
-    FileHarness.finishFileJob(outcome.ok, job.snippet, outcome.ok ? outcome.value : outcome.error);
+    FileHarness.finishFileJob(outcome.ok, job.snippet, outcome.ok ? outcome.value : outcome.error, errors);
   }
 
   function flushPendingPoll(page) {
@@ -449,14 +463,14 @@ const FileHarness = (() => {
 
   function clearBody() { view.body = []; view.footer = []; }
 
-  function finishFileJob(ok, snippet, payload) {
+  function finishFileJob(ok, snippet, payload, errors) {
     activeFileJob = null;
     const header = HeaderFmt.buildHeaderLines();
     if (ok) {
-      const body = buildResultBody(payload);
+      const body = buildResultBody(payload, errors || []);
       writeDebugFile(header, [HeaderFmt.introLine('result', snippet), ...body], []);
     } else {
-      const body = buildErrorBody(payload);
+      const body = buildErrorBody(payload, errors || []);
       writeDebugFile(header, [HeaderFmt.introLine('error', snippet), ...body], []);
     }
   }
@@ -467,17 +481,42 @@ const FileHarness = (() => {
     return true;
   }
 
-  function buildResultBody(value) {
+  function buildResultBody(value, errors) {
     const json = JSON.stringify(value, null, 2) || 'null';
     const lines = json.split('\n');
     const body = [`var result = ${lines[0] || ''}`];
     for (let i = 1; i < lines.length; i++) body.push(lines[i]);
+    
+    // Append errors as comment block if any
+    if (errors && errors.length > 0) {
+      body.push('');
+      body.push('/*');
+      for (const err of errors) {
+        body.push(String(err));
+        body.push('---');
+      }
+      body.push('*/');
+    }
+    
     return body;
   }
 
-  function buildErrorBody(error) {
+  function buildErrorBody(error, errors) {
     const text = error && typeof error === 'object' && error.stack ? String(error.stack) : String(error);
-    return text.split('\n');
+    const body = text.split('\n');
+    
+    // Append errors as comment block if any
+    if (errors && errors.length > 0) {
+      body.push('');
+      body.push('/*');
+      for (const err of errors) {
+        body.push(String(err));
+        body.push('---');
+      }
+      body.push('*/');
+    }
+    
+    return body;
   }
 
   return { boot, refreshHeader, clearBody, finishFileJob };
@@ -505,6 +544,16 @@ async function inject() {
   const endpoint = '/serve.js' + '?name=' + encodeURIComponent(name) + '&url=' + encodeURIComponent(location.href);
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  // Error buffer: capture all window errors since last eval
+  const errorBuffer = [];
+  const errorHandler = (event) => {
+    const err = event.error || event.reason || { message: event.message || String(event) };
+    const stack = err?.stack || String(err);
+    errorBuffer.push(stack);
+  };
+  window.addEventListener('error', errorHandler);
+  window.addEventListener('unhandledrejection', errorHandler);
+
   while (true) {
     try {
       const response = await fetch(endpoint, { headers: { 'cache-control': 'no-cache', pragma: 'no-cache' } });
@@ -513,13 +562,21 @@ async function inject() {
 
       if (!script) { await sleep(300); continue; }
 
+      // Clear error buffer before eval
+      errorBuffer.length = 0;
+
       let payload;
       try {
         const value = await(0, eval)(script);
-        try { payload = JSON.stringify({ ok: true, value }); }
-        catch { payload = JSON.stringify({ ok: true, value: String(value) }); }
+        // Handle function and undefined specially
+        let serializedValue = value;
+        if (typeof value === 'function' || value === undefined) {
+          serializedValue = String(value);
+        }
+        try { payload = JSON.stringify({ ok: true, value: serializedValue, errors: errorBuffer.slice() }); }
+        catch { payload = JSON.stringify({ ok: true, value: String(value), errors: errorBuffer.slice() }); }
       } catch (err) {
-        payload = JSON.stringify({ ok: false, error: { message: err?.message || String(err), stack: err?.stack || null } });
+        payload = JSON.stringify({ ok: false, error: { message: err?.message || String(err), stack: err?.stack || null }, errors: errorBuffer.slice() });
       }
 
       await fetch(endpoint, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: payload });
@@ -620,16 +677,17 @@ const HttpApi = (() => {
       const page = name ? Pages._all().get(name) : null;
       let payload;
       try { payload = body ? JSON.parse(body) : null; }
-      catch { payload = { ok: false, error: { message: 'invalid JSON', stack: '' } }; }
+      catch { payload = { ok: false, error: { message: 'invalid JSON', stack: '' }, errors: [] }; }
 
       if (page) {
         page.last = Date.now();
         const job = page.current;
         if (job && !job.done) {
-          if (payload && payload.ok) Jobs.complete(job, { ok: true, value: payload.value });
+          const errors = payload?.errors || [];
+          if (payload && payload.ok) Jobs.complete(job, { ok: true, value: payload.value, errors });
           else {
             const msg = payload?.error?.stack || payload?.error?.message || 'error';
-            Jobs.complete(job, { ok: false, error: msg });
+            Jobs.complete(job, { ok: false, error: msg, errors });
           }
         }
       }
