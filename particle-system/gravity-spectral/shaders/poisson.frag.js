@@ -20,7 +20,7 @@ uniform sampler2D u_densitySpectrum;
 uniform float u_gridSize;
 uniform float u_slicesPerRow;
 uniform float u_gravitationalConstant;  // 4πG
-uniform float u_boxSize;               // Physical size of simulation box
+uniform vec3 u_worldSize;              // Physical size per axis of simulation box
 uniform int u_splitMode;               // 0 = none, 1 = hard cutoff, 2 = Gaussian
 uniform float u_kCut;                  // Cutoff wavenumber (rad / unit length)
 uniform float u_gaussianSigma;         // Sigma for Gaussian split (length)
@@ -53,8 +53,8 @@ float sinc(float x) {
 void main() {
   ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
   int N = int(u_gridSize);
-  float L = u_boxSize;
-  float d = L / u_gridSize; // grid spacing
+  vec3 L = u_worldSize;
+  vec3 d = L / u_gridSize; // grid spacing per axis
   
   // Read density spectrum (complex)
   vec2 rho_k = texture(u_densitySpectrum, v_uv).rg;
@@ -69,7 +69,7 @@ void main() {
 
   // Optional deconvolution of assignment window (NGP/CIC/TSC)
   if (u_deconvolveOrder > 0) {
-    float halfCell = 0.5 * d;
+    float halfCell = 0.5 * d.x;
     float wx = pow(max(sinc(kg.x * PI / u_gridSize), 1e-4), float(u_deconvolveOrder));
     float wy = pow(max(sinc(kg.y * PI / u_gridSize), 1e-4), float(u_deconvolveOrder));
     float wz = pow(max(sinc(kg.z * PI / u_gridSize), 1e-4), float(u_deconvolveOrder));
@@ -84,11 +84,14 @@ void main() {
     float sx = sin(PI * kg.x / u_gridSize);
     float sy = sin(PI * kg.y / u_gridSize);
     float sz = sin(PI * kg.z / u_gridSize);
-    float c = 2.0 / d;
-    k2 = (c*c) * (sx*sx + sy*sy + sz*sz);
+    float cx = 2.0 / d.x;
+    float cy = 2.0 / d.y;
+    float cz = 2.0 / d.z;
+    k2 = (cx*cx) * (sx*sx) + (cy*cy) * (sy*sy) + (cz*cz) * (sz*sz);
   } else {
     // Continuous
-    vec3 kphys = kg * (TWO_PI / L);
+    vec3 invL = TWO_PI / L;
+    vec3 kphys = kg * invL;
     k2 = dot(kphys, kphys);
   }
 
@@ -108,8 +111,13 @@ void main() {
     phi_k = rhoCorrected * factor * splitWeight;
   }
 
+  // Additional Gaussian smoothing (independent of splitMode)
+  // Note: This applies on top of split weight, so if splitMode==2 with same sigma,
+  // the result is smoothed twice. Typically used for Tree-PM hybrid methods.
   if (u_gaussianSigma > 0.0) {
-    float k2_cont = dot(kg * (TWO_PI / L), kg * (TWO_PI / L));
+    vec3 invL2 = TWO_PI / L;
+    vec3 kphys2 = kg * invL2;
+    float k2_cont = dot(kphys2, kphys2);
     float g = exp(-0.5 * k2_cont * (u_gaussianSigma * u_gaussianSigma));
     phi_k *= g;
   }

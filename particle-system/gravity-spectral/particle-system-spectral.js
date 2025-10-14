@@ -412,16 +412,17 @@ export class ParticleSystemSpectral {
 
     // Update world bounds from texture infrequently (every 10 seconds) to avoid GPU-CPU stalls.
     const now = performance.now ? performance.now() : Date.now();
-    const updateIntervalMs = 10000; // 10 seconds
-    if (this._lastBoundsUpdateTime < 0 || (now - this._lastBoundsUpdateTime) >= updateIntervalMs) {
-      try {
-        updateWorldBoundsFromTexture(this, 16);
-      } catch (e) {
-        // Swallow errors here to avoid breaking the simulation loop; leave previous bounds in place
-        console.warn('updateWorldBoundsFromTexture failed:', e);
-      }
-      this._lastBoundsUpdateTime = now;
-    }
+    // DISABLED: Dynamic bounds updates cause feedback loop with any force miscalculation
+    // const updateIntervalMs = 10000; // 10 seconds
+    // if (this._lastBoundsUpdateTime < 0 || (now - this._lastBoundsUpdateTime) >= updateIntervalMs) {
+    //   try {
+    //     updateWorldBoundsFromTexture(this, 16);
+    //   } catch (e) {
+    //     // Swallow errors here to avoid breaking the simulation loop; leave previous bounds in place
+    //     console.warn('updateWorldBoundsFromTexture failed:', e);
+    //   }
+    //   this._lastBoundsUpdateTime = now;
+    // }
 
     computePMForcesSync(this);
 

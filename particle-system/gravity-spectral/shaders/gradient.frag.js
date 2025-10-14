@@ -22,7 +22,7 @@ uniform sampler2D u_potentialSpectrum;
 uniform int u_axis;  // 0=X, 1=Y, 2=Z
 uniform float u_gridSize;
 uniform float u_slicesPerRow;
-uniform float u_boxSize;
+uniform vec3 u_worldSize;
 
 const float PI = 3.14159265359;
 const float TWO_PI = 6.28318530718;
@@ -56,16 +56,18 @@ void main() {
   k.z = float(voxel.z <= N/2 ? voxel.z : voxel.z - N);
   
   // Scale to physical wave vector: k_phys = 2π * k_grid / L
-  k *= TWO_PI / u_boxSize;
+  k.x *= TWO_PI / u_worldSize.x;
+  k.y *= TWO_PI / u_worldSize.y;
+  k.z *= TWO_PI / u_worldSize.z;
   
   // Select component for this axis
   float k_component = (u_axis == 0) ? k.x : ((u_axis == 1) ? k.y : k.z);
   
   // Compute gradient: F(k) = -i·k·φ(k)
+  // For attractive gravity: F = -∇φ
+  // In Fourier space: ∇φ(k) = i·k·φ(k), so F(k) = -i·k·φ(k)
   // Multiplication by -i: (a + bi) * (-i) = b - ai
-  // Then multiply by k_component
-  // NOTE: For ATTRACTIVE gravity, we want F = -∇φ, so we use +i·k (not -i·k)
-  vec2 ik = vec2(0.0, k_component);  // +i·k as complex number (flipped sign for attractive force)
+  vec2 ik = vec2(0.0, -k_component);  // -i·k as complex number
   vec2 F_k = complexMul(ik, phi_k);
   
   // Output force spectrum for this axis (complex)

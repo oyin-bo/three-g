@@ -199,7 +199,7 @@ export function particleSystem({
         edges,
         springStrength,
         assignment: 'CIC',
-        poissonUseDiscrete: 1,
+        poissonUseDiscrete: 0,
         treePMSigma: 0.0
       });
       break;
@@ -226,7 +226,7 @@ export function particleSystem({
         edges,
         springStrength,
         assignment: 'CIC',
-        poissonUseDiscrete: 1,
+        poissonUseDiscrete: 0,
         treePMSigma: 0.0
       });
       break;

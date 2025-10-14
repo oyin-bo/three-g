@@ -76,16 +76,15 @@ export function computeGradient(psys, boxSize = null) {
   const slicesPerRow = psys.pmGrid.slicesPerRow;
   
   // Calculate box size from world bounds if not provided
-  if (boxSize === null) {
-    const bounds = psys.options?.worldBounds;
-    if (bounds) {
-      const dx = bounds.max[0] - bounds.min[0];
-      const dy = bounds.max[1] - bounds.min[1];
-      const dz = bounds.max[2] - bounds.min[2];
-      boxSize = Math.max(dx, dy, dz);
-    } else {
-      boxSize = 100.0; // Default fallback
-    }
+  const bounds = psys.options?.worldBounds;
+  let worldSize = [100.0, 100.0, 100.0];
+  if (bounds) {
+    const dx = bounds.max[0] - bounds.min[0];
+    const dy = bounds.max[1] - bounds.min[1];
+    const dz = bounds.max[2] - bounds.min[2];
+    worldSize = [dx, dy, dz];
+  } else if (boxSize != null) {
+    worldSize = [boxSize, boxSize, boxSize];
   }
   
   gl.viewport(0, 0, textureSize, textureSize);
@@ -105,7 +104,10 @@ export function computeGradient(psys, boxSize = null) {
   // Set common uniforms
   gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), gridSize);
   gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), slicesPerRow);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_boxSize'), boxSize);
+  gl.uniform3f(
+    gl.getUniformLocation(program, 'u_worldSize'),
+    worldSize[0], worldSize[1], worldSize[2]
+  );
   
   // Compute gradient for each axis
   const axes = [

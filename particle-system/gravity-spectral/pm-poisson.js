@@ -27,16 +27,17 @@ export function solvePoissonFFT(psys, gravitationalConstant, boxSize) {
     gravitationalConstant = 4.0 * Math.PI * G;
   }
   
-  // Calculate box size from world bounds
-  if (boxSize === undefined || boxSize === null) {
+  // Calculate world size (per-axis) from bounds; fallback to scalar boxSize if provided
+  let worldSize = [100.0, 100.0, 100.0];
+  {
     const bounds = psys.options.worldBounds;
     if (bounds) {
       const dx = bounds.max[0] - bounds.min[0];
       const dy = bounds.max[1] - bounds.min[1];
       const dz = bounds.max[2] - bounds.min[2];
-      boxSize = Math.max(dx, dy, dz);
-    } else {
-      boxSize = 100.0; // Default fallback
+      worldSize = [dx, dy, dz];
+    } else if (boxSize !== undefined && boxSize !== null) {
+      worldSize = [boxSize, boxSize, boxSize];
     }
   }
   
@@ -74,7 +75,10 @@ export function solvePoissonFFT(psys, gravitationalConstant, boxSize) {
   gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), gridSize);
   gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), slicesPerRow);
   gl.uniform1f(gl.getUniformLocation(program, 'u_gravitationalConstant'), gravitationalConstant);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_boxSize'), boxSize);
+  gl.uniform3f(
+    gl.getUniformLocation(program, 'u_worldSize'),
+    worldSize[0], worldSize[1], worldSize[2]
+  );
 
   // Extended controls per spec
   const useDiscrete = psys.options?.poissonUseDiscrete ?? 1; // default discrete k_eff
@@ -94,7 +98,7 @@ export function solvePoissonFFT(psys, gravitationalConstant, boxSize) {
   
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   
-  console.log(`[PM Poisson] Solved Poisson equation (4πG=${gravitationalConstant.toFixed(6)}, L=${boxSize.toFixed(2)})`);
+  console.log(`[PM Poisson] Solved Poisson equation (4πG=${gravitationalConstant.toFixed(6)}, L=[${worldSize.map(v=>v.toFixed(2)).join(', ')}])`);
 }
 
 /**
