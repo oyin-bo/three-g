@@ -13,9 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = normalize(join(__dirname));
 
-const DEBUG_FILE = join(ROOT, 'debug.js');
-const DEBUG_SNIPPET_LIMIT = 50;                    // per docs
-const DEBUG_HEADER_INTERVAL_MS = 1000;
+const DEBUG_FILE = join(ROOT, 'debug.md');
 const DEBUG_FILE_DEBOUNCE_MS = 150;
 
 const MIME = {
@@ -101,17 +99,9 @@ const Pages = (() => {
   return { getOrCreate, findByFragment, listForHeader, markLastCompleted, getLastCompleted, _all: () => PAGES };
 })();
 
-/* ─────────────────────────────── header formatting ──────────────────────────── */
+/* ─────────────────────────────── Markdown formatting ──────────────────────────── */
 
-const HeaderFmt = (() => {
-  function numberFmt(value) {
-    try { return Number(value).toLocaleString(); } catch { return String(value); }
-  }
-  function durationFmt(ms) {
-    if (!ms || ms < 1000) return `${numberFmt(ms || 0)}ms`;
-    const seconds = ms / 1000;
-    return seconds >= 10 ? `${numberFmt(Math.round(ms))}ms` : `${seconds.toFixed(1)}s`;
-  }
+const MarkdownFmt = (() => {
   function clockFmt(ms) {
     const d = new Date(ms);
     const hh = String(d.getHours()).padStart(2, '0');
@@ -119,53 +109,23 @@ const HeaderFmt = (() => {
     const ss = String(d.getSeconds()).padStart(2, '0');
     return `${hh}:${mm}:${ss}`;
   }
-  function snippet(code) {
-    const inline = code.replace(/\s+/g, ' ').trim();
-    return (inline.length <= DEBUG_SNIPPET_LIMIT) ? inline : `${inline.slice(0, DEBUG_SNIPPET_LIMIT - 1)}…`;
+  
+  function durationMs(startMs, endMs) {
+    if (!startMs || !endMs) return null;
+    return endMs - startMs;
   }
-  function idleLine(p) {
-    return `// ${p.name} ${p.url || '-'} ${clockFmt(p.last)} idle`;
-  }
-  function execLine(p) {
-    const j = p.current;
-    const snip = j ? j.snippet : '';
-    const startedTxt = (j && j.startedAt != null) ? clockFmt(j.startedAt) : '—';
-    return `// ${p.name} ${p.url || '-'} ${clockFmt(p.last)} executing "${snip}" job=${j ? j.id : '-'} started=${startedTxt}`;
-  }
-  function outcomeLine(p) {
-    const info = p.lastOutcome;
-    if (!info) return idleLine(p);
-    const dur = durationFmt(info.duration || 0);
-    if (info.status === 'ok') return `// ${p.name} ${p.url || '-'} ${clockFmt(p.last)} completed in ${dur} (result below)`;
-    const suffix = info.timeout ? '(timeout)' : '(see below)';
-    return `// ${p.name} ${p.url || '-'} ${clockFmt(p.last)} failed after ${dur} ${suffix}`;
-  }
-  function buildHeaderLines() {
+  
+  function buildConnectedPages() {
     const pages = Pages.listForHeader();
     if (!pages.length) return [];
-    const lines = [];
-    const used = new Set();
-
-    const exec = pages.find(p => p.state === 'executing' && p.current);
-    if (exec) { lines.push(execLine(exec)); used.add(exec.name); }
-    else {
-      const lastName = Pages.getLastCompleted();
-      if (lastName) {
-        const pinned = pages.find(p => p.name === lastName && p.lastOutcome);
-        if (pinned) { lines.push(outcomeLine(pinned)); used.add(pinned.name); }
-      }
-    }
+    const lines = ['# Connected pages:'];
     for (const p of pages) {
-      if (used.has(p.name)) continue;
-      lines.push(p.lastOutcome ? outcomeLine(p) : idleLine(p));
+      lines.push(`* [${p.name}](${p.url || 'http://localhost:8302/'}) last ${clockFmt(p.last)}`);
     }
     return lines;
   }
-  function introLine(kind, snip) {
-    const label = kind === 'result' ? 'eval result for' : 'eval error for';
-    return `// ${label}: ${snip}`;
-  }
-  return { snippet, buildHeaderLines, introLine };
+  
+  return { clockFmt, durationMs, buildConnectedPages };
 })();
 
 /* ─────────────────────────────── job lifecycle ──────────────────────────────── */
@@ -186,7 +146,7 @@ const Jobs = (() => {
       page: o.page,
       source: o.source,
       fragment: o.fragment || null,
-      snippet: HeaderFmt.snippet(o.code),
+      snippet: o.code.replace(/\s+/g, ' ').trim().slice(0, 100),
       requestedAt: Date.now(),
       startedAt: null,
       finishedAt: null
@@ -200,7 +160,6 @@ const Jobs = (() => {
     timers.set(job.id, t);
     job.timer = t;
     flushPendingPoll(page);
-    FileHarness.refreshHeader(true);
   }
 
   /** @param {Job} job */
@@ -223,13 +182,12 @@ const Jobs = (() => {
     page.lastOutcome = null;
     Pages.markLastCompleted(null);
 
-    if (job.source === 'file') FileHarness.clearBody();
+    if (job.source === 'file') FileHarness.writeExecutingStatus(job);
 
     // startedAt measures "script delivered → result returned".
-    res.once('finish', () => { job.startedAt = Date.now(); FileHarness.refreshHeader(true); });
+    res.once('finish', () => { job.startedAt = Date.now(); });
 
     if (page.pendingPoll && page.pendingPoll.res !== res) { clearTimeout(page.pendingPoll.timer); page.pendingPoll = null; }
-    FileHarness.refreshHeader(true);
 
     res.writeHead(200, {
       'Content-Type': MIME['.js'] || 'application/javascript',
@@ -294,12 +252,11 @@ const Jobs = (() => {
         } catch { }
       }
       job.res = null;
-      FileHarness.refreshHeader(true);
       return;
     }
 
-    // FILE MODE: write intro + payload body
-    FileHarness.finishFileJob(outcome.ok, job.snippet, outcome.ok ? outcome.value : outcome.error, errors);
+    // FILE MODE: write Markdown reply
+    FileHarness.writeReply(job, outcome.ok, outcome.ok ? outcome.value : outcome.error, errors);
   }
 
   function flushPendingPoll(page) {
@@ -316,77 +273,75 @@ const Jobs = (() => {
 /* ───────────────────────────────── file harness ─────────────────────────────── */
 
 const FileHarness = (() => {
-  /** @type {{ header: string[], body: string[], footer: string[], text: string }} */
-  const view = { header: [], body: [], footer: [], text: '' };
+  let fileText = '';
   let activeFileJob = /** @type {Job|null} */(null);
   let debugReadTimer;
-  let headerInterval;
-
-  // Matches server-written status header lines:
-  // // <name> <url|-> <HH:MM:SS> (idle|executing|completed|failed) ...
-  const HEADER_STATUS_RE =
-    /^\/\/\s+\S.*\s+(?:https?:\/\/\S+|-)\s+\d{2}:\d{2}:\d{2}\s+(?:idle|executing\b|completed\b|failed\b)/i;
-  // Matches server-written intro/body notes (not user requests):
-  // // eval result for: ..., // eval error for: ..., // invalid name..., // normal eval request...
-  const INTRO_OR_NOTE_RE =
-    /^\/\/\s+(?:eval\s+(?:result|error)\s+for:|invalid\s+name|normal\s+eval\s+request)/i;
+  let headerUpdateTimer;
 
   function boot() {
-    try { if (!existsSync(DEBUG_FILE)) writeFileSync(DEBUG_FILE, '', 'utf8'); } catch { }
-    readInitialState();
-    refreshHeader(false);
-    try { watch(DEBUG_FILE, debounceRead); } catch { }
-    headerInterval = setInterval(() => { refreshHeader(false); debounceRead(); }, DEBUG_HEADER_INTERVAL_MS);
-  }
-
-  function readInitialState() {
-    if (!existsSync(DEBUG_FILE)) { view.text = ''; view.header = []; view.body = []; view.footer = []; return; }
-    try {
-      const text = readFileSync(DEBUG_FILE, 'utf8');
-      view.text = text;
-      const lines = text.replace(/\r\n/g, '\n').split('\n');
-      if (lines.length && lines[lines.length - 1] === '') lines.pop();
-      const header = [], body = [], footer = [];
-      let section = 'header';
-      for (const line of lines) {
-        if (section === 'header') { if (!line.trim()) { section = 'body'; continue; } header.push(line); }
-        else if (section === 'body') { if (!line.trim()) { section = 'footer'; continue; } body.push(line); }
-        else { footer.push(line); }
+    try { 
+      if (!existsSync(DEBUG_FILE)) {
+        const init = '# Connected pages:\n\n';
+        writeFileSync(DEBUG_FILE, init, 'utf8');
+        fileText = init;
+      } else {
+        fileText = readFileSync(DEBUG_FILE, 'utf8');
       }
-      view.header = header; view.body = body; view.footer = footer;
-    } catch {
-      view.text = ''; view.header = []; view.body = []; view.footer = [];
-    }
+    } catch { }
+    try { watch(DEBUG_FILE, debounceRead); } catch { }
+    
+    // Periodically update the connected pages header
+    headerUpdateTimer = setInterval(() => {
+      updateConnectedPagesHeader();
+    }, 5000);  // Update every 5 seconds
   }
 
-  function refreshHeader(force) {
-    const header = HeaderFmt.buildHeaderLines();
-    if (!existsSync(DEBUG_FILE)) return;
-
-    // If body exists and there is no outcome line in the header, don't churn it.
-    if (view.body.length) {
-      const hasOutcomeLine = header.some((line) => /\b(completed|failed)\b/.test(line));
-      if (!hasOutcomeLine) return;
+  function updateConnectedPagesHeader() {
+    const header = MarkdownFmt.buildConnectedPages();
+    const lines = fileText.split('\n');
+    
+    // Find where connected pages section ends
+    let headerStart = -1;
+    let headerEnd = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('# Connected pages:')) {
+        headerStart = i;
+        // Find the end of this section (first non-list item or blank followed by content)
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j] === '' && j + 1 < lines.length && lines[j + 1] !== '') {
+            headerEnd = j;
+            break;
+          } else if (!lines[j].startsWith('*') && lines[j] !== '') {
+            headerEnd = j;
+            break;
+          } else if (j === lines.length - 1) {
+            headerEnd = j + 1;
+            break;
+          }
+        }
+        break;
+      }
     }
-
-    if (!force && arraysEqual(header, view.header)) return;
-    writeDebugFile(header, view.body, view.footer);
-  }
-
-  function writeDebugFile(header, body, footer) {
-    view.header = header.slice();
-    view.body = body.slice();
-    view.footer = footer.slice();
-
-    const sections = [];
-    sections.push(...header);
-    if (body.length) { if (sections.length) sections.push(''); sections.push(...body); }
-    if (footer.length) { if (sections.length) sections.push(''); sections.push(...footer); }
-    const text = sections.join('\n');
-    const output = text ? `${text}\n` : '';
-    if (output === view.text) return;
-    view.text = output;
-    writeFileSync(DEBUG_FILE, output, 'utf8');
+    
+    if (headerStart === -1) {
+      // No header found, add it at the beginning
+      const newLines = [...header, '', ...lines];
+      const newText = newLines.join('\n');
+      if (newText !== fileText) {
+        fileText = newText;
+        writeFileSync(DEBUG_FILE, fileText, 'utf8');
+      }
+    } else {
+      // Replace existing header
+      const beforeHeader = lines.slice(0, headerStart);
+      const afterHeader = lines.slice(headerEnd);
+      const newLines = [...beforeHeader, ...header, ...afterHeader];
+      const newText = newLines.join('\n');
+      if (newText !== fileText) {
+        fileText = newText;
+        writeFileSync(DEBUG_FILE, fileText, 'utf8');
+      }
+    }
   }
 
   function debounceRead() {
@@ -394,132 +349,219 @@ const FileHarness = (() => {
     debugReadTimer = setTimeout(() => {
       debugReadTimer = undefined;
       let text = '';
-      try { text = readFileSync(DEBUG_FILE, 'utf8'); } catch { readInitialState(); return; }
-      if (text === view.text) return;
+      try { text = readFileSync(DEBUG_FILE, 'utf8'); } catch { return; }
+      if (text === fileText) return;
       onFileChanged(text);
     }, DEBUG_FILE_DEBOUNCE_MS);
   }
 
   function onFileChanged(text) {
+    fileText = text;
     const normalized = text.replace(/\r\n/g, '\n');
-    view.text = text;
+    
+    // Parse Markdown to find agent requests
+    // Format: **agent** to <page-fragment> at HH:MM:SS
+    // followed by ```JS or ```js fence with code
+    const agentRequestRE = /^\*\*(\S+)\*\*\s+to\s+(\S+)\s+at\s+(\d{2}:\d{2}:\d{2})\s*$/;
     const lines = normalized.split('\n');
-
-    // 1) Skip any top header/status lines and blanks.
-    let i = 0;
-    while (i < lines.length) {
+    
+    let i = lines.length - 1;
+    // Scan from bottom up to find the most recent agent request
+    while (i >= 0) {
       const line = lines[i];
-      if (!line.trim()) { i += 1; continue; }
-      if (HEADER_STATUS_RE.test(line)) { i += 1; continue; }
-      break;
+      const match = agentRequestRE.exec(line);
+      if (match) {
+        const agent = match[1];
+        const pageFragment = match[2];
+        const timeStr = match[3];
+        
+        // Look for code fence immediately after
+        let codeStart = -1;
+        let codeEnd = -1;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].startsWith('```')) {
+            if (codeStart === -1) {
+              codeStart = j + 1;
+            } else {
+              codeEnd = j;
+              break;
+            }
+          }
+        }
+        
+        if (codeStart > 0 && codeEnd > codeStart) {
+          // Check if there's already a reply for this request
+          let hasReply = false;
+          for (let j = codeEnd + 1; j < lines.length; j++) {
+            const replyLine = lines[j];
+            // Check for reply format: **<page>** to <agent>
+            if (replyLine.match(/^\*\*\S+\*\*\s+to\s+\S+/)) {
+              // Check if it's a reply to this request (same page and close time)
+              if (replyLine.includes(`to ${agent}`)) {
+                hasReply = true;
+                break;
+              }
+            }
+            // Check for next request
+            if (agentRequestRE.test(replyLine)) break;
+          }
+          
+          if (!hasReply) {
+            const code = lines.slice(codeStart, codeEnd).join('\n');
+            handleFileRequest(pageFragment, code, agent, timeStr);
+            return;
+          }
+        }
+      }
+      i--;
     }
-
-    // 2) Find first comment line that is NOT a server status/intro/note → that's the fragment.
-    let requestIndex = -1;
-    for (; i < lines.length; i++) {
-      const line = lines[i];
-      if (!line.trim()) continue;
-      if (!line.startsWith('//')) continue;
-      if (HEADER_STATUS_RE.test(line) || INTRO_OR_NOTE_RE.test(line)) continue;
-      requestIndex = i;
-      break;
-    }
-
-    if (requestIndex === -1) { refreshHeader(true); return; }
-
-    const fragment = lines[requestIndex].slice(2).trim();
-    const code = lines.slice(requestIndex + 1).join('\n');
-    handleFileRequest(fragment, code);
   }
 
-  function handleFileRequest(fragment, code) {
-    if (!fragment) {
-      const hdr = HeaderFmt.buildHeaderLines();
-      writeDebugFile(hdr, [
-        `// invalid page name "${fragment}"${fragment.length > 10 ? ', consider shorter pattern' : ''}`,
-        '// correct eval request should include the page name comment header, then JavaScript snippet directly below'
-      ], []);
-      return;
-    }
+  function handleFileRequest(fragment, code, agent, timeStr) {
     if (!code.trim()) return;
     if (activeFileJob && !activeFileJob.done) return;
 
     const page = Pages.findByFragment(fragment);
-    if (!page) {
-      if (!/invalid\s+page/i.test(fragment)) {
-        const hdr = HeaderFmt.buildHeaderLines();
-        writeDebugFile(hdr, [
-          `// invalid page name "${fragment}"${fragment.length > 10 ? ', consider shorter pattern' : ''}`,
-          '// correct eval request should include the page name comment header, then JavaScript snippet directly below'
-        ], []);
-      }
-      return;
-    }
+    if (!page) return;
 
     const job = Jobs.create({ code, page, source: 'file', fragment });
+    job.agentName = agent;
+    job.requestTime = timeStr;
     activeFileJob = job;
     Jobs.enqueue(page, job);
   }
 
-  function clearBody() { view.body = []; view.footer = []; }
+  function writeExecutingStatus(job) {
+    // Append "executing ..." status after the request
+    const lines = fileText.split('\n');
+    const agentRequestRE = /^\*\*(\S+)\*\*\s+to\s+(\S+)\s+at\s+(\d{2}:\d{2}:\d{2})\s*$/;
+    
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const match = agentRequestRE.exec(lines[i]);
+      if (match && match[1] === job.agentName && match[3] === job.requestTime) {
+        // Find code fence end
+        let codeEnd = -1;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j] === '```') {
+            codeEnd = j;
+            break;
+          }
+        }
+        
+        if (codeEnd > 0) {
+          // Check if executing status already exists
+          if (lines[codeEnd + 1] !== '' || !lines[codeEnd + 2]?.startsWith('**')) {
+            lines.splice(codeEnd + 1, 0, '', `**${job.page.name}** to ${job.agentName} at ${MarkdownFmt.clockFmt(Date.now())}  `, 'executing ...');
+            fileText = lines.join('\n');
+            writeFileSync(DEBUG_FILE, fileText, 'utf8');
+          }
+        }
+        break;
+      }
+    }
+  }
 
-  function finishFileJob(ok, snippet, payload, errors) {
+  function writeReply(job, ok, payload, errors) {
     activeFileJob = null;
-    const header = HeaderFmt.buildHeaderLines();
+    
+    // Build reply content
+    const now = Date.now();
+    const duration = MarkdownFmt.durationMs(job.startedAt, now);
+    const durationText = duration !== null ? `${duration}ms` : '';
+    const errorPrefix = ok ? '' : '**ERROR** after ';
+    
+    let replyHeader = `**${job.page.name}** to ${job.agentName || 'agent'} at ${MarkdownFmt.clockFmt(now)}`;
+    if (errorPrefix || durationText) {
+      replyHeader += ` (${errorPrefix}${durationText})`;
+    }
+    
+    let lang = 'JSON';
+    let content = '';
+    
     if (ok) {
-      const body = buildResultBody(payload, errors || []);
-      writeDebugFile(header, [HeaderFmt.introLine('result', snippet), ...body], []);
+      try {
+        content = JSON.stringify(payload, null, 2) || 'null';
+      } catch {
+        content = String(payload);
+        lang = 'Text';
+      }
     } else {
-      const body = buildErrorBody(payload, errors || []);
-      writeDebugFile(header, [HeaderFmt.introLine('error', snippet), ...body], []);
+      const errorObj = payload && typeof payload === 'object' && payload.stack ? payload.stack : payload;
+      content = String(errorObj);
+      lang = 'Error';
     }
-  }
-
-  function arraysEqual(a, b) {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-    return true;
-  }
-
-  function buildResultBody(value, errors) {
-    const json = JSON.stringify(value, null, 2) || 'null';
-    const lines = json.split('\n');
-    const body = [`var result = ${lines[0] || ''}`];
-    for (let i = 1; i < lines.length; i++) body.push(lines[i]);
     
-    // Append errors as comment block if any
+    // Append errors if any
     if (errors && errors.length > 0) {
-      body.push('');
-      body.push('/*');
+      content += '\n\n/* Captured errors:\n';
       for (const err of errors) {
-        body.push(String(err));
-        body.push('---');
+        content += String(err) + '\n---\n';
       }
-      body.push('*/');
+      content += '*/';
     }
     
-    return body;
-  }
-
-  function buildErrorBody(error, errors) {
-    const text = error && typeof error === 'object' && error.stack ? String(error.stack) : String(error);
-    const body = text.split('\n');
+    // Update connected pages header and append reply
+    const header = MarkdownFmt.buildConnectedPages();
+    const lines = fileText.split('\n');
     
-    // Append errors as comment block if any
-    if (errors && errors.length > 0) {
-      body.push('');
-      body.push('/*');
-      for (const err of errors) {
-        body.push(String(err));
-        body.push('---');
+    // Find where connected pages section ends
+    let headerEnd = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('# Connected pages:')) {
+        // Find the end of this section (first blank line or next section)
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j] === '' || lines[j].startsWith('#')) {
+            headerEnd = j;
+            break;
+          }
+        }
+        break;
       }
-      body.push('*/');
     }
     
-    return body;
+    // Remove executing status if it exists
+    const agentRequestRE = /^\*\*(\S+)\*\*\s+to\s+(\S+)\s+at\s+(\d{2}:\d{2}:\d{2})\s*$/;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const match = agentRequestRE.exec(lines[i]);
+      if (match && match[1] === job.agentName && match[3] === job.requestTime) {
+        // Find code fence end
+        let codeEnd = -1;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j] === '```') {
+            codeEnd = j;
+            break;
+          }
+        }
+        
+        if (codeEnd > 0 && lines[codeEnd + 3] === 'executing ...') {
+          // Remove the executing status (blank line, page name, "executing ...")
+          lines.splice(codeEnd + 1, 3);
+        }
+        break;
+      }
+    }
+    
+    // Replace header
+    const beforeHeader = lines.slice(0, headerEnd > 0 ? lines.findIndex(l => l.startsWith('# Connected pages:')) : 0);
+    const afterHeader = lines.slice(headerEnd || 0);
+    
+    const newLines = [
+      ...header,
+      '',
+      ...afterHeader.filter(l => l !== ''),  // Remove extra blank lines
+      '',
+      replyHeader,
+      '```' + lang,
+      content,
+      '```',
+      ''
+    ];
+    
+    fileText = newLines.join('\n');
+    writeFileSync(DEBUG_FILE, fileText, 'utf8');
   }
 
-  return { boot, refreshHeader, clearBody, finishFileJob };
+  return { boot, writeExecutingStatus, writeReply };
 })();
 
 /* ───────────────────────────────── client script ────────────────────────────── */
