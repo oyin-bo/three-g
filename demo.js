@@ -72,7 +72,7 @@ const profilerOutput = /** @type {HTMLDivElement} */ (
 // 3. Initialize state
 const gl = /** @type {WebGL2RenderingContext} */ (renderer.getContext());
 
-let particleCount = 500000;
+let particleCount = 50000;
 const worldBounds = /** @type {{ min: [number, number, number], max: [number, number, number] }} */ ({
   min: [-2, -0.1, -2],
   max: [2, 0.1, 2]
@@ -83,6 +83,8 @@ let graphForcesEnabled = false;
 let calculationMethod = "quadrupole"; // Default to quadrupole
 let frameCount = 0;
 let lastProfileUpdate = 0;
+
+countInput.value = particleCount.toLocaleString();
 
 const originalTitle = document.title;
 const gravityIndex = originalTitle.indexOf("Gravity");

@@ -75,16 +75,17 @@ export function meshSolvePoisson(psys, options = {}) {
 
   const fourPiG = options.fourPiG ?? (4.0 * Math.PI * (psys.options.gravityStrength || 0.0003));
 
-  let boxSize = options.boxSize;
-  if (boxSize === undefined) {
+  // Calculate world size (per-axis) from bounds; fallback to scalar boxSize if provided
+  let worldSize = [100.0, 100.0, 100.0];
+  {
     const bounds = psys.options.worldBounds || null;
     if (bounds) {
       const dx = bounds.max[0] - bounds.min[0];
       const dy = bounds.max[1] - bounds.min[1];
       const dz = bounds.max[2] - bounds.min[2];
-      boxSize = Math.max(dx, dy, dz);
-    } else {
-      boxSize = 100.0;
+      worldSize = [dx, dy, dz];
+    } else if (options.boxSize !== undefined && options.boxSize !== null) {
+      worldSize = [options.boxSize, options.boxSize, options.boxSize];
     }
   }
 
@@ -111,7 +112,10 @@ export function meshSolvePoisson(psys, options = {}) {
   gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), pmGrid.gridSize);
   gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), pmGrid.slicesPerRow);
   gl.uniform1f(gl.getUniformLocation(program, 'u_gravitationalConstant'), fourPiG);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_boxSize'), boxSize);
+  gl.uniform3f(
+    gl.getUniformLocation(program, 'u_worldSize'),
+    worldSize[0], worldSize[1], worldSize[2]
+  );
 
   const meshConfig = psys.meshConfig || {};
   const splitMode = options.splitMode ?? (meshConfig.splitSigma > 0 ? 2 : meshConfig.kCut > 0 ? 1 : 0);

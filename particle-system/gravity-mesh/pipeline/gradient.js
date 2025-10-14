@@ -65,17 +65,16 @@ export function meshComputeGradient(psys, options = {}) {
     throw new Error('Mesh Gradient resources not initialized');
   }
 
-  let boxSize = options.boxSize;
-  if (boxSize === undefined) {
-    const bounds = psys.options.worldBounds || null;
-    if (bounds) {
-      const dx = bounds.max[0] - bounds.min[0];
-      const dy = bounds.max[1] - bounds.min[1];
-      const dz = bounds.max[2] - bounds.min[2];
-      boxSize = Math.max(dx, dy, dz);
-    } else {
-      boxSize = 100.0;
-    }
+  // Calculate world size (per-axis) from bounds; fallback to scalar boxSize if provided
+  const bounds = psys.options.worldBounds || null;
+  let worldSize = [100.0, 100.0, 100.0];
+  if (bounds) {
+    const dx = bounds.max[0] - bounds.min[0];
+    const dy = bounds.max[1] - bounds.min[1];
+    const dz = bounds.max[2] - bounds.min[2];
+    worldSize = [dx, dy, dz];
+  } else if (options.boxSize != null) {
+    worldSize = [options.boxSize, options.boxSize, options.boxSize];
   }
 
   gl.viewport(0, 0, pmGrid.size, pmGrid.size);
@@ -90,7 +89,10 @@ export function meshComputeGradient(psys, options = {}) {
   gl.uniform1i(gl.getUniformLocation(program, 'u_potentialSpectrum'), 0);
   gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), pmGrid.gridSize);
   gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), pmGrid.slicesPerRow);
-  gl.uniform1f(gl.getUniformLocation(program, 'u_boxSize'), boxSize);
+  gl.uniform3f(
+    gl.getUniformLocation(program, 'u_worldSize'),
+    worldSize[0], worldSize[1], worldSize[2]
+  );
 
   const axes = [
     { axisIndex: 0, target: forceSpectrum.x },

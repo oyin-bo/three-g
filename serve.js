@@ -422,8 +422,8 @@ const FileHarness = (() => {
     if (!fragment) {
       const hdr = HeaderFmt.buildHeaderLines();
       writeDebugFile(hdr, [
-        `// invalid name${fragment.length > 10 ? ', consider shorter pattern: ' : ':'}${fragment}`,
-        '// normal eval request should include page name comment header, then JavaScript snippet'
+        `// invalid page name "${fragment}"${fragment.length > 10 ? ', consider shorter pattern' : ''}`,
+        '// correct eval request should include the page name comment header, then JavaScript snippet directly below'
       ], []);
       return;
     }
@@ -432,11 +432,11 @@ const FileHarness = (() => {
 
     const page = Pages.findByFragment(fragment);
     if (!page) {
-      if (!/invalid\s+name/i.test(fragment)) {
+      if (!/invalid\s+page/i.test(fragment)) {
         const hdr = HeaderFmt.buildHeaderLines();
         writeDebugFile(hdr, [
-          `// invalid name${fragment.length > 10 ? ', consider shorter pattern: ' : ':'}${fragment}`,
-          '// normal eval request should include page name comment header, then JavaScript snippet'
+          `// invalid page name "${fragment}"${fragment.length > 10 ? ', consider shorter pattern' : ''}`,
+          '// correct eval request should include the page name comment header, then JavaScript snippet directly below'
         ], []);
       }
       return;
