@@ -1,0 +1,216 @@
+// @ts-check
+
+/**
+ * IntegrateVelocityKernel - Updates particle velocities from forces
+ * 
+ * Applies F = ma and damping to update velocities with optional speed clamping.
+ * Follows the WebGL2 Kernel contract from docs/8-webgl-kernels.md.
+ */
+
+import fsQuadVert from '../shaders/fullscreen.vert.js';
+import velIntegrateFrag from '../shaders/vel_integrate.frag.js';
+
+export class KIntegrateVelocity {
+  /**
+   * @param {{
+   *   gl: WebGL2RenderingContext,
+   *   inVelocity?: WebGLTexture|null,
+   *   inForce?: WebGLTexture|null,
+   *   inPosition?: WebGLTexture|null,
+   *   outVelocity?: WebGLTexture|null,
+   *   width?: number,
+   *   height?: number,
+   *   dt?: number,
+   *   damping?: number,
+   *   maxSpeed?: number,
+   *   maxAccel?: number
+   * }} options
+   */
+  constructor(options) {
+    this.gl = options.gl;
+    
+    // Resource slots - follow kernel contract
+    this.inVelocity = options.inVelocity !== undefined ? options.inVelocity : null;
+    this.inForce = options.inForce !== undefined ? options.inForce : null;
+    this.inPosition = options.inPosition !== undefined ? options.inPosition : null;
+    this.outVelocity = options.outVelocity !== undefined ? options.outVelocity : null;
+    
+    // Texture dimensions
+    this.width = options.width || 0;
+    this.height = options.height || 0;
+    
+    // Physics parameters
+    this.dt = options.dt !== undefined ? options.dt : (1 / 60);
+    this.damping = options.damping !== undefined ? options.damping : 0.0;
+    this.maxSpeed = options.maxSpeed !== undefined ? options.maxSpeed : 2.0;
+    this.maxAccel = options.maxAccel !== undefined ? options.maxAccel : 1.0;
+    
+    // Create shader program
+    // Compile and link shader program (inline, like KPyramidBuild)
+    const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
+    if (!vert) throw new Error('Failed to create vertex shader');
+    this.gl.shaderSource(vert, fsQuadVert);
+    this.gl.compileShader(vert);
+    if (!this.gl.getShaderParameter(vert, this.gl.COMPILE_STATUS)) {
+      const info = this.gl.getShaderInfoLog(vert);
+      this.gl.deleteShader(vert);
+      throw new Error(`Vertex shader compile failed: ${info}`);
+    }
+
+    const frag = this.gl.createShader(this.gl.FRAGMENT_SHADER);
+    if (!frag) throw new Error('Failed to create fragment shader');
+    this.gl.shaderSource(frag, velIntegrateFrag);
+    this.gl.compileShader(frag);
+    if (!this.gl.getShaderParameter(frag, this.gl.COMPILE_STATUS)) {
+      const info = this.gl.getShaderInfoLog(frag);
+      this.gl.deleteShader(frag);
+      throw new Error(`Fragment shader compile failed: ${info}`);
+    }
+
+    this.program = this.gl.createProgram();
+    if (!this.program) throw new Error('Failed to create program');
+    this.gl.attachShader(this.program, vert);
+    this.gl.attachShader(this.program, frag);
+    this.gl.linkProgram(this.program);
+    if (!this.gl.getProgramParameter(this.program, this.gl.LINK_STATUS)) {
+      const info = this.gl.getProgramInfoLog(this.program);
+      this.gl.deleteProgram(this.program);
+      throw new Error(`Program link failed: ${info}`);
+    }
+
+    this.gl.deleteShader(vert);
+    this.gl.deleteShader(frag);
+
+    // Create quad VAO
+    const quadVAO = this.gl.createVertexArray();
+    if (!quadVAO) throw new Error('Failed to create VAO');
+    this.gl.bindVertexArray(quadVAO);
+    const buffer = this.gl.createBuffer();
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
+    const quadVertices = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, quadVertices, this.gl.STATIC_DRAW);
+    this.gl.enableVertexAttribArray(0);
+    this.gl.vertexAttribPointer(0, 2, this.gl.FLOAT, false, 0, 0);
+    this.gl.bindVertexArray(null);
+    this.quadVAO = quadVAO;
+    
+    // Create an internal framebuffer (configured per-run). Keep a small
+    // shadow of attachments so run() can rebind only when they change.
+    this.outFramebuffer = this.gl.createFramebuffer();
+    /** @type {{ a0: WebGLTexture } | null} */
+    this._fboShadow = null;
+  }
+  
+  /**
+   * @param {string} vertSrc
+   * @param {string} fragSrc
+   * @returns {WebGLProgram}
+   */
+  // shader program and VAO built inline in constructor; helper methods removed
+  
+  /**
+   * @param {WebGLTexture} texture
+   * @returns {WebGLFramebuffer}
+   */
+  _createFramebuffer(texture) {
+    const gl = this.gl;
+    const fbo = gl.createFramebuffer();
+    if (!fbo) throw new Error('Failed to create framebuffer');
+    
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new Error(`Framebuffer incomplete: ${status}`);
+    }
+    
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return fbo;
+  }
+  
+  /**
+   * Run the kernel (synchronous)
+   */
+  run() {
+    const gl = this.gl;
+    
+    if (!this.inVelocity || !this.inForce || !this.inPosition || !this.outVelocity) {
+      throw new Error('KIntegrateVelocity: missing required textures');
+    }
+    
+    gl.useProgram(this.program);
+    
+    // Ensure framebuffer attachments match our output
+    if (!this._fboShadow?.a0 !== this.outVelocity) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outVelocity, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+      const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+      if (status !== gl.FRAMEBUFFER_COMPLETE) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        throw new Error(`Framebuffer incomplete: ${status}`);
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+      this._fboShadow = { a0: this.outVelocity };
+    }
+
+    // Bind output framebuffer
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
+    gl.viewport(0, 0, this.width, this.height);
+    
+    // Setup GL state
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.colorMask(true, true, true, true);
+    
+    // Bind input textures
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.inVelocity);
+    gl.uniform1i(gl.getUniformLocation(this.program, 'u_velocity'), 0);
+    
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.inForce);
+    gl.uniform1i(gl.getUniformLocation(this.program, 'u_force'), 1);
+    
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.inPosition);
+    gl.uniform1i(gl.getUniformLocation(this.program, 'u_position'), 2);
+    
+    // Set uniforms
+    gl.uniform2f(gl.getUniformLocation(this.program, 'u_texSize'), this.width, this.height);
+    gl.uniform1f(gl.getUniformLocation(this.program, 'u_dt'), this.dt);
+    gl.uniform1f(gl.getUniformLocation(this.program, 'u_damping'), this.damping);
+    gl.uniform1f(gl.getUniformLocation(this.program, 'u_maxSpeed'), this.maxSpeed);
+    gl.uniform1f(gl.getUniformLocation(this.program, 'u_maxAccel'), this.maxAccel);
+    
+    // Draw
+    gl.bindVertexArray(this.quadVAO);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+    
+    // Unbind
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+  
+  /**
+   * Dispose all resources
+   */
+  dispose() {
+    const gl = this.gl;
+
+    if (this.program) gl.deleteProgram(this.program);
+    if (this.quadVAO) gl.deleteVertexArray(this.quadVAO);
+    if (this.outFramebuffer) gl.deleteFramebuffer(this.outFramebuffer);
+
+    if (this.inVelocity) gl.deleteTexture(this.inVelocity);
+    if (this.inForce) gl.deleteTexture(this.inForce);
+    if (this.inPosition) gl.deleteTexture(this.inPosition);
+    if (this.outVelocity) gl.deleteTexture(this.outVelocity);
+
+    this._fboShadow = null;
+  }
+}
