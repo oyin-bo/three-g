@@ -129,8 +129,8 @@ export function readPotentialSpectrum(psys, x, y) {
     0
   );
   
-  const data = new Float32Array(4);
-  gl.readPixels(x, y, 1, 1, gl.RGBA, gl.FLOAT, data);
+  const data = new Float32Array(2);
+  gl.readPixels(x, y, 1, 1, gl.RG, gl.FLOAT, data);
   
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   

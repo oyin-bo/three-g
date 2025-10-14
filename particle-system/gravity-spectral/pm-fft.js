@@ -66,7 +66,9 @@ export function convertRealToComplex(psys) {
   while (gl.getError() !== gl.NO_ERROR);
   
   gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, psys.pmGrid.texture);
+  // Prefer the single-channel mass texture if available
+  const massSource = psys.pmMassTexture || psys.pmGrid.texture;
+  gl.bindTexture(gl.TEXTURE_2D, massSource);
   gl.uniform1i(gl.getUniformLocation(psys._realToComplexProgram, 'u_massGrid'), 0);
   
   gl.bindVertexArray(psys.quadVAO);
@@ -192,8 +194,8 @@ export function perform3DFFT(psys, inverse = false) {
     
     // After all stages, ensure result is in primary texture
     if (numStages % 2 === 1) {
-      // Copy from pingPong back to primary
-      copyTexture(gl, spectrum.pingPong, spectrum.texture, textureSize);
+      // Copy from pingPong back to primary (use robust copy with fallback)
+      copyTexture(psys, spectrum.pingPong, spectrum.texture, textureSize);
       if (collectSnapshots) {
         const stats = inspectTexture(gl, spectrum.texture, textureSize, textureSize, 'RG', `FFT axis ${axis} final copy`);
         psys['_fftStageSnapshots'].push({ axis, stage: 'finalCopy', target: 'spectrum', stats });
@@ -215,21 +217,86 @@ export function perform3DFFT(psys, inverse = false) {
 
 /**
  * Copy texture (helper)
- * @param {WebGL2RenderingContext} gl
+ * Attempts a direct GPU copy and falls back to a shader blit if formats are incompatible.
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  * @param {WebGLTexture} src
  * @param {WebGLTexture} dst
  * @param {number} size
  */
-function copyTexture(gl, src, dst, size) {
+function copyTexture(psys, src, dst, size) {
+  // Robust copy helper: try direct GPU copy, fall back to a shader blit if formats
+  // are incompatible (avoids GL_INVALID_OPERATION from copyTexSubImage2D).
+  const gl = psys.gl;
+
+  // Try fast path: copyTexSubImage2D from a READ_FRAMEBUFFER bound to src
   const fbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, src, 0);
-  
+
   gl.bindTexture(gl.TEXTURE_2D, dst);
   gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, size, size);
-  
+  let err = gl.getError();
+
   gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
+
+  if (err === gl.NO_ERROR) {
+    return; // fast path succeeded
+  }
+
+  // Fallback: shader blit that samples the source and writes explicit channels.
+  // Cache blit program on psys to avoid recompiling every frame.
+  if (!psys._blitProgram) {
+    const vert = `#version 300 es
+      in vec2 a_position;
+      out vec2 v_uv;
+      void main() {
+        v_uv = a_position * 0.5 + 0.5;
+        gl_Position = vec4(a_position, 0.0, 1.0);
+      }`;
+    const frag = `#version 300 es
+      precision highp float;
+      in vec2 v_uv;
+      uniform sampler2D u_src;
+      out vec4 outColor;
+      void main() {
+        vec2 c = texture(u_src, v_uv).rg;
+        // Write into RG components explicitly; remaining channels are zero.
+        outColor = vec4(c.r, c.g, 0.0, 0.0);
+      }`;
+    psys._blitProgram = psys.createProgram(vert, frag);
+  }
+
+  // Draw a fullscreen quad sampling src and rendering into dst
+  const blitProg = psys._blitProgram;
+  const drawFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, drawFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst, 0);
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    console.error('[PM FFT] Blit framebuffer incomplete:', status);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(drawFbo);
+    return;
+  }
+
+  gl.viewport(0, 0, size, size);
+  gl.disable(gl.DEPTH_TEST);
+  gl.disable(gl.BLEND);
+
+  gl.useProgram(blitProg);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, src);
+  gl.uniform1i(gl.getUniformLocation(blitProg, 'u_src'), 0);
+
+  gl.bindVertexArray(psys.quadVAO);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindVertexArray(null);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(drawFbo);
 }
 
 /**
@@ -318,14 +385,9 @@ export function inverseFFTToReal(psys, inputSpectrum, outputReal) {
     inspectTexture(gl, inputSpectrum, textureSize, textureSize, 'RG', 'inverseFFTToReal input spectrum');
   }
   
-  // First, copy input spectrum to working spectrum texture
-  const tempFbo = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, tempFbo);
-  gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, inputSpectrum, 0);
-  gl.bindTexture(gl.TEXTURE_2D, psys.pmSpectrum.texture);
-  gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, textureSize, textureSize);
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-  gl.deleteFramebuffer(tempFbo);
+  // First, copy input spectrum to working spectrum texture using robust helper
+  // This will try a fast GPU copy and fall back to a shader blit if formats differ.
+  copyTexture(psys, inputSpectrum, psys.pmSpectrum.texture, textureSize);
   
   // Debug: verify copy
   if (debugFFT) {
@@ -345,7 +407,7 @@ export function inverseFFTToReal(psys, inputSpectrum, outputReal) {
     void main() {
       vec2 complex = texture(u_complexTexture, v_uv).rg;
       float realPart = complex.r; // Extract real component
-      outColor = vec4(realPart, 0.0, 0.0, realPart); // Store in R and A
+      outColor = vec4(realPart, 0.0, 0.0, 0.0); // Store real part in R only
     }
   `;
   

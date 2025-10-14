@@ -22,15 +22,17 @@ export function createPMGrid(gl, gridSize = 64) {
   const texture = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texture);
   
-  // RGBA32F for mass (alpha channel) + potential for additional data
+  // Single-channel R32F for mass (we only store scalar mass per voxel).
+  // This reduces memory and avoids channel-mismatches when copying into
+  // RG32F FFT working buffers. Use gl.RED / gl.R32F with float type.
   gl.texImage2D(
     gl.TEXTURE_2D,
     0,
-    gl.RGBA32F,
+    gl.R32F,
     textureSize,
     textureSize,
     0,
-    gl.RGBA,
+    gl.RED,
     gl.FLOAT,
     null
   );

@@ -27,7 +27,7 @@ import {
 import { updateWorldBoundsFromTexture } from '../utils/bounds.js';
 import { GPUProfiler } from '../utils/gpu-profiler.js';
 import { integratePhysics } from '../utils/integrator.js';
-import { pmDebugRunSingle } from './debug/index.js';
+import { pmDebugRunSingle, pmDebugInit } from './debug/index.js';
 import { createPMDepositProgram } from './pm-deposit.js';
 import { createPMGrid, createPMGridFramebuffer } from './pm-grid.js';
 import { computePMForcesSync } from './pm-pipeline.js';
@@ -243,9 +243,10 @@ export class ParticleSystemSpectral {
       // FFT program and spectrum textures
       this.pmFFTProgram = this.createProgram(fsQuadVert, fftFrag);
 
-      const spectrumTexture = createRGBA32Texture();
+      // Working FFT spectrum: use RG32F to store complex (real, imag) pairs.
+      const spectrumTexture = createRG32Texture();
       const spectrumFBO = createFramebufferForTexture(spectrumTexture);
-      const pingPongTexture = createRGBA32Texture();
+      const pingPongTexture = createRG32Texture();
       const pingPongFBO = createFramebufferForTexture(pingPongTexture);
 
       this.pmSpectrum = {
@@ -259,7 +260,8 @@ export class ParticleSystemSpectral {
         height: textureSize
       };
 
-      const densityTexture = createRGBA32Texture();
+      // Density spectrum should also be RG32F (real/imag channels)
+      const densityTexture = createRG32Texture();
       const densityFBO = createFramebufferForTexture(densityTexture);
       this.pmDensitySpectrum = {
         texture: densityTexture,
@@ -269,6 +271,25 @@ export class ParticleSystemSpectral {
         width: textureSize,
         height: textureSize
       };
+
+      // Mass-only texture (single-channel R32F) to receive deposition outputs
+      const createMassTexture = () => {
+        const tex = gl.createTexture();
+        if (!tex) throw new Error('Failed to create PM mass texture');
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, textureSize, textureSize, 0, gl.RED, gl.FLOAT, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        return tex;
+      };
+
+      const massTexture = createMassTexture();
+      const massFBO = createFramebufferForTexture(massTexture);
+      this.pmMassTexture = massTexture;
+      this.pmMassFBO = massFBO;
 
       // Poisson solver resources
       this.pmPoissonProgram = this.createProgram(fsQuadVert, poissonFrag);
@@ -349,6 +370,21 @@ export class ParticleSystemSpectral {
       gl.disable(gl.SCISSOR_TEST);
 
       finished = true;
+
+      // Developer convenience: expose the constructed psys and debug hooks
+      // on window so the file-based REPL can invoke staging/debug helpers.
+      try {
+        if (typeof window !== 'undefined') {
+          // Attach a reference to this particle system for quick REPL access
+          window.psys = window.psys || this;
+          // Expose wrapper functions bound to this instance
+          window.pmDebugRunSingle = (stage, source, sink) => pmDebugRunSingle(this, stage, source, sink);
+          window.pmDebugInit = (cfg) => pmDebugInit(this, cfg);
+        }
+      } catch (e) {
+        // Swallow: this is only a developer convenience and must not throw
+        console.warn('Failed to attach psys debug helpers to window:', e && e.message);
+      }
     } finally {
       if (!finished)
         this.dispose();

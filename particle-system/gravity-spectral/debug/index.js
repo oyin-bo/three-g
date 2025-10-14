@@ -339,7 +339,8 @@ async function renderOverlay(psys, stage, view) {
   // Render visualization
   switch (view.type) {
     case 'gridSlice':
-      renderGridSlice(psys, texture, view.axis, view.index, false, 3); // alpha = mass
+      // pmGrid now stores mass in the red channel (R32F)
+      renderGridSlice(psys, texture, view.axis, view.index, false, 0); // red = mass
       break;
     case 'spectrumMagnitude':
       renderSpectrumMagnitude(psys, texture, view.logScale);

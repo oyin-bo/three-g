@@ -246,29 +246,29 @@ function getOrCreateSyntheticProgram(psys) {
       ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
       
       if (u_synthType == 0) {
-        // Grid impulse (mass in ALPHA channel to match PM deposit)
+        // Grid impulse (mass in RED channel to match R32F pmGrid)
         ivec3 center = ivec3(u_centerVoxel);
         if (voxel == center) {
-          outColor = vec4(0.0, 0.0, 0.0, u_mass);
+          outColor = vec4(u_mass, 0.0, 0.0, 0.0);
         } else {
           outColor = vec4(0.0);
         }
       } 
       else if (u_synthType == 1) {
-        // Two point masses (mass in ALPHA channel)
+        // Two point masses (mass in RED channel)
         ivec3 a = ivec3(u_pointA);
         ivec3 b = ivec3(u_pointB);
         float mass = 0.0;
         if (voxel == a) mass += u_massA;
         if (voxel == b) mass += u_massB;
-        outColor = vec4(0.0, 0.0, 0.0, mass);
+        outColor = vec4(mass, 0.0, 0.0, 0.0);
       }
       else if (u_synthType == 2) {
-        // Plane wave density (mass in ALPHA channel)
+        // Plane wave density (mass in RED channel)
         vec3 pos = vec3(voxel) / u_gridSize;
         float phase = 2.0 * PI * dot(u_waveVector, pos);
         float density = u_amplitude * cos(phase);
-        outColor = vec4(0.0, 0.0, 0.0, density);
+        outColor = vec4(density, 0.0, 0.0, 0.0);
       }
       else if (u_synthType == 3) {
         // Spectrum delta (single k-mode)

@@ -14,7 +14,7 @@ import fsQuadVert from '../shaders/fullscreen.vert.js';
 
 /**
  * Initialize gradient/force resources
- * @param {import('./particle-system-spectral.js).ParticleSystemSpectral} psys
+ * @param {import('./particle-system-spectral.js').ParticleSystemSpectral} psys
  */
 export function initGradient(psys) {
   const gl = psys.gl;
@@ -167,8 +167,8 @@ export function readForceSpectrum(psys, axis, x, y) {
     0
   );
   
-  const data = new Float32Array(4);
-  gl.readPixels(x, y, 1, 1, gl.RGBA, gl.FLOAT, data);
+  const data = new Float32Array(2);
+  gl.readPixels(x, y, 1, 1, gl.RG, gl.FLOAT, data);
   
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   

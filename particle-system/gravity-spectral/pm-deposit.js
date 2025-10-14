@@ -46,11 +46,12 @@ export function depositParticlesToGrid(psys) {
   const program = psys.pmDepositProgram;
   const grid = psys.pmGrid;
   
-  // Bind framebuffer
-  gl.bindFramebuffer(gl.FRAMEBUFFER, psys.pmGridFramebuffer);
+  // Bind framebuffer: prefer single-channel mass FBO if available
+  const targetFBO = psys.pmMassFBO || psys.pmGridFramebuffer;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO);
   gl.viewport(0, 0, grid.size, grid.size);
-  
-  // Clear grid
+
+  // Clear grid / mass buffer
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   

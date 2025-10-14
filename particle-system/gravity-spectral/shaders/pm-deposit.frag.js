@@ -18,6 +18,7 @@ in float v_weight;
 out vec4 outColor;
 
 void main() {
-  outColor = vec4(v_mass * v_weight, 0.0, 0.0, 1.0);
+  // Write mass into the red channel only. Alpha is unused for the mass texture.
+  outColor = vec4(v_mass * v_weight, 0.0, 0.0, 0.0);
 }
 `;
