@@ -386,9 +386,7 @@ export class KFFT {
     if (this.workingFramebuffer) gl.deleteFramebuffer(this.workingFramebuffer);
     if (this.pingPongFramebuffer) gl.deleteFramebuffer(this.pingPongFramebuffer);
 
-    if (this.inReal) gl.deleteTexture(this.inReal);
-    if (this.inComplex) gl.deleteTexture(this.inComplex);
-    if (this.outComplex) gl.deleteTexture(this.outComplex);
-    if (this.outReal) gl.deleteTexture(this.outReal);
+    // Note: Do not delete inReal, inComplex, outComplex, outReal as they are
+    // owned by external code (ParticleSystemSpectralKernels)
   }
 }

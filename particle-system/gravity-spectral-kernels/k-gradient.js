@@ -192,11 +192,7 @@ export class KGradient {
     if (this.outFramebufferY) gl.deleteFramebuffer(this.outFramebufferY);
     if (this.outFramebufferZ) gl.deleteFramebuffer(this.outFramebufferZ);
 
-    if (this.inPotentialSpectrum) gl.deleteTexture(this.inPotentialSpectrum);
-    if (this.outForceSpectrumX) gl.deleteTexture(this.outForceSpectrumX);
-    if (this.outForceSpectrumY) gl.deleteTexture(this.outForceSpectrumY);
-    if (this.outForceSpectrumZ) gl.deleteTexture(this.outForceSpectrumZ);
-
+    // Note: Do not delete input/output textures as they are owned by external code
     this._fboShadow = null;
   }
 }

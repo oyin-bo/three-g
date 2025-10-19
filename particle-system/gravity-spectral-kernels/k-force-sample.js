@@ -202,12 +202,7 @@ export class KForceSample {
     if (this.particleVAO) gl.deleteVertexArray(this.particleVAO);
     if (this.outFramebuffer) gl.deleteFramebuffer(this.outFramebuffer);
 
-    if (this.inPosition) gl.deleteTexture(this.inPosition);
-    if (this.inForceGridX) gl.deleteTexture(this.inForceGridX);
-    if (this.inForceGridY) gl.deleteTexture(this.inForceGridY);
-    if (this.inForceGridZ) gl.deleteTexture(this.inForceGridZ);
-    if (this.outForce) gl.deleteTexture(this.outForce);
-
+    // Note: Do not delete input/output textures as they are owned by external code
     this._fboShadow = null;
   }
 }

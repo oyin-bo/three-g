@@ -176,9 +176,7 @@ export class KPoisson {
     if (this.quadVAO) gl.deleteVertexArray(this.quadVAO);
     if (this.outFramebuffer) gl.deleteFramebuffer(this.outFramebuffer);
 
-    if (this.inDensitySpectrum) gl.deleteTexture(this.inDensitySpectrum);
-    if (this.outPotentialSpectrum) gl.deleteTexture(this.outPotentialSpectrum);
-
+    // Note: Do not delete inDensitySpectrum, outPotentialSpectrum as they are owned by external code
     this._fboShadow = null;
   }
 }
