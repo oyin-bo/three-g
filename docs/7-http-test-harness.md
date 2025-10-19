@@ -1,94 +1,112 @@
-# serve.js REPL Remote Command Guide
+# Daebug REPL Guide
 
-Purpose: drive particle-system diagnostics and verification scripts through the `serve.js` REPL channel. The REPL replaces the legacy mini HTTP harness, letting you queue JavaScript directly into any open demo page and receive results over the same HTTP request (ideal for `curl`, scripts, or ad-hoc debugging).
+Purpose: drive particle-system diagnostics and verification scripts through daebug's markdown-based REPL. You edit markdown files to queue JavaScript; results appear automatically within 1-2 seconds.
 
-> NOTE: Assume http://localhost:8302/ is already running. No need to start or stop it, or interfere with its running.
+> NOTE: Assume daebug server is already running. No need to start or stop it.
 
 ## Prerequisites
 
 - Node.js 18+
-- `npm install`
-- A WebGL2-capable browser pointed at one of the demos served by `serve.js`
+- `npm install` (in the oyinbo directory)
+- A WebGL2-capable browser pointed at one of the demo pages
 
 ## Quick Start
 
-1. **Install dependencies**
-   ```bash
-   npm install
-   ```
-2. **Launch the dev server** (injects the REPL client into every `.html`)
+1. **Launch the daebug server** (from the oyinbo directory)
    ```bash
    npm start
    ```
-   `serve.js` listens on `http://localhost:8302/` by default.
-3. **Open a target page** – e.g. `http://localhost:8302/index.html` (Gravity demo). Keep the tab focused when running long commands.
+   Daebug serves pages and watches `daebug.md` files for REPL commands.
+2. **Open a target page** – e.g. `http://localhost:8768/` (the default page). Keep the browser tab open.
    Note: Only `index.html` exposes DevTools globals like `window.physics`, `window.setMethod`, and `window.verifyPM()`. Other demos do not export these by default.
-4. **Discover active tabs**
-   ```bash
-   curl http://localhost:8302/serve.js
-   ```
-   Output lists `tabName`, URL, last heartbeat, and state.
-5. **Queue code** – Use either GET (quick snippets) or POST (multiline scripts) to send work to the matching tab fragment.
+
+3. **Find active sessions** – Open `daebug.md` in the repo root. The top of the file lists all connected pages with their session links.
+
+4. **Send commands** – Click a session link from `daebug.md`, scroll to the bottom of that session file, and add a JavaScript code block after the prompt line.
 
 ## Sending Commands
 
-### GET with `eval`
-```bash
-curl --get \
-  --data-urlencode "name=gravity" \
-  --data-urlencode "eval=(()=>{ window.setMethod && window.setMethod('spectral'); return 'spectral enabled'; })()" \
-  http://localhost:8302/serve.js
-```
-The response body contains the return value (serialized as JSON). Errors return the stack trace as plain text.
+### Basic Pattern
 
-### POST with request body
-```bash
-curl -X POST \
-  --data-binary @commands/fft-roundtrip.js \
-  "http://localhost:8302/serve.js?name=gravity&eval=post"
-```
-`eval=post` tells `serve.js` to read the request body as the code to execute. The response mirrors the GET flow.
+1. Open the session file (e.g., `daebug/6-dune-2040-42.md`)
+2. Scroll to the bottom where you see the prompt: `> `
+3. Add a fenced code block:
+   ````markdown
+   ```js
+   window.physics ? 'physics exists' : 'no physics'
+   ```
+   ````
+4. Save the file
+5. Results appear automatically within 1-2 seconds
 
-### Payload format
-Raw JavaScript only. JSON request bodies are not parsed; sending JSON (for example `{ "code": "..." }`) will be treated as invalid JavaScript and result in a syntax error.
+### Command Format
+
+- Use JavaScript fenced code blocks: ````js` ... ````
+- Write expressions or IIFEs that return values
+- Promises are awaited automatically
+- Return values are serialized with `JSON.stringify`
+- Non-serializable values fall back to `String(value)`
+- Do not use top-level `return` or top-level `await`
+
+### Multi-line Scripts
+
+```js
+(async () => {
+  window.setMethod && window.setMethod('spectral');
+  await new Promise(r => setTimeout(r, 1000));
+  return window.physics ? 'spectral enabled' : 'no physics';
+})()
+```
 
 ## Command Context
 
-- Commands run inside the browser tab that registered the matching name. On `index.html` you have access to `window.physics`, `window.setMethod`, `window.scene`, and helpers like `window.verifyPM()`. Other demos (e.g., `simplistic.html`, `texture-mode.html`) do not expose these globals by default.
-- Script shape: provide an expression or an IIFE that returns a value. Do not use top-level `return` or top-level `await`.
-- Promises are awaited. Return values are serialized with `JSON.stringify`. Non-serializable values fall back to `String(value)`.
-- Use `import()` with cache busting (e.g. `?${Date.now()}`) for hot-reload iterations.
+- Commands run inside the browser tab that owns the session file
+- On `index.html` you have access to `window.physics`, `window.setMethod`, `window.scene`, and helpers like `window.verifyPM()`
+- Other demos (e.g., `simplistic.html`, `texture-mode.html`) do not expose these globals by default
+- Use `import()` with cache busting (e.g. `?${Date.now()}`) for hot-reload iterations
 
 ## Examples
 
-- **Minimal smoke test**
-  ```javascript
-  (async () => {
-    await new Promise(r => setTimeout(r, 500));
-    return { TEST: 'PING', time: Date.now() };
-  })()
-  ```
-- **Switch to Spectral (PM/FFT)**
-  ```javascript
-  (async () => {
-    window.setMethod && window.setMethod('spectral');
-    await new Promise(r => setTimeout(r, 1000));
-    return window.physics ? 'spectral enabled' : 'no physics';
-  })()
-  ```
-- **FFT roundtrip verifier** – reuse the example script from `docs/pm-fft-inverse-investigation.md` or store it in a file and POST it as shown above.
+### Minimal smoke test
+```js
+(async () => {
+  await new Promise(r => setTimeout(r, 500));
+  return { TEST: 'PING', time: Date.now() };
+})()
+```
+
+### Switch to Spectral (PM/FFT)
+```js
+(async () => {
+  window.setMethod && window.setMethod('spectral');
+  await new Promise(r => setTimeout(r, 1000));
+  return window.physics ? 'spectral enabled' : 'no physics';
+})()
+```
+
+### Check execution timing
+Always verify execution duration in the result header. This is critical for performance debugging.
 
 ## Inspecting Results
 
-- **Immediate output** – The HTTP response contains the command’s return value or error stack.
-- **Console logs** – View the target tab’s DevTools console for `console.*` emitted during execution.
-- **Archiving** – Redirect curl output to a file if you need history.
+- **Immediate output** – Results appear in the same session file within 1-2 seconds
+- **Console logs** – View the target tab's DevTools console for `console.*` output
+- **History** – All commands and results stay in the session file; scroll up to see previous interactions
+- **Execution timing** – Each result shows execution duration; always check this
 
 ## Tips & Troubleshooting
 
-- **Targeting tabs** – Use distinctive window titles to generate unique `tabName` values (stored in `sessionStorage`).
-- **Timeouts** – Requests time out after 60 s if the tab does not respond. The HTTP client receives `504 timeout`.
-- **Multiple sessions** – Each tab maintains its own queue. Submit commands to the appropriate fragment.
-- **Page reloads** – Refreshing a tab resets its queue; the `tabName` persists across reloads (stored in `sessionStorage`). Open a new tab to get a new name or clear `sessionStorage`.
+- **Finding sessions** – Check `daebug.md` for the list of active pages and their session files
+- **Multiple sessions** – Each browser tab gets its own session file; work with multiple tabs concurrently
+- **Page reloads** – Refreshing a tab creates a new session; the old session file remains for history
+- **Worker threads** – Web workers get separate session files with `-webworker` suffix
+- **Restart server** – Add `%%SHUTDOWN%%` on a separate line in `daebug.md`, then run `npm start` again
+- **File editing** – Any text editor works; daebug watches for file changes and responds automatically
 
-This REPL workflow supersedes the previous file-based HTTP harness. All remote diagnostics should flow through `serve.js` moving forward.
+## Session File Location
+
+Session files are stored in `daebug/` subdirectory with names like:
+- `daebug/6-dune-2040-42.md` (main page)
+- `daebug/6-dune-2040-42-webworker.md` (web worker)
+
+The master registry `daebug.md` always lists all active sessions with clickable links.
