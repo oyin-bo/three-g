@@ -81,6 +81,18 @@ export class KIntegrateVelocity {
     this.gl.deleteShader(vert);
     this.gl.deleteShader(frag);
 
+    // Cache uniform locations
+    this.uniforms = {
+      u_velocity: this.gl.getUniformLocation(this.program, 'u_velocity'),
+      u_force: this.gl.getUniformLocation(this.program, 'u_force'),
+      u_position: this.gl.getUniformLocation(this.program, 'u_position'),
+      u_texSize: this.gl.getUniformLocation(this.program, 'u_texSize'),
+      u_dt: this.gl.getUniformLocation(this.program, 'u_dt'),
+      u_damping: this.gl.getUniformLocation(this.program, 'u_damping'),
+      u_maxSpeed: this.gl.getUniformLocation(this.program, 'u_maxSpeed'),
+      u_maxAccel: this.gl.getUniformLocation(this.program, 'u_maxAccel')
+    };
+
     // Create quad VAO
     const quadVAO = this.gl.createVertexArray();
     if (!quadVAO) throw new Error('Failed to create VAO');
@@ -143,7 +155,7 @@ export class KIntegrateVelocity {
     gl.useProgram(this.program);
     
     // Ensure framebuffer attachments match our output
-    if (!this._fboShadow?.a0 !== this.outVelocity) {
+    if (!this._fboShadow || this._fboShadow.a0 !== this.outVelocity) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outVelocity, 0);
       gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
@@ -170,22 +182,38 @@ export class KIntegrateVelocity {
     // Bind input textures
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.inVelocity);
-    gl.uniform1i(gl.getUniformLocation(this.program, 'u_velocity'), 0);
+    if (this.uniforms.u_velocity) {
+      gl.uniform1i(this.uniforms.u_velocity, 0);
+    }
     
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.inForce);
-    gl.uniform1i(gl.getUniformLocation(this.program, 'u_force'), 1);
+    if (this.uniforms.u_force) {
+      gl.uniform1i(this.uniforms.u_force, 1);
+    }
     
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.inPosition);
-    gl.uniform1i(gl.getUniformLocation(this.program, 'u_position'), 2);
+    if (this.uniforms.u_position) {
+      gl.uniform1i(this.uniforms.u_position, 2);
+    }
     
     // Set uniforms
-    gl.uniform2f(gl.getUniformLocation(this.program, 'u_texSize'), this.width, this.height);
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_dt'), this.dt);
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_damping'), this.damping);
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_maxSpeed'), this.maxSpeed);
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_maxAccel'), this.maxAccel);
+    if (this.uniforms.u_texSize) {
+      gl.uniform2f(this.uniforms.u_texSize, this.width, this.height);
+    }
+    if (this.uniforms.u_dt) {
+      gl.uniform1f(this.uniforms.u_dt, this.dt);
+    }
+    if (this.uniforms.u_damping) {
+      gl.uniform1f(this.uniforms.u_damping, this.damping);
+    }
+    if (this.uniforms.u_maxSpeed) {
+      gl.uniform1f(this.uniforms.u_maxSpeed, this.maxSpeed);
+    }
+    if (this.uniforms.u_maxAccel) {
+      gl.uniform1f(this.uniforms.u_maxAccel, this.maxAccel);
+    }
     
     // Draw
     gl.bindVertexArray(this.quadVAO);

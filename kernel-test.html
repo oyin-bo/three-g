@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kernel Tests - Daebug REPL</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+      margin: 0;
+      padding: 20px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+    }
+    h1 {
+      color: #4ec9b0;
+      margin-top: 0;
+    }
+    .status {
+      padding: 10px;
+      background: #252526;
+      border-left: 3px solid #4ec9b0;
+      margin: 10px 0;
+      font-size: 13px;
+    }
+    .status.loading {
+      border-left-color: #ffc107;
+    }
+    .status.ready {
+      border-left-color: #4ec9b0;
+    }
+    .status.error {
+      border-left-color: #f48771;
+    }
+    code {
+      background: #252526;
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>👾 WebGL2 Kernel Test REPL</h1>
+  
+  <div class="status loading" id="status">
+    ⏳ Loading daebug client...
+  </div>
+  
+  <p>
+    This page provides a WebGL2 context for running kernel tests via the daebug REPL.
+    Create test files in the <code>daebug/</code> directory to execute them here.
+  </p>
+  
+  <p>
+    <strong>Available test utilities:</strong> 
+    <code>getGL()</code>, 
+    <code>createTestTexture()</code>, 
+    <code>readTexture()</code>, 
+    <code>assertClose()</code>, 
+    <code>assertAllFinite()</code>
+  </p>
+
+  <script type="module">
+    // For browser environment, daebug client will be injected by the server
+    // This script just provides status feedback
+    
+    const statusEl = document.getElementById('status');
+    
+    // Wait for daebug to be available
+    let attempts = 0;
+    const checkDaebug = setInterval(() => {
+      attempts++;
+      
+      // Check if daebug has initialized (it modifies window)
+      if (window._daebug || window.__daebugReady || document._daebugPath) {
+        clearInterval(checkDaebug);
+        statusEl.className = 'status ready';
+        statusEl.textContent = '✅ Daebug REPL ready. Create test files in daebug/ directory.';
+      } else if (attempts > 30) {
+        clearInterval(checkDaebug);
+        statusEl.className = 'status error';
+        statusEl.textContent = '❌ Daebug client not loaded. Check server configuration.';
+      }
+    }, 100);
+    
+    // Also detect when page script has fully loaded
+    window.addEventListener('load', () => {
+      if (!window._daebug && attempts < 10) {
+        // Give it a bit longer
+        setTimeout(() => {
+          if (!window._daebug) {
+            statusEl.className = 'status error';
+            statusEl.textContent = '⚠️ Daebug client may not be properly injected. Check serve.js configuration.';
+          }
+        }, 2000);
+      }
+    });
+  </script>
+</body>
+</html>
