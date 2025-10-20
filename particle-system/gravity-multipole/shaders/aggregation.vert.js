@@ -13,7 +13,6 @@ uniform float u_slicesPerRow;    // slices per row (e.g., 8 for 8x8 grid)
 out vec4 v_particleA0;
 out vec4 v_particleA1;
 out vec4 v_particleA2;
-
 ivec2 indexToCoord(int index, vec2 texSize) {
   int w = int(texSize.x);
   int ix = index % w;

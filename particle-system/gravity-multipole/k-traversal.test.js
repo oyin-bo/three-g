@@ -163,12 +163,12 @@ test('KTraversal: two particle interaction', async () => {
   
   // Particle 0 at (-1,0,0) should feel force toward particle 1 at (1,0,0)
   // Force should be in +x direction
-  assert(result[0] > 0, 'Force on particle 0 should be in +x direction');
+  assert.ok(result[0] > 0, 'Force on particle 0 should be in +x direction');
   assertClose(result[1], 0.0, 1e-3, 'Force y should be near zero');
   assertClose(result[2], 0.0, 1e-3, 'Force z should be near zero');
   
   // Particle 1 should feel opposite force
-  assert(result[4] < 0, 'Force on particle 1 should be in -x direction');
+  assert.ok(result[4] < 0, 'Force on particle 1 should be in -x direction');
   
   // Forces should be roughly equal magnitude (Newton's third law)
   assertClose(Math.abs(result[0]), Math.abs(result[4]), 1e-2, 'Forces should have equal magnitude');
@@ -256,8 +256,8 @@ test('KTraversal: theta criterion effect', async () => {
   const mag1 = Math.sqrt(result1[0]**2 + result1[1]**2 + result1[2]**2);
   const mag2 = Math.sqrt(result2[0]**2 + result2[1]**2 + result2[2]**2);
   
-  assert(mag1 > 0, 'Small theta should produce force');
-  assert(mag2 > 0, 'Large theta should produce force');
+  assert.ok(mag1 > 0, 'Small theta should produce force');
+  assert.ok(mag2 > 0, 'Large theta should produce force');
   
   disposeKernel(kernel1);
   disposeKernel(kernel2);
@@ -435,7 +435,7 @@ test('KTraversal: softening prevents singularities', async () => {
   const mag2 = Math.sqrt(result2[0]**2 + result2[1]**2 + result2[2]**2);
   
   // Larger softening should reduce force magnitude
-  assert(mag2 < mag1, 'Larger softening should reduce force');
+  assert.ok(mag2 < mag1, 'Larger softening should reduce force');
   
   disposeKernel(kernel1);
   disposeKernel(kernel2);
@@ -565,7 +565,7 @@ test('KTraversal: multi-level octree', async () => {
   
   // Should produce some force from distributed mass
   const mag = Math.sqrt(result[0]**2 + result[1]**2 + result[2]**2);
-  assert(mag > 0, 'Multi-level should produce force');
+  assert.ok(mag > 0, 'Multi-level should produce force');
   
   disposeKernel(kernel);
   resetGL();

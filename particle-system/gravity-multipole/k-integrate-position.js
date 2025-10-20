@@ -8,7 +8,7 @@
  */
 
 import fsQuadVert from '../shaders/fullscreen.vert.js';
-import posIntegrateFrag from '../shaders/pos_integrate.frag.js';
+import posIntegrateFrag from './shaders/pos_integrate.frag.js';
 
 export class KIntegratePosition {
   /**
@@ -135,7 +135,7 @@ export class KIntegratePosition {
     gl.useProgram(this.program);
     
     // Ensure framebuffer attachments match our current output
-    if (!this._fboShadow?.a0 !== this.outPosition) {
+    if (this._fboShadow?.a0 !== this.outPosition) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outPosition, 0);
       gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
@@ -171,6 +171,7 @@ export class KIntegratePosition {
     // Set uniforms
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_texSize'), this.width, this.height);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_dt'), this.dt);
+    gl.uniform1i(gl.getUniformLocation(this.program, 'u_particleCount'), this.width * this.height);
     
     // Draw
     gl.bindVertexArray(this.quadVAO);
