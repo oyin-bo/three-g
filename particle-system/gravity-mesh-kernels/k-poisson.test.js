@@ -46,8 +46,8 @@ test('KPoisson: creates output texture when not provided', async () => {
     gravityStrength: 0.0003
   });
   
-  assert.ok(kernel.outPotentialSpectrum, 'Output potential spectrum texture created');
-  assert.ok(kernel.ownsOutTexture, 'Kernel owns output texture');
+  assert.ok(kernel.outPotentialSpectrum, 'Output potential spectrum texture created (textureSize=' + textureSize + ')');
+  assert.ok(kernel.ownsOutTexture, 'Kernel owns output texture (ownsOutTexture=' + kernel.ownsOutTexture + ')');
   
   kernel.run();
   
@@ -87,14 +87,20 @@ test('KPoisson: produces non-zero potential from density', async () => {
   
   // Check that we have some non-zero values
   let hasNonZero = false;
+  let nonZeroCount = 0;
+  let maxMag = 0.0;
   for (let i = 0; i < outData.length; i += 4) {
-    if (Math.abs(outData[i]) > 0.001 || Math.abs(outData[i + 1]) > 0.001) {
+    const real = outData[i];
+    const imag = outData[i + 1];
+    const mag = Math.hypot(real, imag);
+    if (mag > 0.001) {
       hasNonZero = true;
-      break;
+      nonZeroCount++;
+      if (mag > maxMag) maxMag = mag;
     }
   }
   
-  assert.ok(hasNonZero, 'Poisson output has non-zero values');
+  assert.ok(hasNonZero, 'Poisson output has non-zero values (count=' + nonZeroCount + ', maxMag=' + maxMag + ')');
   assertAllFinite(outData, 'Poisson output is finite');
   
   disposeKernel(kernel);

@@ -77,8 +77,8 @@ test('KForceSample: creates output texture when not provided', async () => {
     worldBounds: { min: [-2, -2, -2], max: [2, 2, 2] }
   });
   
-  assert.ok(kernel.outForce, 'Output force texture created');
-  assert.ok(kernel.ownsOutForce, 'Kernel owns output texture');
+  assert.ok(kernel.outForce, 'Output force texture created (w=' + particleTexWidth + ', h=' + particleTexHeight + ')');
+  assert.ok(kernel.ownsOutForce, 'Kernel owns output texture (ownsOutForce=' + kernel.ownsOutForce + ')');
   
   kernel.run();
   
@@ -90,7 +90,7 @@ test('KForceSample: creates output texture when not provided', async () => {
   gl.deleteTexture(forceGridX);
   gl.deleteTexture(forceGridY);
   gl.deleteTexture(forceGridZ);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -282,9 +282,9 @@ test('KForceSample: samples spatially varying force field', async () => {
   const force2X = outData[8];
   
   // Left particle should have negative force, right positive, center near zero
-  assert.ok(force0X < 0, 'Left particle has negative X force');
-  assert.ok(force1X > 0, 'Right particle has positive X force');
-  assert.ok(Math.abs(force2X) < Math.abs(force0X), 'Center particle has smaller force');
+  assert.ok(force0X < 0, 'Left particle has negative X force: Fx0=' + force0X);
+  assert.ok(force1X > 0, 'Right particle has positive X force: Fx1=' + force1X);
+  assert.ok(Math.abs(force2X) < Math.abs(force0X), 'Center particle has smaller |Fx|: |Fx_center|=' + Math.abs(force2X) + ' vs |Fx_left|=' + Math.abs(force0X));
   
   disposeKernel(kernel);
   gl.deleteTexture(posTex);
@@ -398,7 +398,7 @@ test('KForceSample: works with different grid sizes', async () => {
   }
   
   gl.deleteTexture(posTex);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -448,7 +448,7 @@ test('KForceSample: uses provided output texture', async () => {
   });
   
   assert.strictEqual(kernel.outForce, outForce, 'Uses provided output texture');
-  assert.ok(!kernel.ownsOutForce, 'Kernel does not own provided texture');
+  assert.ok(!kernel.ownsOutForce, 'Kernel does not own provided texture (ownsOutForce=' + kernel.ownsOutForce + ')');
   
   kernel.run();
   
@@ -461,7 +461,7 @@ test('KForceSample: uses provided output texture', async () => {
   gl.deleteTexture(forceGridY);
   gl.deleteTexture(forceGridZ);
   gl.deleteTexture(outForce);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -489,7 +489,7 @@ test('KForceSample: throws error when inputs not set', async () => {
   }, /texture not set/, 'Throws error when inputs not set');
   
   disposeKernel(kernel);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -598,7 +598,7 @@ test('KForceSample: dispose cleans up owned resources', async () => {
   kernel.dispose();
   
   // Texture should be deleted
-  assert.ok(!gl.isTexture(outForce), 'Output force texture disposed');
+  assert.ok(!gl.isTexture(outForce), 'Output force texture disposed (isTexture=' + gl.isTexture(outForce) + ')');
   
   gl.deleteTexture(posTex);
   gl.deleteTexture(forceGridX);

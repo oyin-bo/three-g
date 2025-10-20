@@ -61,8 +61,8 @@ test('KFFT: creates output texture when not provided', async () => {
     cellVolume: 1.0
   });
   
-  assert.ok(kernel.outSpectrum, 'Output spectrum texture created');
-  assert.ok(kernel.ownsOutSpectrum, 'Kernel owns output texture');
+  assert.ok(kernel.outSpectrum, 'Output spectrum texture created (textureSize=' + textureSize + ')');
+  assert.ok(kernel.ownsOutSpectrum, 'Kernel owns output texture (ownsOutSpectrum=' + kernel.ownsOutSpectrum + ')');
   
   kernel.run();
   
@@ -71,7 +71,7 @@ test('KFFT: creates output texture when not provided', async () => {
   
   disposeKernel(kernel);
   gl.deleteTexture(inputGrid);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -103,19 +103,25 @@ test('KFFT: forward FFT produces complex output', async () => {
   
   // Check that we have some non-zero values
   let hasNonZero = false;
+  let nonZeroCount = 0;
+  let maxMag = 0.0;
   for (let i = 0; i < outData.length; i += 4) {
-    if (Math.abs(outData[i]) > 0.001 || Math.abs(outData[i + 1]) > 0.001) {
+    const real = outData[i];
+    const imag = outData[i + 1];
+    const mag = Math.hypot(real, imag);
+    if (mag > 0.001) {
       hasNonZero = true;
-      break;
+      nonZeroCount++;
+      if (mag > maxMag) maxMag = mag;
     }
   }
   
-  assert.ok(hasNonZero, 'FFT output has non-zero values');
+  assert.ok(hasNonZero, 'FFT output has non-zero values (count=' + nonZeroCount + ', maxMag=' + maxMag + ')');
   assertAllFinite(outData, 'FFT output is finite');
   
   disposeKernel(kernel);
   gl.deleteTexture(inputGrid);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -181,13 +187,13 @@ test('KFFT: inverse FFT recovers original (round-trip)', async () => {
     maxOutput = Math.max(maxOutput, outputData[i + 3]);
   }
   
-  assert.ok(maxOutput > 0, 'Inverse FFT has non-zero peak');
+  assert.ok(maxOutput > 0, 'Inverse FFT has non-zero peak: ' + maxOutput + ' (maxInput: ' + maxInput + ')');
   
   disposeKernel(forwardKernel);
   disposeKernel(inverseKernel);
   gl.deleteTexture(inputGrid);
   gl.deleteTexture(outputGrid);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -221,5 +227,5 @@ test('KFFT: works with different grid sizes', async () => {
     gl.deleteTexture(inputGrid);
   }
   
-  resetGL(gl);
+  resetGL();
 });

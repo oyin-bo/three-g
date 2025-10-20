@@ -88,10 +88,10 @@ test('KNearField: creates output textures when not provided', async () => {
     nearFieldRadius: 2
   });
   
-  assert.ok(kernel.outForceX, 'Output X force texture created');
-  assert.ok(kernel.outForceY, 'Output Y force texture created');
-  assert.ok(kernel.outForceZ, 'Output Z force texture created');
-  assert.ok(kernel.ownsOutTextures, 'Kernel owns output textures');
+  assert.ok(kernel.outForceX, 'Output X force texture created (textureSize=' + textureSize + ', gridSize=' + gridSize + ', slicesPerRow=' + slicesPerRow + ')');
+  assert.ok(kernel.outForceY, 'Output Y force texture created (textureSize=' + textureSize + ', gridSize=' + gridSize + ', slicesPerRow=' + slicesPerRow + ')');
+  assert.ok(kernel.outForceZ, 'Output Z force texture created (textureSize=' + textureSize + ', gridSize=' + gridSize + ', slicesPerRow=' + slicesPerRow + ')');
+  assert.ok(kernel.ownsOutTextures, 'Kernel owns output textures (ownsOutTextures=' + kernel.ownsOutTextures + ')');
   
   kernel.run();
   
@@ -105,7 +105,7 @@ test('KNearField: creates output textures when not provided', async () => {
   
   disposeKernel(kernel);
   gl.deleteTexture(massGrid);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -186,11 +186,11 @@ test('KNearField: single mass produces radial forces', async () => {
   
   // Check that voxel at (2,2,2) has near-zero force (self-interaction handled by softening)
   const centerForce = readVoxel(outDataX, 2, 2, 2, gridSize, slicesPerRow);
-  assert.ok(Math.abs(centerForce[0]) < 0.1, 'Center voxel has small X force');
+  assert.ok(Math.abs(centerForce[0]) < 0.1, 'Center voxel has small X force: |Fx_center|=' + Math.abs(centerForce[0]) + ' < 0.1');
   
   // Check that neighboring voxels have non-zero forces
   const neighborForce = readVoxel(outDataX, 3, 2, 2, gridSize, slicesPerRow);
-  assert.ok(Math.abs(neighborForce[0]) > 0.0, 'Neighboring voxel has non-zero force');
+  assert.ok(Math.abs(neighborForce[0]) > 0.0, 'Neighboring voxel has non-zero force: |Fx_neighbor|=' + Math.abs(neighborForce[0]) + ' > 0');
   
   disposeKernel(kernel);
   gl.deleteTexture(massGrid);
@@ -315,8 +315,8 @@ test('KNearField: scales forces with gravity strength', async () => {
   }
   
   // Check that forces scale approximately with gravity strength
-  assert.ok(results[1] > results[0], 'Higher G produces larger forces');
-  assert.ok(results[2] > results[1], 'Even higher G produces even larger forces');
+  assert.ok(results[1] > results[0], 'Higher G produces larger forces: F[G2]=' + results[1] + ' > F[G1]=' + results[0] + ')');
+  assert.ok(results[2] > results[1], 'Even higher G produces even larger forces: F[G3]=' + results[2] + ' > F[G2]=' + results[1] + ')');
   
   gl.deleteTexture(massGrid);
   resetGL(gl);
@@ -365,7 +365,7 @@ test('KNearField: handles multiple masses', async () => {
   const force1 = readVoxel(outDataX, 1, 0, 0, gridSize, slicesPerRow);
   const force2 = readVoxel(outDataX, 3, 3, 2, gridSize, slicesPerRow);
   
-  assert.ok(Math.abs(force1[0]) > 0.0, 'Force exists near first mass');
+  assert.ok(Math.abs(force1[0]) > 0.0, 'Force exists near first mass: |Fx|=' + Math.abs(force1[0]));
   // Second force may or may not be significant depending on distance
   
   disposeKernel(kernel);
@@ -418,7 +418,7 @@ test('KNearField: uses provided output textures', async () => {
   assert.strictEqual(kernel.outForceX, outX, 'Uses provided X texture');
   assert.strictEqual(kernel.outForceY, outY, 'Uses provided Y texture');
   assert.strictEqual(kernel.outForceZ, outZ, 'Uses provided Z texture');
-  assert.ok(!kernel.ownsOutTextures, 'Kernel does not own provided textures');
+  assert.ok(!kernel.ownsOutTextures, 'Kernel does not own provided textures (ownsOutTextures=' + kernel.ownsOutTextures + ')');
   
   kernel.run();
   
@@ -430,7 +430,7 @@ test('KNearField: uses provided output textures', async () => {
   gl.deleteTexture(outX);
   gl.deleteTexture(outY);
   gl.deleteTexture(outZ);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -456,7 +456,7 @@ test('KNearField: throws error when input not set', async () => {
   }, /inMassGrid texture not set/, 'Throws error when input not set');
   
   disposeKernel(kernel);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -496,7 +496,7 @@ test('KNearField: accepts external quadVAO', async () => {
   });
   
   assert.strictEqual(kernel.quadVAO, quadVAO, 'Uses provided quadVAO');
-  assert.ok(!kernel.ownsQuadVAO, 'Kernel does not own provided quadVAO');
+  assert.ok(!kernel.ownsQuadVAO, 'Kernel does not own provided quadVAO (ownsQuadVAO=' + kernel.ownsQuadVAO + ')');
   
   kernel.run();
   
@@ -507,7 +507,7 @@ test('KNearField: accepts external quadVAO', async () => {
   gl.deleteTexture(massGrid);
   gl.deleteVertexArray(quadVAO);
   gl.deleteBuffer(buffer);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -543,9 +543,9 @@ test('KNearField: dispose cleans up owned resources', async () => {
   kernel.dispose();
   
   // Textures should be deleted
-  assert.ok(!gl.isTexture(outX), 'Output X texture disposed');
-  assert.ok(!gl.isTexture(outY), 'Output Y texture disposed');
-  assert.ok(!gl.isTexture(outZ), 'Output Z texture disposed');
+  assert.ok(!gl.isTexture(outX), 'Output X texture disposed (isTexture=' + gl.isTexture(outX) + ')');
+  assert.ok(!gl.isTexture(outY), 'Output Y texture disposed (isTexture=' + gl.isTexture(outY) + ')');
+  assert.ok(!gl.isTexture(outZ), 'Output Z texture disposed (isTexture=' + gl.isTexture(outZ) + ')');
   
   gl.deleteTexture(massGrid);
   resetGL(gl);
@@ -565,11 +565,11 @@ test('KNearField: handles different world bounds', async () => {
     return (x === 2 && y === 2 && z === 2) ? 1.0 : 0.0;
   });
   
-  const worldBounds = [
+  const worldBounds = /** @type {{min: [number,number,number], max: [number,number,number]}[]} */ ([
     { min: [-1, -1, -1], max: [1, 1, 1] },
     { min: [-4, -4, -4], max: [4, 4, 4] },
     { min: [-10, -5, -8], max: [10, 5, 8] }  // Non-uniform
-  ];
+  ]);
   
   for (const bounds of worldBounds) {
     const kernel = new KNearField({

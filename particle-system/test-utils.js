@@ -183,7 +183,13 @@ export function resetGL() {
   gl.bindBuffer(gl.ARRAY_BUFFER, null);
   
   // Clear any errors
-  while (gl.getError() !== gl.NO_ERROR) {}
+  const busyUntil = Date.now() + 100;
+  while (Date.now() < busyUntil) {
+    if (gl.getError() !== gl.NO_ERROR) break;
+  }
+
+  let glError = gl.getError();
+  if (glError === gl.NO_ERROR) throw new Error('gl.getError() expected not to be gl.NO_ERROR ' + glError);
 }
 
 /**

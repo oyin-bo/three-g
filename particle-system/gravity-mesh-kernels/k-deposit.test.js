@@ -240,8 +240,8 @@ test('KDeposit: creates output texture when not provided', async () => {
     assignment: 'ngp'
   });
   
-  assert.ok(kernel.outGrid, 'Output texture created');
-  assert.ok(kernel.ownsOutGrid, 'Kernel owns output texture');
+  assert.ok(kernel.outGrid, 'Output texture created (textureSize=' + 8 + '×' + 8 + ')');
+  assert.ok(kernel.ownsOutGrid, 'Kernel owns output texture (ownsOutGrid=' + kernel.ownsOutGrid + ')');
   
   kernel.run();
   

@@ -377,7 +377,7 @@ test('KIntegrateVelocity: combined physics', async () => {
   assertClose(result[2], expectedV, 1e-5, 'vz');
   
   const finalMag = Math.sqrt(result[0]*result[0] + result[1]*result[1] + result[2]*result[2]);
-  assert.ok(finalMag <= maxSpeed * 1.01, 'Final speed should not exceed maxSpeed (with small tolerance)');
+  assert.ok(finalMag <= maxSpeed * 1.01, 'Final speed should not exceed maxSpeed (|v|=' + finalMag.toFixed(6) + ' <= ' + (maxSpeed * 1.01).toFixed(6) + ')');
 });
 
 /**
@@ -489,7 +489,7 @@ test('KIntegrateVelocity: large force stability', async () => {
   
   // Verify speed doesn't exceed maxSpeed
   const finalMag = Math.sqrt(result[0]*result[0] + result[1]*result[1] + result[2]*result[2]);
-  assert.ok(finalMag <= maxSpeed * 1.01, 'Speed should be clamped even with huge forces');
+  assert.ok(finalMag <= maxSpeed * 1.01, 'Speed should be clamped even with huge forces (|v|=' + finalMag.toFixed(6) + ' <= ' + (maxSpeed * 1.01).toFixed(6) + ')');
   
   disposeKernel(kernel);
   resetGL();

@@ -76,10 +76,10 @@ test('KGradient: creates output textures when not provided', async () => {
     worldSize: [8, 8, 8]
   });
   
-  assert.ok(kernel.outForceSpectrumX, 'Output X force spectrum texture created');
-  assert.ok(kernel.outForceSpectrumY, 'Output Y force spectrum texture created');
-  assert.ok(kernel.outForceSpectrumZ, 'Output Z force spectrum texture created');
-  assert.ok(kernel.ownsOutTextures, 'Kernel owns output textures');
+  assert.ok(kernel.outForceSpectrumX, 'Output X force spectrum texture created (textureSize=' + textureSize + ')');
+  assert.ok(kernel.outForceSpectrumY, 'Output Y force spectrum texture created (textureSize=' + textureSize + ')');
+  assert.ok(kernel.outForceSpectrumZ, 'Output Z force spectrum texture created (textureSize=' + textureSize + ')');
+  assert.ok(kernel.ownsOutTextures, 'Kernel owns output textures (ownsOutTextures=' + kernel.ownsOutTextures + ')');
   
   kernel.run();
   
@@ -93,7 +93,7 @@ test('KGradient: creates output textures when not provided', async () => {
   
   disposeKernel(kernel);
   gl.deleteTexture(potentialSpectrum);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -131,14 +131,19 @@ test('KGradient: produces non-zero force spectra from potential', async () => {
   
   // Check that we have some non-zero values in each component
   let hasNonZeroX = false, hasNonZeroY = false, hasNonZeroZ = false;
+  let countX = 0, countY = 0, countZ = 0;
+  let maxMagX = 0, maxMagY = 0, maxMagZ = 0;
   for (let i = 0; i < outDataX.length; i += 4) {
-    if (Math.abs(outDataX[i]) > 0.001 || Math.abs(outDataX[i + 1]) > 0.001) hasNonZeroX = true;
-    if (Math.abs(outDataY[i]) > 0.001 || Math.abs(outDataY[i + 1]) > 0.001) hasNonZeroY = true;
-    if (Math.abs(outDataZ[i]) > 0.001 || Math.abs(outDataZ[i + 1]) > 0.001) hasNonZeroZ = true;
+    const mx = Math.hypot(outDataX[i], outDataX[i + 1]);
+    const my = Math.hypot(outDataY[i], outDataY[i + 1]);
+    const mz = Math.hypot(outDataZ[i], outDataZ[i + 1]);
+    if (mx > 0.001) { hasNonZeroX = true; countX++; if (mx > maxMagX) maxMagX = mx; }
+    if (my > 0.001) { hasNonZeroY = true; countY++; if (my > maxMagY) maxMagY = my; }
+    if (mz > 0.001) { hasNonZeroZ = true; countZ++; if (mz > maxMagZ) maxMagZ = mz; }
   }
   
-  assert.ok(hasNonZeroX, 'Force spectrum X has non-zero values');
-  assert.ok(hasNonZeroY, 'Force spectrum Y has non-zero values');
+  assert.ok(hasNonZeroX, 'Force spectrum X has non-zero values (count=' + countX + ', maxMag=' + maxMagX + ')');
+  assert.ok(hasNonZeroY, 'Force spectrum Y has non-zero values (count=' + countY + ', maxMag=' + maxMagY + ')');
   // Z may be zero if no k_z components
   
   disposeKernel(kernel);
@@ -184,7 +189,7 @@ test('KGradient: DC component is zero', async () => {
   
   disposeKernel(kernel);
   gl.deleteTexture(potentialSpectrum);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -228,7 +233,7 @@ test('KGradient: handles different world sizes', async () => {
   }
   
   gl.deleteTexture(potentialSpectrum);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -264,7 +269,7 @@ test('KGradient: works with different grid sizes', async () => {
     gl.deleteTexture(potentialSpectrum);
   }
   
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -309,7 +314,7 @@ test('KGradient: uses provided output textures', async () => {
   assert.strictEqual(kernel.outForceSpectrumX, outX, 'Uses provided X texture');
   assert.strictEqual(kernel.outForceSpectrumY, outY, 'Uses provided Y texture');
   assert.strictEqual(kernel.outForceSpectrumZ, outZ, 'Uses provided Z texture');
-  assert.ok(!kernel.ownsOutTextures, 'Kernel does not own provided textures');
+  assert.ok(!kernel.ownsOutTextures, 'Kernel does not own provided textures (ownsOutTextures=' + kernel.ownsOutTextures + ')');
   
   kernel.run();
   
@@ -321,7 +326,7 @@ test('KGradient: uses provided output textures', async () => {
   gl.deleteTexture(outX);
   gl.deleteTexture(outY);
   gl.deleteTexture(outZ);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -344,7 +349,7 @@ test('KGradient: throws error when input not set', async () => {
   }, /inPotentialSpectrum texture not set/, 'Throws error when input not set');
   
   disposeKernel(kernel);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -386,7 +391,7 @@ test('KGradient: symmetric potential produces expected force patterns', async ()
   
   disposeKernel(kernel);
   gl.deleteTexture(potentialSpectrum);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -423,7 +428,7 @@ test('KGradient: accepts external quadVAO', async () => {
   });
   
   assert.strictEqual(kernel.quadVAO, quadVAO, 'Uses provided quadVAO');
-  assert.ok(!kernel.ownsQuadVAO, 'Kernel does not own provided quadVAO');
+  assert.ok(!kernel.ownsQuadVAO, 'Kernel does not own provided quadVAO (ownsQuadVAO=' + kernel.ownsQuadVAO + ')');
   
   kernel.run();
   
@@ -434,7 +439,7 @@ test('KGradient: accepts external quadVAO', async () => {
   gl.deleteTexture(potentialSpectrum);
   gl.deleteVertexArray(quadVAO);
   gl.deleteBuffer(buffer);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -467,10 +472,10 @@ test('KGradient: dispose cleans up owned resources', async () => {
   kernel.dispose();
   
   // Textures should be deleted (checking isTexture returns false after delete)
-  assert.ok(!gl.isTexture(outX), 'Output X texture disposed');
-  assert.ok(!gl.isTexture(outY), 'Output Y texture disposed');
-  assert.ok(!gl.isTexture(outZ), 'Output Z texture disposed');
+  assert.ok(!gl.isTexture(outX), 'Output X texture disposed (isTexture=' + gl.isTexture(outX) + ')');
+  assert.ok(!gl.isTexture(outY), 'Output Y texture disposed (isTexture=' + gl.isTexture(outY) + ')');
+  assert.ok(!gl.isTexture(outZ), 'Output Z texture disposed (isTexture=' + gl.isTexture(outZ) + ')');
   
   gl.deleteTexture(potentialSpectrum);
-  resetGL(gl);
+  resetGL();
 });

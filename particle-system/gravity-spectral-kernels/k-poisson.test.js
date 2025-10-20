@@ -82,7 +82,7 @@ test('KPoisson: DC mode handling', async () => {
   assertAllFinite(result, 'All potential values should be finite');
   
   // DC mode should be zero or very small (depends on implementation)
-  assert.ok(Math.abs(dcReal) < 1e6, 'DC mode real part should be finite');
+  assert.ok(Math.abs(dcReal) < 1e6, 'DC mode real part should be finite (dcReal=' + dcReal + ', dcImag=' + dcImag + ')');
   
   // Cleanup
   disposeKernel(kernel);
@@ -135,7 +135,7 @@ test('KPoisson: non-zero frequency computation', async () => {
   
   // Should be non-zero (exact value depends on physics constants)
   const magnitude = Math.sqrt(potentialReal * potentialReal + potentialImag * potentialImag);
-  assert.ok(magnitude > 0, 'Non-DC modes should have non-zero potential');
+  assert.ok(magnitude > 0, 'Non-DC modes should have non-zero potential (|phi|=' + magnitude + ' at (1,0))');
   
   // Cleanup
   disposeKernel(kernel);
@@ -189,7 +189,7 @@ test('KPoisson: multiple frequencies', async () => {
     const real = result[idx + 0];
     const imag = result[idx + 1];
     const mag = Math.sqrt(real * real + imag * imag);
-    assert.ok(mag > 0 || (x === 0 && y === 0), `${label} should have non-zero magnitude`);
+    assert.ok(mag > 0 || (x === 0 && y === 0), `${label} should have non-zero magnitude (|phi|=${mag})`);
   };
   
   check(1, 0, '(1,0)');
