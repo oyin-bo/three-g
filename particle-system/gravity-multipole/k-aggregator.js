@@ -33,12 +33,6 @@ export class KAggregator {
   constructor(options) {
     this.gl = options.gl;
     
-    // Resource slots
-    this.inPosition = options.inPosition !== undefined ? options.inPosition : null;
-    this.outA0 = options.outA0 !== undefined ? options.outA0 : null;
-    this.outA1 = options.outA1 !== undefined ? options.outA1 : null;
-    this.outA2 = options.outA2 !== undefined ? options.outA2 : null;
-    
     // Particle configuration
     this.particleCount = options.particleCount || 0;
     this.particleTexWidth = options.particleTexWidth || 0;
@@ -46,6 +40,13 @@ export class KAggregator {
     
     // Octree configuration
     this.octreeSize = options.octreeSize || 512;
+    
+    // Resource slots - create textures if not provided per kernel contract
+    this.inPosition = options.inPosition !== undefined ? options.inPosition : null;
+    const { outA0, outA1, outA2 } = options;
+    this.outA0 = (outA0 || outA0 === null) ? outA0 : createTextureRGBA32F(this.gl, this.octreeSize, this.octreeSize);
+    this.outA1 = (outA1 || outA1 === null) ? outA1 : createTextureRGBA32F(this.gl, this.octreeSize, this.octreeSize);
+    this.outA2 = (outA2 || outA2 === null) ? outA2 : createTextureRGBA32F(this.gl, this.octreeSize, this.octreeSize);
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || 8;
     
@@ -155,6 +156,8 @@ export class KAggregator {
 
     // Bind output framebuffer (MRT)
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
+    // Reassert draw buffers on the bound FBO (robust across context changes)
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
     gl.viewport(0, 0, this.octreeSize, this.octreeSize);
     
     // Clear outputs
@@ -197,6 +200,10 @@ export class KAggregator {
     // Disable blend
     gl.disable(gl.BLEND);
     
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.useProgram(null);
+    
     // Unbind
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
@@ -218,4 +225,28 @@ export class KAggregator {
 
     this._fboShadow = null;
   }
+}
+
+/**
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ * @returns {WebGLTexture}
+ */
+function createTextureRGBA32F(gl, width, height) {
+  const fmt = gl.RGBA32F;
+  const tp = gl.FLOAT;
+
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0, gl.RGBA, tp, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  return texture;
 }

@@ -186,9 +186,18 @@ export class KForceSample {
     gl.bindVertexArray(this.particleVAO);
     gl.drawArrays(gl.POINTS, 0, this.particleCount);
     gl.bindVertexArray(null);
-    
+
     // Cleanup
     gl.disable(gl.BLEND);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.useProgram(null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
   

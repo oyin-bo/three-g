@@ -172,10 +172,10 @@ test('KTraversalQuadrupole: two particle interaction', async () => {
   // First particle should feel force in +x direction (toward second particle)
   // Force magnitude should be proportional to G * m1 * m2 / r^2
   // With distance 2, masses 1, G=0.0003, softening 0.2: expect small positive force
-  assert(result[0] > 0, 'First particle should feel attraction in +x');
+  assert.ok(result[0] > 0, 'First particle should feel attraction in +x');
   
   // Second particle should feel force in -x direction
-  assert(result[4] < 0, 'Second particle should feel attraction in -x');
+  assert.ok(result[4] < 0, 'Second particle should feel attraction in -x');
   
   // Y and Z forces should be near zero
   assertClose(result[1], 0.0, 1e-4, 'First particle force y should be ~0');

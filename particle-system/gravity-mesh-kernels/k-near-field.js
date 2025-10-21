@@ -216,6 +216,9 @@ export class KNearField {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     
     gl.bindVertexArray(null);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, null);
     
     // Restore GL state
     gl.bindFramebuffer(gl.FRAMEBUFFER, prevFB);

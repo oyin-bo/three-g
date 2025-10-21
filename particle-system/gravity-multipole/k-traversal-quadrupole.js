@@ -12,8 +12,7 @@ import fsQuadVert from '../shaders/fullscreen.vert.js';
 function buildTraversalQuadrupoleShader(levelCount) {
   const maxL = Math.max(1, Math.min(levelCount | 0, 8));
   const decls = (prefix) => Array.from({ length: maxL }, (_, i) => `uniform sampler2D ${prefix}_${i};`).join('\n');
-  const samplerDecl = `
-#version 300 es
+  const samplerDecl = `#version 300 es
 precision highp float;
 
 uniform sampler2D u_particlePositions;
@@ -362,7 +361,26 @@ export class KTraversalQuadrupole {
     gl.bindVertexArray(this.quadVAO);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
-    
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
+    for (let i = 0; i < maxLevels; i++) {
+      gl.activeTexture(gl.TEXTURE1 + i);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    }
+    if (this.enableQuadrupoles) {
+      for (let i = 0; i < maxLevels; i++) {
+        gl.activeTexture(gl.TEXTURE8 + i);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+      }
+      for (let i = 0; i < maxLevels; i++) {
+        gl.activeTexture(gl.TEXTURE16 + i);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+      }
+    }
+    gl.useProgram(null);
+
     // Unbind
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }

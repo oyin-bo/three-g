@@ -138,6 +138,9 @@ test('KTraversal: two particle interaction', async () => {
   
   aggregator.run();
   
+  //  Read octree to check aggregation results
+  const octreeCheck = readTexture(gl, octreeA0, octreeSize, octreeSize);
+  
   const outForce = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
   
   const kernel = new KTraversal({
@@ -158,8 +161,66 @@ test('KTraversal: two particle interaction', async () => {
   kernel.run();
   
   const result = readTexture(gl, outForce, particleTexWidth, particleTexHeight);
+  const posCheck = readTexture(gl, posTex, particleTexWidth, particleTexHeight);
   
   assertAllFinite(result, 'Force must be finite');
+  
+  // Add diagnostics if test would fail
+  if (result[0] <= 0) {
+    let octreeNonZero = 0, resultNonZero = 0;
+    for (let i = 0; i < octreeCheck.length; i++) {
+      if (octreeCheck[i] !== 0) octreeNonZero++;
+      if (result[i] !== 0) resultNonZero++;
+    }
+    
+    // Find which voxels have particles
+    let octreeVoxels = [];
+    for (let z = 0; z < gridSize; z++) {
+      for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+          const sliceRow = Math.floor(z / slicesPerRow);
+          const sliceCol = z % slicesPerRow;
+          const texX = sliceCol * gridSize + x;
+          const texY = sliceRow * gridSize + y;
+          const texIdx = (texY * octreeSize + texX) * 4;
+          const mass = octreeCheck[texIdx + 3];
+          if (mass > 0) {
+            octreeVoxels.push({
+              voxel: [x,y,z],
+              mass,
+              pos: [octreeCheck[texIdx]/mass, octreeCheck[texIdx+1]/mass, octreeCheck[texIdx+2]/mass]
+            });
+          }
+        }
+      }
+    }
+    
+    // Check kernel configuration
+    const kernelConfig = {
+      numLevels: kernel.numLevels,
+      levelConfigs: kernel.levelConfigs,
+      theta: kernel.theta,
+      gravityStrength: kernel.gravityStrength,
+      softening: kernel.softening,
+      worldBounds: kernel.worldBounds,
+      inLevelA0Length: kernel.inLevelA0 ? kernel.inLevelA0.length : 0,
+      inLevelA0HasTextures: kernel.inLevelA0 ? kernel.inLevelA0.map(t => t ? 'texture' : 'null') : []
+    };
+    
+    const diagnostics = {
+      Fx0: result[0],
+      Fy0: result[1],
+      Fz0: result[2],
+      particle0Pos: [posCheck[0], posCheck[1], posCheck[2], posCheck[3]],
+      particle1Pos: [posCheck[4], posCheck[5], posCheck[6], posCheck[7]],
+      octreeNonZero,
+      octreeSample: [octreeCheck[0], octreeCheck[1], octreeCheck[2], octreeCheck[3]],
+      octreeVoxels,
+      resultNonZero,
+      kernelConfig
+    };
+    assert.ok(false, 'KTraversal failed - diagnostics:\n' + JSON.stringify(diagnostics, null, 2));
+  }
   
   // Particle 0 at (-1,0,0) should feel force toward particle 1 at (1,0,0)
   // Force should be in +x direction

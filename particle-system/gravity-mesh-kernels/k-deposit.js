@@ -200,7 +200,10 @@ export class KDeposit {
       gl.drawArrays(gl.POINTS, 0, this.particleCount);
     }
     gl.bindVertexArray(null);
-    
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
     // Restore GL state
     gl.bindFramebuffer(gl.FRAMEBUFFER, prevFB);
     gl.viewport(prevVP[0], prevVP[1], prevVP[2], prevVP[3]);

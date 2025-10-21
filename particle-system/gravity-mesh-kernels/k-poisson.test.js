@@ -54,9 +54,10 @@ test('KPoisson: creates output texture when not provided', async () => {
   const outData = readTexture(gl, kernel.outPotentialSpectrum, textureSize, textureSize);
   assertAllFinite(outData, 'Output potential spectrum data is finite');
   
+  kernel.inDensitySpectrum = null;
   disposeKernel(kernel);
   gl.deleteTexture(densitySpectrum);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -105,7 +106,7 @@ test('KPoisson: produces non-zero potential from density', async () => {
   
   disposeKernel(kernel);
   gl.deleteTexture(densitySpectrum);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -139,11 +140,12 @@ test('KPoisson: works with different split modes', async () => {
     const outData = readTexture(gl, kernel.outPotentialSpectrum, textureSize, textureSize);
     assertAllFinite(outData, `Poisson output is finite for splitMode=${splitMode}`);
     
+    kernel.inDensitySpectrum = null;
     disposeKernel(kernel);
   }
   
   gl.deleteTexture(densitySpectrum);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -181,11 +183,12 @@ test('KPoisson: handles different world sizes', async () => {
     const outData = readTexture(gl, kernel.outPotentialSpectrum, textureSize, textureSize);
     assertAllFinite(outData, `Poisson output is finite for worldSize=[${worldSize}]`);
     
+    kernel.inDensitySpectrum = null;
     disposeKernel(kernel);
   }
   
   gl.deleteTexture(densitySpectrum);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -217,9 +220,10 @@ test('KPoisson: works with different deconvolution orders', async () => {
     const outData = readTexture(gl, kernel.outPotentialSpectrum, textureSize, textureSize);
     assertAllFinite(outData, `Poisson output is finite for deconvolveOrder=${deconvolveOrder}`);
     
+    kernel.inDensitySpectrum = null;
     disposeKernel(kernel);
   }
   
   gl.deleteTexture(densitySpectrum);
-  resetGL(gl);
+  resetGL();
 });

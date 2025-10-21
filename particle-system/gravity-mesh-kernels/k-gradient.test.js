@@ -91,6 +91,7 @@ test('KGradient: creates output textures when not provided', async () => {
   assertAllFinite(outDataY, 'Force spectrum Y data is finite');
   assertAllFinite(outDataZ, 'Force spectrum Z data is finite');
   
+  kernel.inPotentialSpectrum = null;
   disposeKernel(kernel);
   gl.deleteTexture(potentialSpectrum);
   resetGL();
@@ -146,9 +147,10 @@ test('KGradient: produces non-zero force spectra from potential', async () => {
   assert.ok(hasNonZeroY, 'Force spectrum Y has non-zero values (count=' + countY + ', maxMag=' + maxMagY + ')');
   // Z may be zero if no k_z components
   
+  kernel.inPotentialSpectrum = null;
   disposeKernel(kernel);
   gl.deleteTexture(potentialSpectrum);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -229,6 +231,7 @@ test('KGradient: handles different world sizes', async () => {
     const outDataX = readTexture(gl, kernel.outForceSpectrumX, textureSize, textureSize);
     assertAllFinite(outDataX, `Force spectrum X is finite for worldSize=[${worldSize}]`);
     
+    kernel.inPotentialSpectrum = null;
     disposeKernel(kernel);
   }
   
@@ -265,6 +268,7 @@ test('KGradient: works with different grid sizes', async () => {
     const outDataX = readTexture(gl, kernel.outForceSpectrumX, textureSize, textureSize);
     assertAllFinite(outDataX, `Gradient output is finite for gridSize=${gridSize}`);
     
+    kernel.inPotentialSpectrum = null;
     disposeKernel(kernel);
     gl.deleteTexture(potentialSpectrum);
   }
@@ -321,6 +325,7 @@ test('KGradient: uses provided output textures', async () => {
   const outDataX = readTexture(gl, outX, textureSize, textureSize);
   assertAllFinite(outDataX, 'External texture written successfully');
   
+  kernel.inPotentialSpectrum = null;
   disposeKernel(kernel);
   gl.deleteTexture(potentialSpectrum);
   gl.deleteTexture(outX);
@@ -348,6 +353,7 @@ test('KGradient: throws error when input not set', async () => {
     kernel.run();
   }, /inPotentialSpectrum texture not set/, 'Throws error when input not set');
   
+  kernel.inPotentialSpectrum = null;
   disposeKernel(kernel);
   resetGL();
 });
@@ -435,6 +441,7 @@ test('KGradient: accepts external quadVAO', async () => {
   const outDataX = readTexture(gl, kernel.outForceSpectrumX, textureSize, textureSize);
   assertAllFinite(outDataX, 'Works with external quadVAO');
   
+  kernel.inPotentialSpectrum = null;
   disposeKernel(kernel);
   gl.deleteTexture(potentialSpectrum);
   gl.deleteVertexArray(quadVAO);

@@ -12,15 +12,14 @@ import { getGL, createTestTexture, readTexture, assertClose, assertAllFinite, di
  * @param {(x: number, y: number) => [number, number]} valueFunc - Returns [real, imag]
  */
 function createComplexTexture(gl, size, valueFunc) {
-  const data = new Float32Array(size * size * 4);
+  // RG32F format needs stride of 2, not 4
+  const data = new Float32Array(size * size * 2);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const idx = (y * size + x) * 4;
+      const idx = (y * size + x) * 2;
       const [real, imag] = valueFunc(x, y);
       data[idx + 0] = real;  // R channel = real
       data[idx + 1] = imag;  // G channel = imaginary
-      data[idx + 2] = 0;     // B unused
-      data[idx + 3] = 0;     // A unused
     }
   }
   
@@ -119,6 +118,9 @@ test('KPoisson: non-zero frequency computation', async () => {
     worldSize: [4.0, 4.0, 4.0]
   });
   
+  // Read input for diagnostics
+  const inputCheck = readTexture(gl, inDensitySpectrum, textureSize, textureSize);
+  
   // Run kernel
   kernel.run();
   
@@ -135,6 +137,27 @@ test('KPoisson: non-zero frequency computation', async () => {
   
   // Should be non-zero (exact value depends on physics constants)
   const magnitude = Math.sqrt(potentialReal * potentialReal + potentialImag * potentialImag);
+  
+  // If test would fail, gather diagnostics
+  if (magnitude <= 0) {
+    let inputNonZero = 0, outputNonZero = 0;
+    for (let i = 0; i < inputCheck.length; i++) {
+      if (inputCheck[i] !== 0) inputNonZero++;
+      if (result[i] !== 0) outputNonZero++;
+    }
+    
+    const diagnostics = {
+      magnitude,
+      inputNonZero,
+      outputNonZero,
+      inputAt1: [inputCheck[4], inputCheck[5], inputCheck[6], inputCheck[7]],
+      outputAt1: [result[4], result[5], result[6], result[7]],
+      inputDC: [inputCheck[0], inputCheck[1], inputCheck[2], inputCheck[3]],
+      outputDC: [result[0], result[1], result[2], result[3]]
+    };
+    assert.ok(false, 'KPoisson failed - diagnostics: ' + JSON.stringify(diagnostics, null, 2));
+  }
+  
   assert.ok(magnitude > 0, 'Non-DC modes should have non-zero potential (|phi|=' + magnitude + ' at (1,0))');
   
   // Cleanup

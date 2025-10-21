@@ -183,14 +183,20 @@ export class KTraversal {
     // Bind position texture
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.inPosition);
-    gl.uniform1i(gl.getUniformLocation(this.program, 'u_positions'), 0);
+    gl.uniform1i(gl.getUniformLocation(this.program, 'u_particlePositions'), 0);
+    
+    // Set particle count
+    const particleCount = this.particleTexWidth * this.particleTexHeight;
+    gl.uniform1i(gl.getUniformLocation(this.program, 'u_particleCount'), particleCount);
     
     // Bind all octree level textures (A0 only for monopole)
     for (let i = 0; i < this.numLevels; i++) {
       const unit = gl.TEXTURE1 + i;
       gl.activeTexture(unit);
-      gl.bindTexture(gl.TEXTURE_2D, this.inLevelA0[i]);
-      gl.uniform1i(gl.getUniformLocation(this.program, `u_level${i}`), i + 1);
+      // Only bind if texture exists, otherwise bind null
+      const texture = this.inLevelA0[i] || null;
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.uniform1i(gl.getUniformLocation(this.program, `u_quadtreeLevel${i}`), i + 1);
     }
     
     // Set level configuration uniforms
@@ -198,16 +204,22 @@ export class KTraversal {
     const levelGridSizes = new Float32Array(this.numLevels);
     const levelSlicesPerRow = new Float32Array(this.numLevels);
     
+    const worldExtent = Math.max(
+      this.worldBounds.max[0] - this.worldBounds.min[0],
+      this.worldBounds.max[1] - this.worldBounds.min[1],
+      this.worldBounds.max[2] - this.worldBounds.min[2]
+    );
+    
     for (let i = 0; i < this.numLevels; i++) {
       const config = this.levelConfigs[i];
-      levelSizes[i] = config.size;
+      levelSizes[i] = worldExtent / config.gridSize;  // World-space cell size
       levelGridSizes[i] = config.gridSize;
       levelSlicesPerRow[i] = config.slicesPerRow;
     }
     
-    gl.uniform1fv(gl.getUniformLocation(this.program, 'u_levelSizes'), levelSizes);
-    gl.uniform1fv(gl.getUniformLocation(this.program, 'u_levelGridSizes'), levelGridSizes);
-    gl.uniform1fv(gl.getUniformLocation(this.program, 'u_levelSlicesPerRow'), levelSlicesPerRow);
+    gl.uniform1fv(gl.getUniformLocation(this.program, 'u_cellSizes'), levelSizes);
+    gl.uniform1fv(gl.getUniformLocation(this.program, 'u_gridSizes'), levelGridSizes);
+    gl.uniform1fv(gl.getUniformLocation(this.program, 'u_slicesPerRow'), levelSlicesPerRow);
     
     // Set physics parameters
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_texSize'),
@@ -225,7 +237,16 @@ export class KTraversal {
     gl.bindVertexArray(this.quadVAO);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
-    
+
+    for (let i = 0; i < this.numLevels; i++) {
+      const unit = gl.TEXTURE1 + i;
+      gl.activeTexture(unit);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.useProgram(null);
+
     // Unbind
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }

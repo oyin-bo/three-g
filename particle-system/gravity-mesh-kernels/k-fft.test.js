@@ -53,7 +53,7 @@ test('KFFT: creates output texture when not provided', async () => {
   
   const kernel = new KFFT({
     gl,
-    inGrid: inputGrid,
+    grid: inputGrid,
     gridSize,
     slicesPerRow,
     textureSize,
@@ -61,12 +61,12 @@ test('KFFT: creates output texture when not provided', async () => {
     cellVolume: 1.0
   });
   
-  assert.ok(kernel.outSpectrum, 'Output spectrum texture created (textureSize=' + textureSize + ')');
-  assert.ok(kernel.ownsOutSpectrum, 'Kernel owns output texture (ownsOutSpectrum=' + kernel.ownsOutSpectrum + ')');
+  assert.ok(kernel.spectrum, 'Output spectrum texture created (textureSize=' + textureSize + ')');
+  assert.ok(kernel.ownsSpectrum, 'Kernel owns output texture (ownsSpectrum=' + kernel.ownsSpectrum + ')');
   
   kernel.run();
   
-  const outData = readTexture(gl, kernel.outSpectrum, textureSize, textureSize);
+  const outData = readTexture(gl, kernel.spectrum, textureSize, textureSize);
   assertAllFinite(outData, 'Output spectrum data is finite');
   
   disposeKernel(kernel);
@@ -88,7 +88,7 @@ test('KFFT: forward FFT produces complex output', async () => {
   
   const kernel = new KFFT({
     gl,
-    inGrid: inputGrid,
+    grid: inputGrid,
     gridSize,
     slicesPerRow,
     textureSize,
@@ -99,7 +99,7 @@ test('KFFT: forward FFT produces complex output', async () => {
   kernel.run();
   
   // Read output spectrum (RG32F format - real and imaginary parts)
-  const outData = readTexture(gl, kernel.outSpectrum, textureSize, textureSize);
+  const outData = readTexture(gl, kernel.spectrum, textureSize, textureSize);
   
   // Check that we have some non-zero values
   let hasNonZero = false;
@@ -140,7 +140,7 @@ test('KFFT: inverse FFT recovers original (round-trip)', async () => {
   // Forward FFT
   const forwardKernel = new KFFT({
     gl,
-    inGrid: inputGrid,
+    grid: inputGrid,
     gridSize,
     slicesPerRow,
     textureSize,
@@ -163,7 +163,8 @@ test('KFFT: inverse FFT recovers original (round-trip)', async () => {
   // Inverse FFT
   const inverseKernel = new KFFT({
     gl,
-    outSpectrum: outputGrid,
+    spectrum: forwardKernel.spectrum,
+    grid: outputGrid,
     gridSize,
     slicesPerRow,
     textureSize,
@@ -171,7 +172,7 @@ test('KFFT: inverse FFT recovers original (round-trip)', async () => {
     cellVolume: 1.0
   });
   
-  inverseKernel.runInverseToReal(forwardKernel.outSpectrum, outputGrid);
+  inverseKernel.run();
   
   const outputData = readTexture(gl, outputGrid, textureSize, textureSize);
   
@@ -185,6 +186,32 @@ test('KFFT: inverse FFT recovers original (round-trip)', async () => {
   for (let i = 0; i < inputData.length; i += 4) {
     maxInput = Math.max(maxInput, inputData[i + 3]);
     maxOutput = Math.max(maxOutput, outputData[i + 3]);
+  }
+  
+  // If test would fail, gather detailed diagnostics
+  if (maxOutput <= 0) {
+    // Read intermediate stages for diagnostics
+    const forwardSpectrum = readTexture(gl, forwardKernel.spectrum, textureSize, textureSize);
+    
+    // Count non-zero values at each stage
+    let inputNonZero = 0, fwdNonZero = 0, outputNonZero = 0;
+    for (let i = 0; i < inputData.length; i++) {
+      if (inputData[i] !== 0) inputNonZero++;
+      if (forwardSpectrum[i] !== 0) fwdNonZero++;
+      if (outputData[i] !== 0) outputNonZero++;
+    }
+    
+    // Sample key pixels
+    const diagnostics = {
+      maxInput, maxOutput,
+      inputNonZero, fwdNonZero, outputNonZero,
+      inputDC: [inputData[0], inputData[1], inputData[2], inputData[3]],
+      fwdDC: [forwardSpectrum[0], forwardSpectrum[1], forwardSpectrum[2], forwardSpectrum[3]],
+      outputDC: [outputData[0], outputData[1], outputData[2], outputData[3]],
+      outputSample: [outputData[4], outputData[5], outputData[6], outputData[7]]
+    };
+    
+    assert.ok(false, 'Inverse FFT failed - diagnostics: ' + JSON.stringify(diagnostics, null, 2));
   }
   
   assert.ok(maxOutput > 0, 'Inverse FFT has non-zero peak: ' + maxOutput + ' (maxInput: ' + maxInput + ')');
@@ -210,7 +237,7 @@ test('KFFT: works with different grid sizes', async () => {
     
     const kernel = new KFFT({
       gl,
-      inGrid: inputGrid,
+      grid: inputGrid,
       gridSize,
       slicesPerRow,
       textureSize,
@@ -220,7 +247,7 @@ test('KFFT: works with different grid sizes', async () => {
     
     kernel.run();
     
-    const outData = readTexture(gl, kernel.outSpectrum, textureSize, textureSize);
+    const outData = readTexture(gl, kernel.spectrum, textureSize, textureSize);
     assertAllFinite(outData, `FFT output is finite for gridSize=${gridSize}`);
     
     disposeKernel(kernel);

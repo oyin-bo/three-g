@@ -103,6 +103,7 @@ test('KNearField: creates output textures when not provided', async () => {
   assertAllFinite(outDataY, 'Near-field force Y data is finite');
   assertAllFinite(outDataZ, 'Near-field force Z data is finite');
   
+  kernel.inMassGrid = null;
   disposeKernel(kernel);
   gl.deleteTexture(massGrid);
   resetGL();
@@ -146,9 +147,10 @@ test('KNearField: empty mass grid produces zero forces', async () => {
     assertClose(outDataZ[i], 0.0, 0.001, `Force Z at index ${i} is near zero`);
   }
   
+  kernel.inMassGrid = null;
   disposeKernel(kernel);
   gl.deleteTexture(massGrid);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -192,9 +194,10 @@ test('KNearField: single mass produces radial forces', async () => {
   const neighborForce = readVoxel(outDataX, 3, 2, 2, gridSize, slicesPerRow);
   assert.ok(Math.abs(neighborForce[0]) > 0.0, 'Neighboring voxel has non-zero force: |Fx_neighbor|=' + Math.abs(neighborForce[0]) + ' > 0');
   
+  kernel.inMassGrid = null;
   disposeKernel(kernel);
   gl.deleteTexture(massGrid);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -229,11 +232,12 @@ test('KNearField: works with different near-field radii', async () => {
     const outDataX = readTexture(gl, kernel.outForceX, textureSize, textureSize);
     assertAllFinite(outDataX, `Near-field forces finite for radius=${nearFieldRadius}`);
     
+    kernel.inMassGrid = null;
     disposeKernel(kernel);
   }
   
   gl.deleteTexture(massGrid);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -268,11 +272,12 @@ test('KNearField: handles different softening values', async () => {
     const outDataX = readTexture(gl, kernel.outForceX, textureSize, textureSize);
     assertAllFinite(outDataX, `Forces finite for softening=${softening}`);
     
+    kernel.inMassGrid = null;
     disposeKernel(kernel);
   }
   
   gl.deleteTexture(massGrid);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -311,6 +316,7 @@ test('KNearField: scales forces with gravity strength', async () => {
     const neighborForce = readVoxel(outDataX, 3, 2, 2, gridSize, slicesPerRow);
     results.push(Math.abs(neighborForce[0]));
     
+    kernel.inMassGrid = null;
     disposeKernel(kernel);
   }
   
@@ -319,7 +325,7 @@ test('KNearField: scales forces with gravity strength', async () => {
   assert.ok(results[2] > results[1], 'Even higher G produces even larger forces: F[G3]=' + results[2] + ' > F[G2]=' + results[1] + ')');
   
   gl.deleteTexture(massGrid);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -368,9 +374,10 @@ test('KNearField: handles multiple masses', async () => {
   assert.ok(Math.abs(force1[0]) > 0.0, 'Force exists near first mass: |Fx|=' + Math.abs(force1[0]));
   // Second force may or may not be significant depending on distance
   
+  kernel.inMassGrid = null;
   disposeKernel(kernel);
   gl.deleteTexture(massGrid);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -425,6 +432,7 @@ test('KNearField: uses provided output textures', async () => {
   const outDataX = readTexture(gl, outX, textureSize, textureSize);
   assertAllFinite(outDataX, 'External texture written successfully');
   
+  kernel.inMassGrid = null;
   disposeKernel(kernel);
   gl.deleteTexture(massGrid);
   gl.deleteTexture(outX);
@@ -455,6 +463,7 @@ test('KNearField: throws error when input not set', async () => {
     kernel.run();
   }, /inMassGrid texture not set/, 'Throws error when input not set');
   
+  kernel.inMassGrid = null;
   disposeKernel(kernel);
   resetGL();
 });
@@ -503,6 +512,7 @@ test('KNearField: accepts external quadVAO', async () => {
   const outDataX = readTexture(gl, kernel.outForceX, textureSize, textureSize);
   assertAllFinite(outDataX, 'Works with external quadVAO');
   
+  kernel.inMassGrid = null;
   disposeKernel(kernel);
   gl.deleteTexture(massGrid);
   gl.deleteVertexArray(quadVAO);
@@ -548,7 +558,7 @@ test('KNearField: dispose cleans up owned resources', async () => {
   assert.ok(!gl.isTexture(outZ), 'Output Z texture disposed (isTexture=' + gl.isTexture(outZ) + ')');
   
   gl.deleteTexture(massGrid);
-  resetGL(gl);
+  resetGL();
 });
 
 /**
@@ -589,9 +599,10 @@ test('KNearField: handles different world bounds', async () => {
     const outDataX = readTexture(gl, kernel.outForceX, textureSize, textureSize);
     assertAllFinite(outDataX, `Forces finite for bounds=[${bounds.min}] to [${bounds.max}]`);
     
+    kernel.inMassGrid = null;
     disposeKernel(kernel);
   }
   
   gl.deleteTexture(massGrid);
-  resetGL(gl);
+  resetGL();
 });

@@ -14,8 +14,8 @@ export class KFFT {
   /**
    * @param {{
    *   gl: WebGL2RenderingContext,
-   *   inGrid?: WebGLTexture|null,
-   *   outSpectrum?: WebGLTexture|null,
+   *   grid?: WebGLTexture|null,
+   *   spectrum?: WebGLTexture|null,
    *   quadVAO?: WebGLVertexArrayObject|null,
    *   gridSize?: number,
    *   slicesPerRow?: number,
@@ -28,8 +28,8 @@ export class KFFT {
     this.gl = options.gl;
     
     // Resource slots
-    this.inGrid = options.inGrid !== undefined ? options.inGrid : null;
-    this.outSpectrum = options.outSpectrum !== undefined ? options.outSpectrum : null;
+    this.grid = options.grid !== undefined ? options.grid : null;
+    this.spectrum = options.spectrum !== undefined ? options.spectrum : null;
     this.quadVAO = options.quadVAO !== undefined ? options.quadVAO : null;
     
     // Grid configuration
@@ -95,11 +95,11 @@ export class KFFT {
     }
     
     // If no output texture provided, create one
-    if (!this.outSpectrum) {
-      this.outSpectrum = this._createSpectrumTexture();
-      this.ownsOutSpectrum = true;
+    if (!this.spectrum) {
+      this.spectrum = this._createSpectrumTexture();
+      this.ownsSpectrum = true;
     } else {
-      this.ownsOutSpectrum = false;
+      this.ownsSpectrum = false;
     }
     
     // Create quad VAO if not provided
@@ -248,18 +248,19 @@ export class KFFT {
   _convertRealToComplex() {
     const gl = this.gl;
     
-    if (!this.inGrid) {
-      throw new Error('KFFT: inGrid not set for real-to-complex conversion');
+    if (!this.grid) {
+      throw new Error('KFFT: grid not set for real-to-complex conversion');
     }
     
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outSpectrum, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.spectrum, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
     
     gl.viewport(0, 0, this.textureSize, this.textureSize);
     gl.useProgram(this.realToComplexProgram);
     
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.inGrid);
+    gl.bindTexture(gl.TEXTURE_2D, this.grid);
     gl.uniform1i(gl.getUniformLocation(this.realToComplexProgram, 'u_massGrid'), 0);
     gl.uniform1f(gl.getUniformLocation(this.realToComplexProgram, 'u_cellVolume'), this.cellVolume);
     
@@ -297,12 +298,13 @@ export class KFFT {
         gl.uniform1i(uStage, stage);
         
         const readFromPrimary = (stage % 2 === 0);
-        const readTex = readFromPrimary ? this.outSpectrum : this.pingPongTexture;
-        const writeTex = readFromPrimary ? this.pingPongTexture : this.outSpectrum;
+        const readTex = readFromPrimary ? this.spectrum : this.pingPongTexture;
+        const writeTex = readFromPrimary ? this.pingPongTexture : this.spectrum;
         const writeFBO = readFromPrimary ? this.pingPongFBO : this.framebuffer;
         
         gl.bindFramebuffer(gl.FRAMEBUFFER, writeFBO);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, writeTex, 0);
+        gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
         
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, readTex);
@@ -315,7 +317,7 @@ export class KFFT {
       
       // If odd number of stages, result is in ping-pong, copy to primary
       if (numStages % 2 === 1) {
-        this._copyTexture(this.pingPongTexture, this.outSpectrum);
+        this._copyTexture(this.pingPongTexture, this.spectrum);
       }
     }
     
@@ -328,6 +330,8 @@ export class KFFT {
     const tempFBO = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, tempFBO);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outputTexture, 0);
+    // Make sure we render to COLOR_ATTACHMENT0 on this FBO
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
     
     gl.viewport(0, 0, this.textureSize, this.textureSize);
     gl.disable(gl.BLEND);
@@ -336,10 +340,10 @@ export class KFFT {
     gl.useProgram(this.complexToRealProgram);
     
     // Avoid sampling from the same texture that is currently bound as the draw target
-    // If outputTexture === outSpectrum, copy outSpectrum into pingPongTexture and sample from it
-    let sourceTex = this.outSpectrum;
-    if (outputTexture === this.outSpectrum) {
-      this._copyTexture(this.outSpectrum, this.pingPongTexture);
+    // If outputTexture === spectrum, copy spectrum into pingPongTexture and sample from it
+    let sourceTex = this.spectrum;
+    if (outputTexture === this.spectrum) {
+      this._copyTexture(this.spectrum, this.pingPongTexture);
       sourceTex = this.pingPongTexture;
     }
     
@@ -372,11 +376,11 @@ export class KFFT {
   run() {
     const gl = this.gl;
     
-    if (!this.inGrid && !this.inverse) {
-      throw new Error('KFFT: inGrid texture not set for forward transform');
+    if (!this.grid && !this.inverse) {
+      throw new Error('KFFT: grid texture not set for forward transform');
     }
-    if (!this.outSpectrum) {
-      throw new Error('KFFT: outSpectrum texture not set');
+    if (!this.spectrum) {
+      throw new Error('KFFT: spectrum texture not set');
     }
     
     // Save GL state
@@ -390,11 +394,17 @@ export class KFFT {
     if (!this.inverse) {
       // Forward FFT: real grid -> complex spectrum
       this._convertRealToComplex();
-      this._perform3DFFT();
-    } else {
-      // Inverse FFT: complex spectrum -> complex spectrum (caller extracts real)
-      this._perform3DFFT();
     }
+    
+    this._perform3DFFT();
+    
+    if (this.inverse) {
+      // Inverse FFT: extract real part from spectrum back to grid
+      this._extractRealPart(this.grid);
+    }
+    
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, null);
     
     // Restore GL state
     gl.bindFramebuffer(gl.FRAMEBUFFER, prevFB);
@@ -403,33 +413,6 @@ export class KFFT {
     gl.bindVertexArray(prevVAO);
     if (prevBlend) gl.enable(gl.BLEND);
     if (prevDepthTest) gl.enable(gl.DEPTH_TEST);
-  }
-
-  /**
-   * Run inverse FFT and extract real part to output texture
-   * @param {WebGLTexture} inputSpectrum - Input spectrum texture
-   * @param {WebGLTexture} outputRealGrid - Output real-valued texture
-   */
-  runInverseToReal(inputSpectrum, outputRealGrid) {
-    const gl = this.gl;
-    
-    // Copy input spectrum to working texture
-    const fbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, inputSpectrum, 0);
-    
-    gl.bindTexture(gl.TEXTURE_2D, this.outSpectrum);
-    gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, this.textureSize, this.textureSize);
-    
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    gl.deleteFramebuffer(fbo);
-    
-    // Perform inverse FFT
-    this.inverse = true;
-    this.run();
-    
-    // Extract real part
-    this._extractRealPart(outputRealGrid);
   }
 
   dispose() {
@@ -465,9 +448,9 @@ export class KFFT {
       this.pingPongTexture = null;
     }
     
-    if (this.ownsOutSpectrum && this.outSpectrum) {
-      gl.deleteTexture(this.outSpectrum);
-      this.outSpectrum = null;
+    if (this.ownsSpectrum && this.spectrum) {
+      gl.deleteTexture(this.spectrum);
+      this.spectrum = null;
     }
     
     if (this.ownsQuadVAO && this.quadVAO) {

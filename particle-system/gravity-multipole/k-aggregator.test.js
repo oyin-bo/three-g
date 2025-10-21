@@ -141,11 +141,11 @@ test('KAggregator: multiple particles same voxel with blending', async () => {
   const particleTexWidth = 2;
   const particleTexHeight = 2;
   
-  // Three particles near (0, 0, 0), all mapping to center voxel
+  // Three particles all in center voxel [2,2,2] (world range [0,1])
   const posData = new Float32Array([
-    0.0, 0.0, 0.0, 1.0,  // particle 0
-    0.1, 0.1, 0.1, 2.0,  // particle 1
-    -0.1, -0.1, -0.1, 1.5, // particle 2
+    0.0, 0.0, 0.0, 1.0,  // particle 0 at center
+    0.1, 0.1, 0.1, 2.0,  // particle 1 slightly offset
+    0.2, 0.2, 0.2, 1.5,  // particle 2 further offset (still in [0,1])
     0.0, 0.0, 0.0, 0.0   // unused
   ]);
   const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
@@ -182,8 +182,39 @@ test('KAggregator: multiple particles same voxel with blending', async () => {
   const [a0_r, a0_g, a0_b, a0_a] = readVoxel(resultA0, 2, 2, 2, gridSize, slicesPerRow);
   
   // Total mass = 1.0 + 2.0 + 1.5 = 4.5
-  // Total mass*x = 0*1 + 0.1*2 + (-0.1)*1.5 = 0.2 - 0.15 = 0.05
-  assertClose(a0_r, 0.05, 1e-4, 'A0.r (sum mass*x)');
+  // Total mass*x = 0*1 + 0.1*2 + 0.2*1.5 = 0 + 0.2 + 0.3 = 0.5
+  
+  // Add diagnostics if test fails
+  if (Math.abs(a0_r - 0.5) > 1e-4) {
+    // Check all voxels to see where data went
+    let voxelsWithData = [];
+    for (let z = 0; z < gridSize; z++) {
+      for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+          const voxel = readVoxel(resultA0, x, y, z, gridSize, slicesPerRow);
+          if (voxel[3] > 0) {
+            voxelsWithData.push({
+              coords: [x,y,z],
+              mass: voxel[3],
+              massX: voxel[0],
+              massY: voxel[1],
+              massZ: voxel[2]
+            });
+          }
+        }
+      }
+    }
+    
+    const diagnostics = {
+      centerVoxel: { r: a0_r, g: a0_g, b: a0_b, a: a0_a },
+      voxelsWithData,
+      expectedMassX: 0.5,
+      expectedMass: 4.5
+    };
+    assert.ok(false, 'KAggregator blending failed - diagnostics: ' + JSON.stringify(diagnostics, null, 2));
+  }
+  
+  assertClose(a0_r, 0.5, 1e-4, 'A0.r (sum mass*x)');
   assertClose(a0_a, 4.5, 1e-4, 'A0.a (sum mass)');
   
   disposeKernel(kernel);
@@ -241,6 +272,58 @@ test('KAggregator: particles in different voxels', async () => {
   // Check corner voxels have mass
   const corner000 = readVoxel(resultA0, 0, 0, 0, gridSize, slicesPerRow);
   const corner333 = readVoxel(resultA0, 3, 3, 3, gridSize, slicesPerRow);
+  const corner030 = readVoxel(resultA0, 0, 3, 0, gridSize, slicesPerRow);
+  const corner303 = readVoxel(resultA0, 3, 0, 3, gridSize, slicesPerRow);
+  
+  // Add diagnostics if test would fail
+  if (Math.abs(corner000[3] - 1.0) > 1e-4) {
+    // Check which voxels have data
+    let voxelsWithData = [];
+    for (let z = 0; z < gridSize; z++) {
+      for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+          const voxel = readVoxel(resultA0, x, y, z, gridSize, slicesPerRow);
+          if (voxel[3] > 0) {
+            voxelsWithData.push({ 
+              coords: [x,y,z], 
+              mass: voxel[3], 
+              pos: [voxel[0]/voxel[3], voxel[1]/voxel[3], voxel[2]/voxel[3]]
+            });
+          }
+        }
+      }
+    }
+    
+    // Calculate expected voxel coords for each particle
+    const worldMin = [-2, -2, -2];
+    const worldMax = [2, 2, 2];
+    const expectedVoxels = [
+      { particle: [-1.5, -1.5, -1.5], expected: [0,0,0] },
+      { particle: [1.5, 1.5, 1.5], expected: [3,3,3] },
+      { particle: [-1.5, 1.5, -1.5], expected: [0,3,0] },
+      { particle: [1.5, -1.5, 1.5], expected: [3,0,3] }
+    ].map(p => {
+      const norm = [
+        (p.particle[0] - worldMin[0]) / (worldMax[0] - worldMin[0]),
+        (p.particle[1] - worldMin[1]) / (worldMax[1] - worldMin[1]),
+        (p.particle[2] - worldMin[2]) / (worldMax[2] - worldMin[2])
+      ];
+      const voxel = norm.map(n => Math.floor(n * gridSize));
+      return { ...p, norm, voxel };
+    });
+    
+    const diagnostics = {
+      corner000: corner000,
+      corner333: corner333,
+      corner030: corner030,
+      corner303: corner303,
+      voxelsWithData,
+      expectedVoxels,
+      gridSize,
+      worldBounds: { min: worldMin, max: worldMax }
+    };
+    assert.ok(false, 'KAggregator failed - diagnostics:\n' + JSON.stringify(diagnostics, null, 2));
+  }
   
   assertClose(corner000[3], 1.0, 1e-4, 'Corner (0,0,0) mass');
   assertClose(corner333[3], 1.0, 1e-4, 'Corner (3,3,3) mass');

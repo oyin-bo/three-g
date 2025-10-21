@@ -99,6 +99,9 @@ export class KForceSample {
     if (!buffer) throw new Error('Failed to create buffer');
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, new Float32Array(this.particleCount), this.gl.STATIC_DRAW);
+    // Enable dummy attribute for gl_VertexID to work on all implementations
+    this.gl.enableVertexAttribArray(0);
+    this.gl.vertexAttribPointer(0, 1, this.gl.FLOAT, false, 0, 0);
     this.gl.bindVertexArray(null);
     this.particleVAO = particleVAO;
 
@@ -155,6 +158,8 @@ export class KForceSample {
     // Bind FBO and attach output texture
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outForce, 0);
+    // Ensure we are drawing to COLOR_ATTACHMENT0
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
     
     const fbStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
     if (fbStatus !== gl.FRAMEBUFFER_COMPLETE) {
@@ -203,6 +208,15 @@ export class KForceSample {
     gl.bindVertexArray(this.particleVAO);
     gl.drawArrays(gl.POINTS, 0, this.particleCount);
     gl.bindVertexArray(null);
+    
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, null);
     
     // Restore GL state
     gl.bindFramebuffer(gl.FRAMEBUFFER, prevFB);

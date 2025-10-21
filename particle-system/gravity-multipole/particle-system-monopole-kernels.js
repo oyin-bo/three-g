@@ -102,12 +102,11 @@ export class ParticleSystemMonopoleKernels {
 
     // Create aggregator kernel for L0. Do not pass concrete output textures;
     // let the kernel allocate them and expose them as properties (outA0/outA1/outA2).
+    // Per kernel contract: omit options (don't pass null) to trigger creation.
   this.aggregatorKernel = new KAggregator({
       gl: this.gl,
       inPosition: null,  // set per-frame before run
-      outA0: null,
-      outA1: null,
-      outA2: null,
+      // outA0/outA1/outA2 omitted - kernel will create them
       particleCount: this.options.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,

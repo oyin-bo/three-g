@@ -270,8 +270,8 @@ export class ParticleSystemMeshKernels {
     // FFT kernel for forward transform
     this.fftForwardKernel = new KFFT({
       gl: this.gl,
-      inGrid: null,
-      outSpectrum: null,
+      grid: null,
+      spectrum: null,
       quadVAO: this.quadVAO,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
@@ -315,8 +315,8 @@ export class ParticleSystemMeshKernels {
     // FFT kernel for inverse transforms (reused for x, y, z)
     this.fftInverseKernel = new KFFT({
       gl: this.gl,
-      inGrid: null,
-      outSpectrum: null,
+      grid: null,
+      spectrum: null,
       quadVAO: this.quadVAO,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
@@ -413,11 +413,11 @@ export class ParticleSystemMeshKernels {
     }
     
     // Forward FFT: mass grid -> density spectrum
-    this.fftForwardKernel.inGrid = this.depositKernel.outGrid;
+    this.fftForwardKernel.grid = this.depositKernel.outGrid;
     this.fftForwardKernel.run();
     
     // Solve Poisson: density spectrum -> potential spectrum
-    this.poissonKernel.inDensitySpectrum = this.fftForwardKernel.outSpectrum;
+    this.poissonKernel.inDensitySpectrum = this.fftForwardKernel.spectrum;
     this.poissonKernel.run();
     
     // Compute gradient: potential spectrum -> force spectra
@@ -425,19 +425,18 @@ export class ParticleSystemMeshKernels {
     this.gradientKernel.run();
     
     // Inverse FFT for each force component: force spectra -> force grids
-    // Note: KFFT has a convenience method for this
-    this.fftInverseKernel.runInverseToReal(
-      this.gradientKernel.outForceSpectrumX,
-      this.gradientKernel.outForceSpectrumX
-    );
-    this.fftInverseKernel.runInverseToReal(
-      this.gradientKernel.outForceSpectrumY,
-      this.gradientKernel.outForceSpectrumY
-    );
-    this.fftInverseKernel.runInverseToReal(
-      this.gradientKernel.outForceSpectrumZ,
-      this.gradientKernel.outForceSpectrumZ
-    );
+    // Set spectrum input and grid output, then run with inverse flag
+    this.fftInverseKernel.spectrum = this.gradientKernel.outForceSpectrumX;
+    this.fftInverseKernel.grid = this.gradientKernel.outForceSpectrumX;
+    this.fftInverseKernel.run();
+    
+    this.fftInverseKernel.spectrum = this.gradientKernel.outForceSpectrumY;
+    this.fftInverseKernel.grid = this.gradientKernel.outForceSpectrumY;
+    this.fftInverseKernel.run();
+    
+    this.fftInverseKernel.spectrum = this.gradientKernel.outForceSpectrumZ;
+    this.fftInverseKernel.grid = this.gradientKernel.outForceSpectrumZ;
+    this.fftInverseKernel.run();
   }
   
   _sampleForces() {

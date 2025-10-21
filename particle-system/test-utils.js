@@ -29,6 +29,12 @@ export function getGL() {
     if (!ext) {
       throw new Error('EXT_color_buffer_float not supported');
     }
+    
+    // Enable float blending for additive accumulation
+    const floatBlend = sharedGL.getExtension('EXT_float_blend');
+    if (!floatBlend) {
+      console.warn('EXT_float_blend not supported - blending on float textures may not work');
+    }
   }
   return sharedGL;
 }
@@ -139,6 +145,7 @@ export function assertEqual(actual, expected, message = '') {
 }
 
 /**
+ * TODO: this function should not exist: it repeats what a kernel is supposed to do in the first place. We should remove it explicitly, but ONLY when the requested and planned!
  * Dispose all WebGL resources in an object (kernel cleanup).
  * @param {object} kernel
  */
@@ -185,11 +192,11 @@ export function resetGL() {
   // Clear any errors
   const busyUntil = Date.now() + 100;
   while (Date.now() < busyUntil) {
-    if (gl.getError() !== gl.NO_ERROR) break;
+    if (gl.getError() === gl.NO_ERROR) break;
   }
 
   let glError = gl.getError();
-  if (glError === gl.NO_ERROR) throw new Error('gl.getError() expected not to be gl.NO_ERROR ' + glError);
+  if (glError !== gl.NO_ERROR) throw new Error('gl.getError() expected to be gl.NO_ERROR ' + glError);
 }
 
 /**

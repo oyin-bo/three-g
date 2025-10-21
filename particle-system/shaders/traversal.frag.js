@@ -103,8 +103,8 @@ void main() {
     norm = clamp(norm, vec3(0.0), vec3(1.0 - (1.0 / gridSize)));
     ivec3 myVoxel = ivec3(floor(norm * gridSize));
 
-    // Sample full 3D neighborhood (27 voxels - 1 center = 26 voxels)
-    // Use all neighbors to avoid anisotropic sampling bias
+    // Sample full 3D neighborhood (27 voxels including center)
+    // Include center voxel to allow same-voxel particle interactions
     const int R = 1;
     int parentLevel = level + 1;
     bool hasParent = (parentLevel < u_numLevels) && (level >= 1);
@@ -113,7 +113,7 @@ void main() {
     for (int dz = -R; dz <= R; dz++) {
       for (int dy = -R; dy <= R; dy++) {
         for (int dx = -R; dx <= R; dx++) {
-          if (dx == 0 && dy == 0 && dz == 0) { continue; } // Skip center
+          // Include center voxel for same-voxel interactions
           
           ivec3 neighborVoxel = myVoxel + ivec3(dx, dy, dz);
           
@@ -190,7 +190,7 @@ void main() {
     for (int dz = -R0; dz <= R0; dz++) {
       for (int dy = -R0; dy <= R0; dy++) {
         for (int dx = -R0; dx <= R0; dx++) {
-          if (dx == 0 && dy == 0 && dz == 0) { continue; }
+          // Include center voxel for same-voxel interactions
           
           // Skip far corners to maintain isotropy
           int manhattan = abs(dx) + abs(dy) + abs(dz);
