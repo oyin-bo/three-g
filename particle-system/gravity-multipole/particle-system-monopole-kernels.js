@@ -117,9 +117,9 @@ export class ParticleSystemMonopoleKernels {
       disableFloatBlend: this.disableFloatBlend
     });
 
-    // Create pyramid build kernels for each reduction level. They will own their
-    // own input/output textures; wiring is performed at runtime after the
-    // previous-level kernel runs.
+    // Create pyramid build kernels for each reduction level. Per kernel contract,
+    // omit output texture options so kernels allocate their own. Pass null for
+    // inputs since they will be wired at runtime from previous-level outputs.
     this.pyramidKernels = [];
     for (let i = 0; i < this.numLevels - 1; i++) {
       this.pyramidKernels.push(new KPyramidBuild({
@@ -127,22 +127,20 @@ export class ParticleSystemMonopoleKernels {
         inA0: null,
         inA1: null,
         inA2: null,
-        outA0: null,
-        outA1: null,
-        outA2: null,
+        // outA0/outA1/outA2 omitted - kernel will create them
         outSize: this.levelConfigs[i + 1].size,
         outGridSize: this.levelConfigs[i + 1].gridSize,
         outSlicesPerRow: this.levelConfigs[i + 1].slicesPerRow
       }));
     }
 
-    // Create traversal kernel. Do not pass level textures; we'll wire them
-    // from the pyramid kernels after the pyramid build runs.
+    // Create traversal kernel. Omit outForce so kernel allocates it. Pass null for
+    // inPosition (set per-frame). We'll wire inLevelA0 from pyramid outputs after build.
   this.traversalKernel = new KTraversal({
       gl: this.gl,
       inPosition: null,  // set per-frame
       inLevelA0: undefined,
-      outForce: null,
+      // outForce omitted - kernel will create it
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
       numLevels: this.numLevels,

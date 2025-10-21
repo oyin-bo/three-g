@@ -30,14 +30,23 @@ export class KTraversal {
   constructor(options) {
     this.gl = options.gl;
     
-    // Resource slots
-    this.inPosition = options.inPosition !== undefined ? options.inPosition : null;
-    this.inLevelA0 = options.inLevelA0 || [];
-    this.outForce = options.outForce !== undefined ? options.outForce : null;
-    
     // Particle texture dimensions
     this.particleTexWidth = options.particleTexWidth || 0;
     this.particleTexHeight = options.particleTexHeight || 0;
+    
+    // Resource slots - follow kernel contract: (truthy || === null) ? use : create
+    this.inPosition = (options.inPosition || options.inPosition === null)
+      ? options.inPosition
+      : createTextureRGBA32F(this.gl, this.particleTexWidth, this.particleTexHeight);
+    
+    this.inLevelA0 = (options.inLevelA0 || options.inLevelA0 === null)
+      ? options.inLevelA0
+      : [];
+    
+    // Allocate outForce if not provided (truthy) or explicitly null
+    this.outForce = (options.outForce || options.outForce === null) 
+      ? options.outForce 
+      : createTextureRGBA32F(this.gl, this.particleTexWidth, this.particleTexHeight);
     
     // Octree configuration
     this.numLevels = options.numLevels || 7;
@@ -156,7 +165,7 @@ export class KTraversal {
     gl.useProgram(this.program);
 
     // Ensure framebuffer attachments match our output
-    if (!this._fboShadow?.a0 !== this.outForce) {
+    if (this._fboShadow?.a0 !== this.outForce) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outForce, 0);
       gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
@@ -267,3 +276,28 @@ export class KTraversal {
     this._fboShadow = null;
   }
 }
+
+/**
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ * @returns {WebGLTexture}
+ */
+function createTextureRGBA32F(gl, width, height) {
+  const fmt = gl.RGBA32F;
+  const tp = gl.FLOAT;
+
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0, gl.RGBA, tp, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  return texture;
+}
+

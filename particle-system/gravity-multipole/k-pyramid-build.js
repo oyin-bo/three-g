@@ -112,7 +112,7 @@ export class KPyramidBuild {
     // Ensure the framebuffer attachments match our current outputs. We
     // only reconfigure when attachments differ from the shadow to avoid
     // redundant GL calls.
-    if (!this._fboShadow?.a0 !== this.outA0 ||
+    if (this._fboShadow?.a0 !== this.outA0 ||
       this._fboShadow?.a1 !== this.outA1 ||
       this._fboShadow?.a2 !== this.outA2) {
       this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.outFramebuffer);
