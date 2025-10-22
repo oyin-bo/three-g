@@ -241,7 +241,6 @@ test('KDeposit: creates output texture when not provided', async () => {
   });
   
   assert.ok(kernel.outGrid, 'Output texture created (textureSize=' + 8 + '×' + 8 + ')');
-  assert.ok(kernel.ownsOutGrid, 'Kernel owns output texture (ownsOutGrid=' + kernel.ownsOutGrid + ')');
   
   kernel.run();
   

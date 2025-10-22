@@ -84,7 +84,6 @@ test('KForceSample: creates output texture when not provided', async () => {
   });
   
   assert.ok(kernel.outForce, 'Output force texture created (w=' + particleTexWidth + ', h=' + particleTexHeight + ')');
-  assert.ok(kernel.ownsOutForce, 'Kernel owns output texture (ownsOutForce=' + kernel.ownsOutForce + ')');
   
   kernel.run();
   

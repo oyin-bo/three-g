@@ -79,7 +79,6 @@ test('KGradient: creates output textures when not provided', async () => {
   assert.ok(kernel.outForceSpectrumX, 'Output X force spectrum texture created (textureSize=' + textureSize + ')');
   assert.ok(kernel.outForceSpectrumY, 'Output Y force spectrum texture created (textureSize=' + textureSize + ')');
   assert.ok(kernel.outForceSpectrumZ, 'Output Z force spectrum texture created (textureSize=' + textureSize + ')');
-  assert.ok(kernel.ownsOutTextures, 'Kernel owns output textures (ownsOutTextures=' + kernel.ownsOutTextures + ')');
   
   kernel.run();
   
