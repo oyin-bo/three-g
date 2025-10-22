@@ -113,7 +113,7 @@ outcome.animate = () => {
     const positionTexture = physics.getPositionTexture();
     positionTextureWrapper = new THREE.ExternalTexture(positionTexture);
 
-    const colorTex = physics.getColorTexture();
+  const colorTex = physics.colorTexture;
     if (!colorTex) {
       return;
     }
@@ -395,9 +395,9 @@ function recreatePhysicsAndMesh() {
     throw error;
   }
 
-  const textureSize = system.getTextureSize();
+  const textureSize = { width: system.textureWidth, height: system.textureHeight };
   const positionTexture = system.getPositionTexture();
-  const colorTexture = system.getColorTexture();
+  const colorTexture = system.colorTexture;
   
   if (!positionTexture || !colorTexture) {
     throw new Error('[Demo Kernels] Particle system did not provide renderable textures.');

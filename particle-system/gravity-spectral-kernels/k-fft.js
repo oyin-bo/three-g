@@ -32,10 +32,10 @@ export class KFFT {
     this.gl = options.gl;
     
     // Resource slots
-    this.inReal = options.inReal !== undefined ? options.inReal : null;
-    this.inComplex = options.inComplex !== undefined ? options.inComplex : null;
-    this.outComplex = options.outComplex !== undefined ? options.outComplex : null;
-    this.outReal = options.outReal !== undefined ? options.outReal : null;
+    this.inReal = (options.inReal || options.inReal === null) ? options.inReal : createTextureRGBA32F(this.gl, options.gridSize || 64, options.gridSize || 64);
+    this.inComplex = (options.inComplex || options.inComplex === null) ? options.inComplex : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
+    this.outComplex = (options.outComplex || options.outComplex === null) ? options.outComplex : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
+    this.outReal = (options.outReal || options.outReal === null) ? options.outReal : createTextureRGBA32F(this.gl, options.gridSize || 64, options.gridSize || 64);
     
     // Grid configuration
     this.gridSize = options.gridSize || 64;
@@ -389,4 +389,41 @@ export class KFFT {
     // Note: Do not delete inReal, inComplex, outComplex, outReal as they are
     // owned by external code (ParticleSystemSpectralKernels)
   }
+}
+
+/**
+ * Helper: Create a RGBA32F texture
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ */
+function createTextureRGBA32F(gl, width, height) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
+}
+
+/**
+ * Helper: Create an RG32F complex texture
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} size
+ */
+function createComplexTexture(gl, size) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, size, size, 0, gl.RG, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
 }

@@ -25,10 +25,16 @@ export class KIntegratePosition {
   constructor(options) {
     this.gl = options.gl;
     
-    // Resource slots - follow kernel contract
-    this.inPosition = options.inPosition !== undefined ? options.inPosition : null;
-    this.inVelocity = options.inVelocity !== undefined ? options.inVelocity : null;
-    this.outPosition = options.outPosition !== undefined ? options.outPosition : null;
+    // Resource slots - follow kernel contract: (truthy || === null) ? use : create
+    this.inPosition = (options.inPosition || options.inPosition === null)
+      ? options.inPosition
+      : createTextureRGBA32F(this.gl, options.width || 0, options.height || 0);
+    this.inVelocity = (options.inVelocity || options.inVelocity === null)
+      ? options.inVelocity
+      : createTextureRGBA32F(this.gl, options.width || 0, options.height || 0);
+    this.outPosition = (options.outPosition || options.outPosition === null)
+      ? options.outPosition
+      : createTextureRGBA32F(this.gl, options.width || 0, options.height || 0);
     
     // Texture dimensions
     this.width = options.width || 0;
@@ -204,4 +210,23 @@ export class KIntegratePosition {
 
     this._fboShadow = null;
   }
+}
+
+/**
+ * Helper: Create a RGBA32F texture
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ */
+function createTextureRGBA32F(gl, width, height) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
 }

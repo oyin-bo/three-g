@@ -30,9 +30,13 @@ export class KDeposit {
   constructor(options) {
     this.gl = options.gl;
     
-    // Resource slots
-    this.inPosition = options.inPosition !== undefined ? options.inPosition : null;
-    this.outMassGrid = options.outMassGrid !== undefined ? options.outMassGrid : null;
+    // Resource slots - follow kernel contract: (truthy || === null) ? use : create
+    this.inPosition = (options.inPosition || options.inPosition === null)
+      ? options.inPosition
+      : createTextureRGBA32F(this.gl, options.particleTexWidth || 0, options.particleTexHeight || 0);
+    this.outMassGrid = (options.outMassGrid || options.outMassGrid === null)
+      ? options.outMassGrid
+      : createTextureR32F(this.gl, options.textureSize || 64, options.textureSize || 64);
     
     // Particle configuration
     this.particleCount = options.particleCount || 0;
@@ -221,4 +225,42 @@ export class KDeposit {
     // Note: Do not delete inPosition, outMassGrid as they are owned by external code
     this._fboShadow = null;
   }
+}
+
+/**
+ * Helper: Create a RGBA32F texture
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ */
+function createTextureRGBA32F(gl, width, height) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
+}
+
+/**
+ * Helper: Create a R32F texture
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ */
+function createTextureR32F(gl, width, height) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, width, height, 0, gl.RED, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
 }

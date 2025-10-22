@@ -30,8 +30,8 @@ export class KPoisson {
     this.gl = options.gl;
     
     // Resource slots
-    this.inDensitySpectrum = options.inDensitySpectrum !== undefined ? options.inDensitySpectrum : null;
-    this.outPotentialSpectrum = options.outPotentialSpectrum !== undefined ? options.outPotentialSpectrum : null;
+    this.inDensitySpectrum = (options.inDensitySpectrum || options.inDensitySpectrum === null) ? options.inDensitySpectrum : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
+    this.outPotentialSpectrum = (options.outPotentialSpectrum || options.outPotentialSpectrum === null) ? options.outPotentialSpectrum : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
     
     // Grid configuration
     this.gridSize = options.gridSize || 64;
@@ -182,4 +182,22 @@ export class KPoisson {
     // Note: Do not delete inDensitySpectrum, outPotentialSpectrum as they are owned by external code
     this._fboShadow = null;
   }
+}
+
+/**
+ * Helper: Create an RG32F complex texture
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} size
+ */
+function createComplexTexture(gl, size) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, size, size, 0, gl.RG, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
 }

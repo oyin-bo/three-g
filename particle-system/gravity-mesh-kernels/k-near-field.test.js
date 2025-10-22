@@ -91,7 +91,6 @@ test('KNearField: creates output textures when not provided', async () => {
   assert.ok(kernel.outForceX, 'Output X force texture created (textureSize=' + textureSize + ', gridSize=' + gridSize + ', slicesPerRow=' + slicesPerRow + ')');
   assert.ok(kernel.outForceY, 'Output Y force texture created (textureSize=' + textureSize + ', gridSize=' + gridSize + ', slicesPerRow=' + slicesPerRow + ')');
   assert.ok(kernel.outForceZ, 'Output Z force texture created (textureSize=' + textureSize + ', gridSize=' + gridSize + ', slicesPerRow=' + slicesPerRow + ')');
-  assert.ok(kernel.ownsOutTextures, 'Kernel owns output textures (ownsOutTextures=' + kernel.ownsOutTextures + ')');
   
   kernel.run();
   
@@ -425,7 +424,6 @@ test('KNearField: uses provided output textures', async () => {
   assert.strictEqual(kernel.outForceX, outX, 'Uses provided X texture');
   assert.strictEqual(kernel.outForceY, outY, 'Uses provided Y texture');
   assert.strictEqual(kernel.outForceZ, outZ, 'Uses provided Z texture');
-  assert.ok(!kernel.ownsOutTextures, 'Kernel does not own provided textures (ownsOutTextures=' + kernel.ownsOutTextures + ')');
   
   kernel.run();
   
@@ -505,7 +503,6 @@ test('KNearField: accepts external quadVAO', async () => {
   });
   
   assert.strictEqual(kernel.quadVAO, quadVAO, 'Uses provided quadVAO');
-  assert.ok(!kernel.ownsQuadVAO, 'Kernel does not own provided quadVAO (ownsQuadVAO=' + kernel.ownsQuadVAO + ')');
   
   kernel.run();
   

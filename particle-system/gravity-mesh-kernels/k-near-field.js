@@ -32,11 +32,11 @@ export class KNearField {
     this.gl = options.gl;
     
     // Resource slots
-    this.inMassGrid = options.inMassGrid !== undefined ? options.inMassGrid : null;
-    this.outForceX = options.outForceX !== undefined ? options.outForceX : null;
-    this.outForceY = options.outForceY !== undefined ? options.outForceY : null;
-    this.outForceZ = options.outForceZ !== undefined ? options.outForceZ : null;
-    this.quadVAO = options.quadVAO !== undefined ? options.quadVAO : null;
+    this.inMassGrid = (options.inMassGrid || options.inMassGrid === null) ? options.inMassGrid : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.outForceX = (options.outForceX || options.outForceX === null) ? options.outForceX : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.outForceY = (options.outForceY || options.outForceY === null) ? options.outForceY : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.outForceZ = (options.outForceZ || options.outForceZ === null) ? options.outForceZ : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.quadVAO = (options.quadVAO || options.quadVAO === null) ? options.quadVAO : createQuadVAO(this.gl);
     
     // Grid configuration
     this.gridSize = options.gridSize || 64;
@@ -95,24 +95,6 @@ export class KNearField {
     this.framebufferZ = this.gl.createFramebuffer();
     if (!this.framebufferX || !this.framebufferY || !this.framebufferZ) {
       throw new Error('Failed to create framebuffers');
-    }
-    
-    // If no output textures provided, create them
-    if (!this.outForceX || !this.outForceY || !this.outForceZ) {
-      this.outForceX = this._createForceTexture();
-      this.outForceY = this._createForceTexture();
-      this.outForceZ = this._createForceTexture();
-      this.ownsOutTextures = true;
-    } else {
-      this.ownsOutTextures = false;
-    }
-    
-    // Create quad VAO if not provided
-    if (!this.quadVAO) {
-      this.quadVAO = this._createQuadVAO();
-      this.ownsQuadVAO = true;
-    } else {
-      this.ownsQuadVAO = false;
     }
   }
 
@@ -244,18 +226,55 @@ export class KNearField {
     this.framebufferY = null;
     this.framebufferZ = null;
     
-    if (this.ownsOutTextures) {
-      if (this.outForceX) gl.deleteTexture(this.outForceX);
-      if (this.outForceY) gl.deleteTexture(this.outForceY);
-      if (this.outForceZ) gl.deleteTexture(this.outForceZ);
-      this.outForceX = null;
-      this.outForceY = null;
-      this.outForceZ = null;
-    }
+    if (this.outForceX) gl.deleteTexture(this.outForceX);
+    if (this.outForceY) gl.deleteTexture(this.outForceY);
+    if (this.outForceZ) gl.deleteTexture(this.outForceZ);
+    this.outForceX = null;
+    this.outForceY = null;
+    this.outForceZ = null;
     
-    if (this.ownsQuadVAO && this.quadVAO) {
+    if (this.quadVAO) {
       gl.deleteVertexArray(this.quadVAO);
       this.quadVAO = null;
     }
   }
+}
+
+/**
+ * Helper: Create a grid texture (RGBA32F for mass/force)
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} size
+ */
+function createGridTexture(gl, size) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, size, size, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
+}
+
+/**
+ * Helper: Create a fullscreen quad VAO
+ * @param {WebGL2RenderingContext} gl
+ */
+function createQuadVAO(gl) {
+  const vao = gl.createVertexArray();
+  if (!vao) throw new Error('Failed to create VAO');
+  gl.bindVertexArray(vao);
+  const buffer = gl.createBuffer();
+  if (!buffer) throw new Error('Failed to create buffer');
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  const quadVertices = new Float32Array([
+    -1, -1,  1, -1,  -1, 1,  1, 1
+  ]);
+  gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+  return vao;
 }

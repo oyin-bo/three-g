@@ -318,7 +318,6 @@ test('KGradient: uses provided output textures', async () => {
   assert.strictEqual(kernel.outForceSpectrumX, outX, 'Uses provided X texture');
   assert.strictEqual(kernel.outForceSpectrumY, outY, 'Uses provided Y texture');
   assert.strictEqual(kernel.outForceSpectrumZ, outZ, 'Uses provided Z texture');
-  assert.ok(!kernel.ownsOutTextures, 'Kernel does not own provided textures (ownsOutTextures=' + kernel.ownsOutTextures + ')');
   
   kernel.run();
   
@@ -434,7 +433,6 @@ test('KGradient: accepts external quadVAO', async () => {
   });
   
   assert.strictEqual(kernel.quadVAO, quadVAO, 'Uses provided quadVAO');
-  assert.ok(!kernel.ownsQuadVAO, 'Kernel does not own provided quadVAO (ownsQuadVAO=' + kernel.ownsQuadVAO + ')');
   
   kernel.run();
   

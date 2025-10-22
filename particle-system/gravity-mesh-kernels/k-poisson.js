@@ -33,9 +33,9 @@ export class KPoisson {
     this.gl = options.gl;
     
     // Resource slots
-    this.inDensitySpectrum = options.inDensitySpectrum !== undefined ? options.inDensitySpectrum : null;
-    this.outPotentialSpectrum = options.outPotentialSpectrum !== undefined ? options.outPotentialSpectrum : null;
-    this.quadVAO = options.quadVAO !== undefined ? options.quadVAO : null;
+    this.inDensitySpectrum = (options.inDensitySpectrum || options.inDensitySpectrum === null) ? options.inDensitySpectrum : createComplexTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.outPotentialSpectrum = (options.outPotentialSpectrum || options.outPotentialSpectrum === null) ? options.outPotentialSpectrum : createComplexTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.quadVAO = (options.quadVAO || options.quadVAO === null) ? options.quadVAO : createQuadVAO(this.gl);
     
     // Grid configuration
     this.gridSize = options.gridSize || 64;
@@ -89,22 +89,6 @@ export class KPoisson {
     // Create FBO for output
     this.framebuffer = this.gl.createFramebuffer();
     if (!this.framebuffer) throw new Error('Failed to create framebuffer');
-    
-    // If no output texture provided, create one
-    if (!this.outPotentialSpectrum) {
-      this.outPotentialSpectrum = this._createSpectrumTexture();
-      this.ownsOutTexture = true;
-    } else {
-      this.ownsOutTexture = false;
-    }
-    
-    // Create quad VAO if not provided
-    if (!this.quadVAO) {
-      this.quadVAO = this._createQuadVAO();
-      this.ownsQuadVAO = true;
-    } else {
-      this.ownsQuadVAO = false;
-    }
   }
 
   _createSpectrumTexture() {
@@ -220,14 +204,53 @@ export class KPoisson {
       this.framebuffer = null;
     }
     
-    if (this.ownsOutTexture && this.outPotentialSpectrum) {
+    if (this.outPotentialSpectrum) {
       gl.deleteTexture(this.outPotentialSpectrum);
       this.outPotentialSpectrum = null;
     }
     
-    if (this.ownsQuadVAO && this.quadVAO) {
+    if (this.quadVAO) {
       gl.deleteVertexArray(this.quadVAO);
       this.quadVAO = null;
     }
   }
+}
+
+/**
+ * Helper: Create an RG32F complex texture
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} size
+ */
+function createComplexTexture(gl, size) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, size, size, 0, gl.RG, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
+}
+
+/**
+ * Helper: Create a fullscreen quad VAO
+ * @param {WebGL2RenderingContext} gl
+ */
+function createQuadVAO(gl) {
+  const vao = gl.createVertexArray();
+  if (!vao) throw new Error('Failed to create VAO');
+  gl.bindVertexArray(vao);
+  const buffer = gl.createBuffer();
+  if (!buffer) throw new Error('Failed to create buffer');
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  const quadVertices = new Float32Array([
+    -1, -1,  1, -1,  -1, 1,  1, 1
+  ]);
+  gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+  return vao;
 }

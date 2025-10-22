@@ -32,11 +32,11 @@ export class KForceSample {
     this.gl = options.gl;
     
     // Resource slots
-    this.inPosition = options.inPosition !== undefined ? options.inPosition : null;
-    this.inForceGridX = options.inForceGridX !== undefined ? options.inForceGridX : null;
-    this.inForceGridY = options.inForceGridY !== undefined ? options.inForceGridY : null;
-    this.inForceGridZ = options.inForceGridZ !== undefined ? options.inForceGridZ : null;
-    this.outForce = options.outForce !== undefined ? options.outForce : null;
+    this.inPosition = (options.inPosition || options.inPosition === null) ? options.inPosition : createTextureRGBA32F(this.gl, options.particleTexWidth || 1, options.particleTexHeight || 1);
+    this.inForceGridX = (options.inForceGridX || options.inForceGridX === null) ? options.inForceGridX : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.inForceGridY = (options.inForceGridY || options.inForceGridY === null) ? options.inForceGridY : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.inForceGridZ = (options.inForceGridZ || options.inForceGridZ === null) ? options.inForceGridZ : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.outForce = (options.outForce || options.outForce === null) ? options.outForce : createTextureRGBA32F(this.gl, options.particleTexWidth || 1, options.particleTexHeight || 1);
     
     // Particle configuration
     this.particleCount = options.particleCount || 0;
@@ -108,14 +108,6 @@ export class KForceSample {
     // Create FBO for output
     this.framebuffer = this.gl.createFramebuffer();
     if (!this.framebuffer) throw new Error('Failed to create framebuffer');
-    
-    // If no output texture provided, create one
-    if (!this.outForce) {
-      this.outForce = this._createForceTexture();
-      this.ownsOutForce = true;
-    } else {
-      this.ownsOutForce = false;
-    }
   }
 
   _createForceTexture() {
@@ -245,9 +237,46 @@ export class KForceSample {
       this.framebuffer = null;
     }
     
-    if (this.ownsOutForce && this.outForce) {
+    if (this.outForce) {
       gl.deleteTexture(this.outForce);
       this.outForce = null;
     }
   }
+}
+
+/**
+ * Helper: Create a RGBA32F texture
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ */
+function createTextureRGBA32F(gl, width, height) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
+}
+
+/**
+ * Helper: Create a grid texture (RGBA32F for force grids)
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} size
+ */
+function createGridTexture(gl, size) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, size, size, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
 }

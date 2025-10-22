@@ -62,7 +62,6 @@ test('KFFT: creates output texture when not provided', async () => {
   });
   
   assert.ok(kernel.spectrum, 'Output spectrum texture created (textureSize=' + textureSize + ')');
-  assert.ok(kernel.ownsSpectrum, 'Kernel owns output texture (ownsSpectrum=' + kernel.ownsSpectrum + ')');
   
   kernel.run();
   

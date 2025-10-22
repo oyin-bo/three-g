@@ -13,6 +13,8 @@ import { KPoisson } from './k-poisson.js';
 import { KGradient } from './k-gradient.js';
 import { KForceSample } from './k-force-sample.js';
 import { KNearField } from './k-near-field.js';
+import { KIntegrateVelocity } from '../gravity-multipole/k-integrate-velocity.js';
+import { KIntegratePosition } from '../gravity-multipole/k-integrate-position.js';
 
 export class ParticleSystemMeshKernels {
   /**
@@ -82,19 +84,88 @@ export class ParticleSystemMeshKernels {
     
     // Grid configuration
     this.gridTextureSize = this.meshConfig.gridSize * this.meshConfig.slicesPerRow;
-    
+
     // Check WebGL2 support
-    this._checkWebGL2Support();
-    
-    // Create textures
-    this._createTextures();
-    
+    const colorBufferFloat = this.gl.getExtension('EXT_color_buffer_float');
+    if (!colorBufferFloat) {
+      throw new Error('EXT_color_buffer_float extension not supported');
+    }
+
+    const floatBlend = this.gl.getExtension('EXT_float_blend');
+    this.disableFloatBlend = !floatBlend;
+    if (!floatBlend) {
+      console.warn('EXT_float_blend not supported: reduced accumulation accuracy');
+    }
+
+    // Create position textures: public active texture and internal write target
+    this.positionTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
+    this.positionTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
+
+    // Create velocity textures: public active texture and internal write target
+    this.velocityTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
+    this.velocityTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
+
+    // Create mesh textures
+    this.massGridTexture = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
+    this.densitySpectrumTexture = createComplexTexture(this.gl, this.gridTextureSize, this.gridTextureSize);
+    this.potentialSpectrumTexture = createComplexTexture(this.gl, this.gridTextureSize, this.gridTextureSize);
+    this.forceSpectrumX = createComplexTexture(this.gl, this.gridTextureSize, this.gridTextureSize);
+    this.forceSpectrumY = createComplexTexture(this.gl, this.gridTextureSize, this.gridTextureSize);
+    this.forceSpectrumZ = createComplexTexture(this.gl, this.gridTextureSize, this.gridTextureSize);
+    this.forceGridX = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
+    this.forceGridY = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
+    this.forceGridZ = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
+    this.forceTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
+    this.nearFieldForceX = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
+    this.nearFieldForceY = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
+    this.nearFieldForceZ = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
+
     // Upload particle data
-    this._uploadParticleData();
-    
+    const { positions, velocities } = this.particleData;
+    const velDataVal = velocities || new Float32Array(positions.length);
+
+    const expectedLength = this.actualTextureSize * 4;
+    if (positions.length !== expectedLength) {
+      throw new Error(`Position data length mismatch: expected ${expectedLength}, got ${positions.length}`);
+    }
+
+    // Sanity checks to satisfy @ts-check and ensure textures were created
+    if (!this.positionTexture)
+      throw new Error('Position textures not initialized');
+    if (!this.velocityTexture)
+      throw new Error('Velocity textures not initialized');
+
+    // Upload positions into both active and write textures so first-frame reads are valid
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionTexture);
+    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, positions);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionTextureWrite);
+    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, positions);
+
+    // Upload velocities into both active and write textures
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.velocityTexture);
+    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, velDataVal);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.velocityTextureWrite);
+    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, velDataVal);
+
+    this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+
     // Create shared quad VAO
-    this.quadVAO = this._createQuadVAO();
+    const vao = this.gl.createVertexArray();
+    if (!vao) throw new Error('Failed to create VAO');
     
+    this.gl.bindVertexArray(vao);
+    const buffer = this.gl.createBuffer();
+    if (!buffer) throw new Error('Failed to create buffer');
+    
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
+    const quadData = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, quadData, this.gl.STATIC_DRAW);
+    this.gl.enableVertexAttribArray(0);
+    this.gl.vertexAttribPointer(0, 2, this.gl.FLOAT, false, 0, 0);
+    this.gl.bindVertexArray(null);
+    
+    this.quadVAO = vao;
+
     // Calculate cell volume for FFT
     const bounds = this.options.worldBounds;
     const boxSize = Math.max(
@@ -111,168 +182,28 @@ export class ParticleSystemMeshKernels {
       bounds.max[1] - bounds.min[1],
       bounds.max[2] - bounds.min[2]
     ];
-    
-    // Create kernels
-    this._createKernels();
-  }
-  
-  _checkWebGL2Support() {
-    const gl = this.gl;
-    const colorBufferFloat = gl.getExtension('EXT_color_buffer_float');
-    const floatBlend = gl.getExtension('EXT_float_blend');
-    
-    if (!colorBufferFloat) {
-      throw new Error('EXT_color_buffer_float extension not supported');
-    }
-    
-    this.disableFloatBlend = !floatBlend;
-    
-    if (!floatBlend) {
-      console.warn('EXT_float_blend not supported: reduced accumulation accuracy');
-    }
-  }
-  
-  _createTextures() {
-    const gl = this.gl;
-    
-    // Create position ping-pong textures
-    this.positionTextures = this._createPingPongTextures(this.textureWidth, this.textureHeight);
-    
-    // Create velocity ping-pong textures
-    this.velocityTextures = this._createPingPongTextures(this.textureWidth, this.textureHeight);
-    
-    // Create color texture
-    this.colorTexture = this._createRenderTexture(
-      this.textureWidth,
-      this.textureHeight,
-      gl.RGBA8,
-      gl.UNSIGNED_BYTE
-    );
-  }
-  
-  _createPingPongTextures(width, height) {
-    const textures = [
-      this._createTexture2D(width, height),
-      this._createTexture2D(width, height)
-    ];
-    
-    return {
-      textures,
-      currentIndex: 0,
-      getCurrentTexture() { return this.textures[this.currentIndex]; },
-      getTargetTexture() { return this.textures[1 - this.currentIndex]; },
-      swap() { this.currentIndex = 1 - this.currentIndex; }
-    };
-  }
-  
-  _createRenderTexture(width, height, internalFormat, type) {
-    const gl = this.gl;
-    const fmt = internalFormat || gl.RGBA32F;
-    const tp = type || gl.FLOAT;
-    
-    return this._createTexture2D(width, height, fmt, tp);
-  }
-  
-  _createTexture2D(width, height, internalFormat, type) {
-    const gl = this.gl;
-    const fmt = internalFormat || gl.RGBA32F;
-    const tp = type || gl.FLOAT;
-    
-    const texture = gl.createTexture();
-    if (!texture) throw new Error('Failed to create texture');
-    
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0, gl.RGBA, tp, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    
-    return texture;
-  }
-  
-  _createQuadVAO() {
-    const gl = this.gl;
-    const vao = gl.createVertexArray();
-    if (!vao) throw new Error('Failed to create VAO');
-    
-    gl.bindVertexArray(vao);
-    const buffer = gl.createBuffer();
-    if (!buffer) throw new Error('Failed to create buffer');
-    
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    const quadData = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
-    gl.bufferData(gl.ARRAY_BUFFER, quadData, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    gl.bindVertexArray(null);
-    
-    return vao;
-  }
-  
-  _uploadParticleData() {
-    const gl = this.gl;
-    const { positions, velocities, colors } = this.particleData;
-    
-    const expectedLength = this.actualTextureSize * 4;
-    if (positions.length !== expectedLength) {
-      throw new Error(`Position data length mismatch: expected ${expectedLength}, got ${positions.length}`);
-    }
-    
-    const velData = velocities || new Float32Array(expectedLength);
-    const colorData = colors || new Uint8Array(expectedLength).fill(255);
-    
-    if (!this.positionTextures || !this.positionTextures.textures) {
-      throw new Error('Position textures not initialized');
-    }
-    if (!this.velocityTextures || !this.velocityTextures.textures) {
-      throw new Error('Velocity textures not initialized');
-    }
-    if (!this.colorTexture) {
-      throw new Error('Color texture not initialized');
-    }
 
-    // Upload positions
-    gl.bindTexture(gl.TEXTURE_2D, this.positionTextures.textures[0]);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, gl.RGBA, gl.FLOAT, positions);
-    gl.bindTexture(gl.TEXTURE_2D, this.positionTextures.textures[1]);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, gl.RGBA, gl.FLOAT, positions);
-
-    // Upload velocities
-    gl.bindTexture(gl.TEXTURE_2D, this.velocityTextures.textures[0]);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, gl.RGBA, gl.FLOAT, velData);
-    gl.bindTexture(gl.TEXTURE_2D, this.velocityTextures.textures[1]);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, gl.RGBA, gl.FLOAT, velData);
-
-    // Upload colors
-    gl.bindTexture(gl.TEXTURE_2D, this.colorTexture);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, gl.RGBA, gl.UNSIGNED_BYTE, colorData);
-
-    gl.bindTexture(gl.TEXTURE_2D, null);
-  }
-  
-  _createKernels() {
+    // Create kernels inline
     // Deposit kernel
     this.depositKernel = new KDeposit({
       gl: this.gl,
       inPosition: null,
-      outGrid: null,
+      outGrid: this.massGridTexture,
       particleCount: this.options.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       worldBounds: this.options.worldBounds,
-      assignment: this.meshConfig.assignment
+      assignment: this.meshConfig.assignment,
+      disableFloatBlend: this.disableFloatBlend
     });
     
     // FFT kernel for forward transform
     this.fftForwardKernel = new KFFT({
       gl: this.gl,
-      grid: null,
-      spectrum: null,
-      quadVAO: this.quadVAO,
+      inReal: this.massGridTexture,
+      outComplex: this.densitySpectrumTexture,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
@@ -283,13 +214,12 @@ export class ParticleSystemMeshKernels {
     // Poisson solver kernel
     this.poissonKernel = new KPoisson({
       gl: this.gl,
-      inDensitySpectrum: null,
-      outPotentialSpectrum: null,
-      quadVAO: this.quadVAO,
+      inDensitySpectrum: this.densitySpectrumTexture,
+      outPotentialSpectrum: this.potentialSpectrumTexture,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
-      worldSize: this.worldSize,
+      worldSize: /** @type {[number, number, number]} */ (this.worldSize),
       gravityStrength: this.options.gravityStrength,
       splitMode: this.meshConfig.splitSigma > 0 ? 2 : this.meshConfig.kCut > 0 ? 1 : 0,
       kCut: this.meshConfig.kCut,
@@ -301,23 +231,21 @@ export class ParticleSystemMeshKernels {
     // Gradient kernel
     this.gradientKernel = new KGradient({
       gl: this.gl,
-      inPotentialSpectrum: null,
-      outForceSpectrumX: null,
-      outForceSpectrumY: null,
-      outForceSpectrumZ: null,
-      quadVAO: this.quadVAO,
+      inPotentialSpectrum: this.potentialSpectrumTexture,
+      outForceSpectrumX: this.forceSpectrumX,
+      outForceSpectrumY: this.forceSpectrumY,
+      outForceSpectrumZ: this.forceSpectrumZ,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
-      worldSize: this.worldSize
+      worldSize: /** @type {[number, number, number]} */ (this.worldSize)
     });
     
     // FFT kernel for inverse transforms (reused for x, y, z)
     this.fftInverseKernel = new KFFT({
       gl: this.gl,
-      grid: null,
-      spectrum: null,
-      quadVAO: this.quadVAO,
+      inComplex: null,  // set per-frame
+      outReal: null,    // set per-frame
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
@@ -329,10 +257,10 @@ export class ParticleSystemMeshKernels {
     this.forceSampleKernel = new KForceSample({
       gl: this.gl,
       inPosition: null,
-      inForceGridX: null,
-      inForceGridY: null,
-      inForceGridZ: null,
-      outForce: null,
+      inForceGridX: this.forceGridX,
+      inForceGridY: this.forceGridY,
+      inForceGridZ: this.forceGridZ,
+      outForce: this.forceTexture,
       particleCount: this.options.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
@@ -345,11 +273,10 @@ export class ParticleSystemMeshKernels {
     // Near-field kernel
     this.nearFieldKernel = new KNearField({
       gl: this.gl,
-      inMassGrid: null,
-      outForceX: null,
-      outForceY: null,
-      outForceZ: null,
-      quadVAO: this.quadVAO,
+      inMassGrid: this.massGridTexture,
+      outForceX: this.nearFieldForceX,
+      outForceY: this.nearFieldForceY,
+      outForceZ: this.nearFieldForceZ,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
@@ -363,10 +290,10 @@ export class ParticleSystemMeshKernels {
     this.nearFieldSampleKernel = new KForceSample({
       gl: this.gl,
       inPosition: null,
-      inForceGridX: null,
-      inForceGridY: null,
-      inForceGridZ: null,
-      outForce: null,
+      inForceGridX: this.nearFieldForceX,
+      inForceGridY: this.nearFieldForceY,
+      inForceGridZ: this.nearFieldForceZ,
+      outForce: this.forceTexture,
       particleCount: this.options.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
@@ -375,8 +302,33 @@ export class ParticleSystemMeshKernels {
       worldBounds: this.options.worldBounds,
       accumulate: true
     });
+
+    // Create velocity and position integrator kernels
+    this.velocityKernel = new KIntegrateVelocity({
+      gl: this.gl,
+      inVelocity: null,
+      inForce: null,
+      inPosition: null,
+      outVelocity: null,
+      width: this.textureWidth,
+      height: this.textureHeight,
+      dt: this.options.dt,
+      damping: this.options.damping,
+      maxSpeed: this.options.maxSpeed,
+      maxAccel: this.options.maxAccel
+    });
+
+    this.positionKernel = new KIntegratePosition({
+      gl: this.gl,
+      inPosition: null,
+      inVelocity: null,
+      outPosition: null,
+      width: this.textureWidth,
+      height: this.textureHeight,
+      dt: this.options.dt
+    });
   }
-  
+
   /**
    * Step the simulation forward one frame
    */
@@ -400,10 +352,10 @@ export class ParticleSystemMeshKernels {
   }
   
   _depositMass() {
-    if (!this.depositKernel) throw new Error('Deposit kernel missing');
-    if (!this.positionTextures) throw new Error('Position textures missing');
-    
-    this.depositKernel.inPosition = this.positionTextures.getCurrentTexture();
+  if (!this.depositKernel) throw new Error('Deposit kernel missing');
+  if (!this.positionTexture) throw new Error('Position textures missing');
+
+  this.depositKernel.inPosition = this.positionTexture;
     this.depositKernel.run();
   }
   
@@ -441,10 +393,10 @@ export class ParticleSystemMeshKernels {
   
   _sampleForces() {
     if (!this.forceSampleKernel) throw new Error('Force sample kernel missing');
-    if (!this.positionTextures) throw new Error('Position textures missing');
+    if (!this.positionTexture) throw new Error('Position textures missing');
     
     // Sample far-field forces at particle positions
-    this.forceSampleKernel.inPosition = this.positionTextures.getCurrentTexture();
+  this.forceSampleKernel.inPosition = this.positionTexture;
     this.forceSampleKernel.inForceGridX = this.gradientKernel.outForceSpectrumX;
     this.forceSampleKernel.inForceGridY = this.gradientKernel.outForceSpectrumY;
     this.forceSampleKernel.inForceGridZ = this.gradientKernel.outForceSpectrumZ;
@@ -455,14 +407,14 @@ export class ParticleSystemMeshKernels {
     if (!this.nearFieldKernel || !this.nearFieldSampleKernel) {
       throw new Error('Near-field kernels missing');
     }
-    if (!this.positionTextures) throw new Error('Position textures missing');
+    if (!this.positionTexture) throw new Error('Position textures missing');
     
     // Compute near-field correction per voxel
     this.nearFieldKernel.inMassGrid = this.depositKernel.outGrid;
     this.nearFieldKernel.run();
     
     // Sample near-field forces and accumulate
-    this.nearFieldSampleKernel.inPosition = this.positionTextures.getCurrentTexture();
+  this.nearFieldSampleKernel.inPosition = this.positionTexture;
     this.nearFieldSampleKernel.inForceGridX = this.nearFieldKernel.outForceX;
     this.nearFieldSampleKernel.inForceGridY = this.nearFieldKernel.outForceY;
     this.nearFieldSampleKernel.inForceGridZ = this.nearFieldKernel.outForceZ;
@@ -476,62 +428,51 @@ export class ParticleSystemMeshKernels {
     // In a complete implementation, this would use KIntegrateVelocity and KIntegratePosition
     // similar to monopole-kernels
     
-    if (!this.velocityTextures || !this.positionTextures) {
+    if (!this.velocityTexture || !this.positionTexture) {
       throw new Error('Ping-pong textures missing');
     }
-    
+
     // TODO: Implement integrator kernels or reuse from monopole-kernels
     // For now, this is a placeholder that swaps textures
-    this.velocityTextures.swap();
-    this.positionTextures.swap();
+    {
+      const tmp = this.velocityTexture;
+      this.velocityTexture = this.velocityTextureWrite;
+      this.velocityTextureWrite = tmp;
+    }
+    {
+      const tmp = this.positionTexture;
+      this.positionTexture = this.positionTextureWrite;
+      this.positionTextureWrite = tmp;
+    }
   }
   
   /**
    * Get current position texture for rendering
    */
-  getPositionTexture() {
-    if (!this.positionTextures) return null;
-    return this.positionTextures.getCurrentTexture();
+    getPositionTexture() {
+    if (!this.positionTexture) return null;
+    return this.positionTexture;
   }
   
   /**
    * Get all position textures
    */
   getPositionTextures() {
-    if (!this.positionTextures) return [];
-    return this.positionTextures.textures;
+    return [this.positionTexture, this.positionTextureWrite];
   }
   
   /**
    * Get current ping-pong index
    */
   getCurrentIndex() {
-    if (!this.positionTextures) return 0;
-    return this.positionTextures.currentIndex;
+    return 0;
   }
 
   /**
    * Expose kernels for external inspection or configuration
    */
-  getKernels() {
-    return {
-      deposit: this.depositKernel,
-      fftForward: this.fftForwardKernel,
-      poisson: this.poissonKernel,
-      gradient: this.gradientKernel,
-      fftInverse: this.fftInverseKernel,
-      forceSample: this.forceSampleKernel,
-      nearField: this.nearFieldKernel,
-      nearFieldSample: this.nearFieldSampleKernel
-    };
-  }
-  
-  /**
-   * Get color texture
-   */
-  getColorTexture() {
-    return this.colorTexture;
-  }
+  // getKernels() and getColorTexture() removed: use instance properties
+  // (e.g. `.colorTexture`, `.depositKernel`) for inspection/access.
   
   /**
    * Get texture dimensions
@@ -557,15 +498,21 @@ export class ParticleSystemMeshKernels {
     if (this.nearFieldSampleKernel) this.nearFieldSampleKernel.dispose();
     
     // Clean up textures
-    if (this.positionTextures) {
-      this.positionTextures.textures.forEach(tex => gl.deleteTexture(tex));
+    if (this.positionTexture) {
+      gl.deleteTexture(this.positionTexture);
+      this.positionTexture = null;
     }
-    if (this.velocityTextures) {
-      this.velocityTextures.textures.forEach(tex => gl.deleteTexture(tex));
+    if (this.positionTextureWrite) {
+      gl.deleteTexture(this.positionTextureWrite);
+      this.positionTextureWrite = null;
     }
-    if (this.colorTexture) {
-      gl.deleteTexture(this.colorTexture);
-      this.colorTexture = null;
+    if (this.velocityTexture) {
+      gl.deleteTexture(this.velocityTexture);
+      this.velocityTexture = null;
+    }
+    if (this.velocityTextureWrite) {
+      gl.deleteTexture(this.velocityTextureWrite);
+      this.velocityTextureWrite = null;
     }
     
     if (this.quadVAO) {
@@ -573,4 +520,50 @@ export class ParticleSystemMeshKernels {
       this.quadVAO = null;
     }
   }
+}
+
+/**
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ * @param {number} [internalFormat]
+ * @param {number} [type]
+ */
+function createTexture2D(gl, width, height, internalFormat, type) {
+  const fmt = internalFormat || gl.RGBA32F;
+  const tp = type || gl.FLOAT;
+
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0, gl.RGBA, tp, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  return texture;
+}
+
+/**
+ * Create a complex RG32F texture for FFT spectra
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ */
+function createComplexTexture(gl, width, height) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+  
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, width, height, 0, gl.RG, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  
+  return texture;
 }

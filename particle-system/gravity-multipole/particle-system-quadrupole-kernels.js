@@ -72,18 +72,56 @@ export class ParticleSystemQuadrupoleKernels {
     this.octreeGridSize = 64;
     this.octreeSlicesPerRow = 8;
     this.L0Size = this.octreeGridSize * this.octreeSlicesPerRow;
-    
+
     // Check WebGL2 support
-    this._checkWebGL2Support();
-    
-    // Create textures
-    this._createTextures();
-    
+    const colorBufferFloat = this.gl.getExtension('EXT_color_buffer_float');
+    if (!colorBufferFloat)
+      throw new Error('EXT_color_buffer_float extension not supported');
+
+    const floatBlend = this.gl.getExtension('EXT_float_blend');
+    this.disableFloatBlend = !floatBlend;
+    if (!floatBlend)
+      console.warn('EXT_float_blend not supported: reduced accumulation accuracy');
+
+    // Create position textures: public active texture and internal write target
+    this.positionTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
+    this.positionTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
+
+    // Create velocity textures: public active texture and internal write target
+    this.velocityTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
+    this.velocityTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
+
     // Upload particle data
-    this._uploadParticleData();
-    
-    // Create kernels immediately in the constructor
-    // Prepare levelConfigs (sizes for each pyramid level)
+    const { positions, velocities } = this.particleData;
+
+    const expectedLength = this.actualTextureSize * 4;
+    if (positions.length !== expectedLength)
+      throw new Error(`Position data length mismatch: expected ${expectedLength}, got ${positions.length}`);
+
+    const velData = velocities || new Float32Array(expectedLength);
+
+    // Sanity checks to satisfy @ts-check and ensure textures were created
+    if (!this.positionTexture)
+      throw new Error('Position textures not initialized');
+    if (!this.velocityTexture)
+      throw new Error('Velocity textures not initialized');
+
+    // Upload positions into both active and write textures so first-frame reads are valid
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionTexture);
+    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, positions);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionTextureWrite);
+    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, positions);
+
+    // Upload velocities into both active and write textures
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.velocityTexture);
+    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, velData);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.velocityTextureWrite);
+    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, velData);
+
+    this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+
+    // Prepare levelConfigs (sizes for each pyramid level). We do NOT create
+    // the A0/A1/A2 textures here; kernels will create their own resources.
     this.levelConfigs = [];
     let currentSize = this.L0Size;
     let currentGridSize = this.octreeGridSize;
@@ -100,13 +138,11 @@ export class ParticleSystemQuadrupoleKernels {
       currentSize = currentGridSize * currentSlicesPerRow;
     }
 
-    // Create aggregator kernel for L0
+    // Create aggregator kernel for L0. Do not pass concrete output textures;
+    // let the kernel allocate them and expose them as properties (outA0/outA1/outA2).
     this.aggregatorKernel = new KAggregator({
       gl: this.gl,
       inPosition: null,  // set per-frame before run
-      outA0: null,
-      outA1: null,
-      outA2: null,
       particleCount: this.options.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
@@ -117,7 +153,9 @@ export class ParticleSystemQuadrupoleKernels {
       disableFloatBlend: this.disableFloatBlend
     });
 
-    // Create pyramid build kernels for each reduction level
+    // Create pyramid build kernels for each reduction level. Per kernel contract,
+    // omit output texture options so kernels allocate their own. Pass null for
+    // inputs since they will be wired at runtime from previous-level outputs.
     this.pyramidKernels = [];
     for (let i = 0; i < this.numLevels - 1; i++) {
       this.pyramidKernels.push(new KPyramidBuild({
@@ -125,23 +163,20 @@ export class ParticleSystemQuadrupoleKernels {
         inA0: null,
         inA1: null,
         inA2: null,
-        outA0: null,
-        outA1: null,
-        outA2: null,
         outSize: this.levelConfigs[i + 1].size,
         outGridSize: this.levelConfigs[i + 1].gridSize,
         outSlicesPerRow: this.levelConfigs[i + 1].slicesPerRow
       }));
     }
 
-    // Create quadrupole traversal kernel
+    // Create quadrupole traversal kernel. Omit outForce so kernel allocates it.
+    // Pass null for inPosition (set per-frame). We'll wire inLevelA0/A1/A2 from pyramid outputs after build.
     this.traversalKernel = new KTraversalQuadrupole({
       gl: this.gl,
       inPosition: null,  // set per-frame
       inLevelA0: undefined,
       inLevelA1: undefined,
       inLevelA2: undefined,
-      outForce: null,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
       numLevels: this.numLevels,
@@ -154,7 +189,9 @@ export class ParticleSystemQuadrupoleKernels {
       useOccupancyMasks: this.options.useOccupancyMasks
     });
 
-    // Create integrator kernels
+    // Create integrator kernels. These kernels will accept external ping-pong
+    // textures (positions/velocities) each frame and write to targets; we do
+    // not force them to own the system-level ping-pong textures.
     this.velocityKernel = new KIntegrateVelocity({
       gl: this.gl,
       inVelocity: null,
@@ -180,139 +217,6 @@ export class ParticleSystemQuadrupoleKernels {
     });
   }
   
-  _checkWebGL2Support() {
-    const gl = this.gl;
-    const colorBufferFloat = gl.getExtension('EXT_color_buffer_float');
-    const floatBlend = gl.getExtension('EXT_float_blend');
-    
-    if (!colorBufferFloat) {
-      throw new Error('EXT_color_buffer_float extension not supported');
-    }
-    
-    this.disableFloatBlend = !floatBlend;
-    
-    if (!floatBlend) {
-      console.warn('EXT_float_blend not supported: reduced accumulation accuracy');
-    }
-  }
-  
-  _createTextures() {
-    const gl = this.gl;
-    
-    // Create position ping-pong textures
-    this.positionTextures = this._createPingPongTextures(this.textureWidth, this.textureHeight);
-    
-    // Create velocity ping-pong textures
-    this.velocityTextures = this._createPingPongTextures(this.textureWidth, this.textureHeight);
-    
-    // Create color texture (system-owned for rendering)
-    this.colorTexture = this._createRenderTexture(
-      this.textureWidth,
-      this.textureHeight,
-      gl.RGBA8,
-      gl.UNSIGNED_BYTE
-    );
-  }
-  
-  /**
-   * @param {number} width
-   * @param {number} height
-   */
-  _createPingPongTextures(width, height) {
-    const textures = [
-      this._createTexture2D(width, height),
-      this._createTexture2D(width, height)
-    ];
-    
-    return {
-      textures,
-      currentIndex: 0,
-      getCurrentTexture() { return this.textures[this.currentIndex]; },
-      getTargetTexture() { return this.textures[1 - this.currentIndex]; },
-      swap() { this.currentIndex = 1 - this.currentIndex; }
-    };
-  }
-  
-  /**
-   * @param {number} width
-   * @param {number} height
-   * @param {number} [internalFormat]
-   * @param {number} [type]
-   */
-  _createRenderTexture(width, height, internalFormat, type) {
-    const gl = this.gl;
-    const fmt = internalFormat || gl.RGBA32F;
-    const tp = type || gl.FLOAT;
-    
-    return this._createTexture2D(width, height, fmt, tp);
-  }
-  
-  /**
-   * @param {number} width
-   * @param {number} height
-   * @param {number} [internalFormat]
-   * @param {number} [type]
-   */
-  _createTexture2D(width, height, internalFormat, type) {
-    const gl = this.gl;
-    const fmt = internalFormat || gl.RGBA32F;
-    const tp = type || gl.FLOAT;
-    
-    const texture = gl.createTexture();
-    if (!texture) throw new Error('Failed to create texture');
-    
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0, gl.RGBA, tp, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    
-    return texture;
-  }
-  
-  _uploadParticleData() {
-    const gl = this.gl;
-    const { positions, velocities, colors } = this.particleData;
-    
-    const expectedLength = this.actualTextureSize * 4;
-    if (positions.length !== expectedLength) {
-      throw new Error(`Position data length mismatch: expected ${expectedLength}, got ${positions.length}`);
-    }
-    
-    const velData = velocities || new Float32Array(expectedLength);
-    const colorData = colors || new Uint8Array(expectedLength).fill(255);
-    
-    if (!this.positionTextures || !this.positionTextures.textures) {
-      throw new Error('Position textures not initialized');
-    }
-    if (!this.velocityTextures || !this.velocityTextures.textures) {
-      throw new Error('Velocity textures not initialized');
-    }
-    if (!this.colorTexture) {
-      throw new Error('Color texture not initialized');
-    }
-
-    // Upload positions
-    gl.bindTexture(gl.TEXTURE_2D, this.positionTextures.textures[0]);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, gl.RGBA, gl.FLOAT, positions);
-    gl.bindTexture(gl.TEXTURE_2D, this.positionTextures.textures[1]);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, gl.RGBA, gl.FLOAT, positions);
-
-    // Upload velocities
-    gl.bindTexture(gl.TEXTURE_2D, this.velocityTextures.textures[0]);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, gl.RGBA, gl.FLOAT, velData);
-    gl.bindTexture(gl.TEXTURE_2D, this.velocityTextures.textures[1]);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, gl.RGBA, gl.FLOAT, velData);
-
-    // Upload colors
-    gl.bindTexture(gl.TEXTURE_2D, this.colorTexture);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, gl.RGBA, gl.UNSIGNED_BYTE, colorData);
-
-    gl.bindTexture(gl.TEXTURE_2D, null);
-  }
-  
   /**
    * Step the simulation forward one frame
    */
@@ -331,10 +235,10 @@ export class ParticleSystemQuadrupoleKernels {
   
   _buildOctree() {
     // Aggregate particles into L0
-    if (!this.aggregatorKernel) throw new Error('Aggregator kernel missing');
-    if (!this.positionTextures) throw new Error('Position textures missing');
+  if (!this.aggregatorKernel) throw new Error('Aggregator kernel missing');
+  if (!this.positionTexture) throw new Error('Position texture missing');
 
-    this.aggregatorKernel.inPosition = this.positionTextures.getCurrentTexture();
+  this.aggregatorKernel.inPosition = this.positionTexture;
     this.aggregatorKernel.run();
 
     // Wire and run pyramid kernels sequentially
@@ -357,8 +261,8 @@ export class ParticleSystemQuadrupoleKernels {
   
   _calculateForces() {
     // Run tree traversal to compute forces using quadrupole moments
-    if (!this.traversalKernel) throw new Error('Traversal kernel missing');
-    if (!this.positionTextures) throw new Error('Position textures missing');
+  if (!this.traversalKernel) throw new Error('Traversal kernel missing');
+  if (!this.positionTexture) throw new Error('Position texture missing');
 
     // Build arrays of A0, A1, A2 textures per level (aggregator + pyramid outputs)
     const levelA0s = [];
@@ -379,7 +283,7 @@ export class ParticleSystemQuadrupoleKernels {
       }
     }
 
-    this.traversalKernel.inPosition = this.positionTextures.getCurrentTexture();
+  this.traversalKernel.inPosition = this.positionTexture;
     this.traversalKernel.inLevelA0 = levelA0s;
     this.traversalKernel.inLevelA1 = levelA1s;
     this.traversalKernel.inLevelA2 = levelA2s;
@@ -394,71 +298,63 @@ export class ParticleSystemQuadrupoleKernels {
   _integratePhysics() {
     // Update velocities
     if (!this.velocityKernel) throw new Error('Velocity kernel missing');
-    if (!this.velocityTextures || !this.positionTextures) throw new Error('Ping-pong textures missing');
+    if (!this.velocityTexture || !this.positionTexture) throw new Error('Textures missing');
 
-    this.velocityKernel.inVelocity = this.velocityTextures.getCurrentTexture();
-    this.velocityKernel.inPosition = this.positionTextures.getCurrentTexture();
-    this.velocityKernel.outVelocity = this.velocityTextures.getTargetTexture();
+    this.velocityKernel.inVelocity = this.velocityTexture;
+    this.velocityKernel.inPosition = this.positionTexture;
+    this.velocityKernel.outVelocity = this.velocityTextureWrite;
     this.velocityKernel.run();
 
-    // Swap system velocity ping-pong textures
-    this.velocityTextures.swap();
+    // Swap velocity textures: write becomes active
+    {
+      const tmp = this.velocityTexture;
+      this.velocityTexture = this.velocityTextureWrite;
+      this.velocityTextureWrite = tmp;
+    }
 
     // Update positions
     if (!this.positionKernel) throw new Error('Position kernel missing');
 
-    this.positionKernel.inPosition = this.positionTextures.getCurrentTexture();
-    this.positionKernel.inVelocity = this.velocityTextures.getCurrentTexture();
-    this.positionKernel.outPosition = this.positionTextures.getTargetTexture();
+    this.positionKernel.inPosition = this.positionTexture;
+    this.positionKernel.inVelocity = this.velocityTexture;
+    this.positionKernel.outPosition = this.positionTextureWrite;
     this.positionKernel.run();
 
-    // Swap system position ping-pong textures
-    this.positionTextures.swap();
+    // Swap position textures: write becomes active
+    {
+      const tmp = this.positionTexture;
+      this.positionTexture = this.positionTextureWrite;
+      this.positionTextureWrite = tmp;
+    }
   }
   
   /**
    * Get current position texture for rendering
    */
   getPositionTexture() {
-    if (!this.positionTextures) return null;
-    return this.positionTextures.getCurrentTexture();
+    if (!this.positionTexture) return null;
+    return this.positionTexture;
   }
   
   /**
    * Get all position textures
    */
   getPositionTextures() {
-    if (!this.positionTextures) return [];
-    return this.positionTextures.textures;
+    return [this.positionTexture, this.positionTextureWrite];
   }
   
   /**
    * Get current ping-pong index
    */
   getCurrentIndex() {
-    if (!this.positionTextures) return 0;
-    return this.positionTextures.currentIndex;
+    return 0;
   }
 
   /**
    * Expose kernels for external inspection or configuration
    */
-  getKernels() {
-    return {
-      aggregator: this.aggregatorKernel,
-      pyramid: this.pyramidKernels,
-      traversal: this.traversalKernel,
-      velocityIntegrator: this.velocityKernel,
-      positionIntegrator: this.positionKernel
-    };
-  }
-  
-  /**
-   * Get color texture
-   */
-  getColorTexture() {
-    return this.colorTexture;
-  }
+  // getKernels() and getColorTexture() removed: use instance properties
+  // (e.g. `.colorTexture`, `.aggregatorKernel`) for inspection/access.
   
   /**
    * Get texture dimensions
@@ -480,16 +376,47 @@ export class ParticleSystemQuadrupoleKernels {
     if (this.velocityKernel) this.velocityKernel.dispose();
     if (this.positionKernel) this.positionKernel.dispose();
     
-    // Clean up textures not owned by kernels
-    if (this.positionTextures) {
-      this.positionTextures.textures.forEach(tex => gl.deleteTexture(tex));
+    // Clean up textures
+    if (this.positionTexture) {
+      gl.deleteTexture(this.positionTexture);
+      this.positionTexture = null;
     }
-    if (this.velocityTextures) {
-      this.velocityTextures.textures.forEach(tex => gl.deleteTexture(tex));
+    if (this.positionTextureWrite) {
+      gl.deleteTexture(this.positionTextureWrite);
+      this.positionTextureWrite = null;
     }
-    if (this.colorTexture) {
-      gl.deleteTexture(this.colorTexture);
-      this.colorTexture = null;
+    if (this.velocityTexture) {
+      gl.deleteTexture(this.velocityTexture);
+      this.velocityTexture = null;
+    }
+    if (this.velocityTextureWrite) {
+      gl.deleteTexture(this.velocityTextureWrite);
+      this.velocityTextureWrite = null;
     }
   }
+}
+
+/**
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ * @param {number} [internalFormat]
+ * @param {number} [type]
+ */
+function createTexture2D(gl, width, height, internalFormat, type) {
+  const fmt = internalFormat || gl.RGBA32F;
+  const tp = type || gl.FLOAT;
+
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0, gl.RGBA, tp, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  return texture;
 }

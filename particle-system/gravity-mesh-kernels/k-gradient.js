@@ -29,11 +29,11 @@ export class KGradient {
     this.gl = options.gl;
     
     // Resource slots
-    this.inPotentialSpectrum = options.inPotentialSpectrum !== undefined ? options.inPotentialSpectrum : null;
-    this.outForceSpectrumX = options.outForceSpectrumX !== undefined ? options.outForceSpectrumX : null;
-    this.outForceSpectrumY = options.outForceSpectrumY !== undefined ? options.outForceSpectrumY : null;
-    this.outForceSpectrumZ = options.outForceSpectrumZ !== undefined ? options.outForceSpectrumZ : null;
-    this.quadVAO = options.quadVAO !== undefined ? options.quadVAO : null;
+    this.inPotentialSpectrum = (options.inPotentialSpectrum || options.inPotentialSpectrum === null) ? options.inPotentialSpectrum : createComplexTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.outForceSpectrumX = (options.outForceSpectrumX || options.outForceSpectrumX === null) ? options.outForceSpectrumX : createComplexTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.outForceSpectrumY = (options.outForceSpectrumY || options.outForceSpectrumY === null) ? options.outForceSpectrumY : createComplexTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.outForceSpectrumZ = (options.outForceSpectrumZ || options.outForceSpectrumZ === null) ? options.outForceSpectrumZ : createComplexTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.quadVAO = (options.quadVAO || options.quadVAO === null) ? options.quadVAO : createQuadVAO(this.gl);
     
     // Grid configuration
     this.gridSize = options.gridSize || 64;
@@ -84,24 +84,6 @@ export class KGradient {
     this.framebufferZ = this.gl.createFramebuffer();
     if (!this.framebufferX || !this.framebufferY || !this.framebufferZ) {
       throw new Error('Failed to create framebuffers');
-    }
-    
-    // If no output textures provided, create them
-    if (!this.outForceSpectrumX || !this.outForceSpectrumY || !this.outForceSpectrumZ) {
-      this.outForceSpectrumX = this._createSpectrumTexture();
-      this.outForceSpectrumY = this._createSpectrumTexture();
-      this.outForceSpectrumZ = this._createSpectrumTexture();
-      this.ownsOutTextures = true;
-    } else {
-      this.ownsOutTextures = false;
-    }
-    
-    // Create quad VAO if not provided
-    if (!this.quadVAO) {
-      this.quadVAO = this._createQuadVAO();
-      this.ownsQuadVAO = true;
-    } else {
-      this.ownsQuadVAO = false;
     }
   }
 
@@ -223,18 +205,55 @@ export class KGradient {
     this.framebufferY = null;
     this.framebufferZ = null;
     
-    if (this.ownsOutTextures) {
-      if (this.outForceSpectrumX) gl.deleteTexture(this.outForceSpectrumX);
-      if (this.outForceSpectrumY) gl.deleteTexture(this.outForceSpectrumY);
-      if (this.outForceSpectrumZ) gl.deleteTexture(this.outForceSpectrumZ);
-      this.outForceSpectrumX = null;
-      this.outForceSpectrumY = null;
-      this.outForceSpectrumZ = null;
-    }
+    if (this.outForceSpectrumX) gl.deleteTexture(this.outForceSpectrumX);
+    if (this.outForceSpectrumY) gl.deleteTexture(this.outForceSpectrumY);
+    if (this.outForceSpectrumZ) gl.deleteTexture(this.outForceSpectrumZ);
+    this.outForceSpectrumX = null;
+    this.outForceSpectrumY = null;
+    this.outForceSpectrumZ = null;
     
-    if (this.ownsQuadVAO && this.quadVAO) {
+    if (this.quadVAO) {
       gl.deleteVertexArray(this.quadVAO);
       this.quadVAO = null;
     }
   }
+}
+
+/**
+ * Helper: Create an RG32F complex texture
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} size
+ */
+function createComplexTexture(gl, size) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, size, size, 0, gl.RG, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
+}
+
+/**
+ * Helper: Create a fullscreen quad VAO
+ * @param {WebGL2RenderingContext} gl
+ */
+function createQuadVAO(gl) {
+  const vao = gl.createVertexArray();
+  if (!vao) throw new Error('Failed to create VAO');
+  gl.bindVertexArray(vao);
+  const buffer = gl.createBuffer();
+  if (!buffer) throw new Error('Failed to create buffer');
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  const quadVertices = new Float32Array([
+    -1, -1,  1, -1,  -1, 1,  1, 1
+  ]);
+  gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+  return vao;
 }

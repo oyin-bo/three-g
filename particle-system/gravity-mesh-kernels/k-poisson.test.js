@@ -47,7 +47,6 @@ test('KPoisson: creates output texture when not provided', async () => {
   });
   
   assert.ok(kernel.outPotentialSpectrum, 'Output potential spectrum texture created (textureSize=' + textureSize + ')');
-  assert.ok(kernel.ownsOutTexture, 'Kernel owns output texture (ownsOutTexture=' + kernel.ownsOutTexture + ')');
   
   kernel.run();
   
