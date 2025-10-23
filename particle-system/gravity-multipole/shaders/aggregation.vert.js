@@ -1,4 +1,4 @@
-export default `#version 300 es
+export default /* glsl */`#version 300 es
 precision highp float;
 
 // Octree 3D aggregation with Z-slice stacking
