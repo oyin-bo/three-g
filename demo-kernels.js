@@ -102,6 +102,9 @@ let physics = null;
 let m = null;
 let positionTextureWrapper = /** @type {THREE.ExternalTexture | null} */ (null);
 let isInitialized = false;
+// Global color texture loaded from colors array
+/** @type {WebGLTexture | null} */
+let colorTexGlobal = null;
 
 // 4. Animation loop - MUST be set BEFORE recreateAll()
 outcome.animate = () => {
@@ -110,14 +113,17 @@ outcome.animate = () => {
   }
 
   if (!isInitialized) {
-    const positionTexture = physics.getPositionTexture();
+    const positionTexture =
+      physics instanceof ParticleSystemMonopoleKernels ?
+        physics.positionTexture :
+        physics.getPositionTexture();
     positionTextureWrapper = new THREE.ExternalTexture(positionTexture);
 
-  const colorTex = physics.colorTexture;
-    if (!colorTex) {
+    // Use pre-loaded global color texture
+    if (!colorTexGlobal) {
       return;
     }
-    const colorTexture = new THREE.ExternalTexture(colorTex);
+    const colorTexture = new THREE.ExternalTexture(colorTexGlobal);
     m.mesh.material.uniforms.u_colorTexture.value = colorTexture;
 
     isInitialized = true;
@@ -375,7 +381,8 @@ function recreatePhysicsAndMesh() {
       }
       case 'monopole':
       default: {
-        system = new ParticleSystemMonopoleKernels(gl, {
+        system = new ParticleSystemMonopoleKernels({
+          gl,
           particleData,
           worldBounds,
           theta: 0.7,
@@ -396,20 +403,39 @@ function recreatePhysicsAndMesh() {
   }
 
   const textureSize = { width: system.textureWidth, height: system.textureHeight };
-  const positionTexture = system.getPositionTexture();
-  const colorTexture = system.colorTexture;
-  
-  if (!positionTexture || !colorTexture) {
-    throw new Error('[Demo Kernels] Particle system did not provide renderable textures.');
+  const positionTexture =
+    system instanceof ParticleSystemMonopoleKernels ?
+      system.positionTexture :
+      system.getPositionTexture();
+
+  // Dispose previous color texture if any
+  if (colorTexGlobal) {
+    gl.deleteTexture(colorTexGlobal);
+    colorTexGlobal = null;
   }
+  // Create color texture from colors array
+  const colorTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, colorTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(
+    gl.TEXTURE_2D, 0, gl.RGBA, textureSize.width, textureSize.height, 0,
+    gl.RGBA, gl.UNSIGNED_BYTE, colors
+  );
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  // Store for animation use
+  colorTexGlobal = colorTex;
 
   const meshInstance = massSpotMesh({
     textureMode: true,
     particleCount,
     textures: {
-      position: positionTexture,
-      color: colorTexture,
-      size: [textureSize.width, textureSize.height],
+      // positionTexture is always defined here
+      position: /** @type {WebGLTexture} */ (positionTexture),
+      color: colorTex,
+      size: [textureSize.width, textureHeight],
     },
     fog: { start: 0.3, gray: 50 },
     enableProfiling: false,
