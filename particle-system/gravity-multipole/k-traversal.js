@@ -154,7 +154,7 @@ export class KTraversal {
   run() {
     const gl = this.gl;
     
-    console.log(`[KTraversal.run] START: texW=${this.particleTexWidth}, texH=${this.particleTexHeight}, numLevels=${this.numLevels}`);
+    // console.log(`[KTraversal.run] START: texW=${this.particleTexWidth}, texH=${this.particleTexHeight}, numLevels=${this.numLevels}`);
     
     if (!this.inPosition || !this.outForce) {
       throw new Error('KTraversal: missing required textures');
@@ -201,7 +201,7 @@ export class KTraversal {
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_particleCount'), particleCount);
     
     // Bind all octree level textures (A0 only for monopole)
-    console.log(`[KTraversal] Binding ${this.numLevels} level textures. inLevelA0 length: ${this.inLevelA0.length}`);
+    // console.log(`[KTraversal] Binding ${this.numLevels} level textures. inLevelA0 length: ${this.inLevelA0.length}`);
     for (let i = 0; i < this.numLevels; i++) {
       const unit = gl.TEXTURE1 + i;
       gl.activeTexture(unit);

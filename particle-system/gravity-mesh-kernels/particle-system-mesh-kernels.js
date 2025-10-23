@@ -105,21 +105,6 @@ export class ParticleSystemMeshKernels {
     this.velocityTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
     this.velocityTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
 
-    // Create mesh textures
-    this.massGridTexture = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
-    this.densitySpectrumTexture = createComplexTexture(this.gl, this.gridTextureSize, this.gridTextureSize);
-    this.potentialSpectrumTexture = createComplexTexture(this.gl, this.gridTextureSize, this.gridTextureSize);
-    this.forceSpectrumX = createComplexTexture(this.gl, this.gridTextureSize, this.gridTextureSize);
-    this.forceSpectrumY = createComplexTexture(this.gl, this.gridTextureSize, this.gridTextureSize);
-    this.forceSpectrumZ = createComplexTexture(this.gl, this.gridTextureSize, this.gridTextureSize);
-    this.forceGridX = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
-    this.forceGridY = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
-    this.forceGridZ = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
-    this.forceTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-    this.nearFieldForceX = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
-    this.nearFieldForceY = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
-    this.nearFieldForceZ = createTexture2D(this.gl, this.gridTextureSize, this.gridTextureSize);
-
     // Upload particle data
     const { positions, velocities } = this.particleData;
     const velDataVal = velocities || new Float32Array(positions.length);
@@ -188,7 +173,6 @@ export class ParticleSystemMeshKernels {
     this.depositKernel = new KDeposit({
       gl: this.gl,
       inPosition: null,
-      outGrid: this.massGridTexture,
       particleCount: this.options.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
@@ -202,8 +186,6 @@ export class ParticleSystemMeshKernels {
     // FFT kernel for forward transform
     this.fftForwardKernel = new KFFT({
       gl: this.gl,
-      inReal: this.massGridTexture,
-      outComplex: this.densitySpectrumTexture,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
@@ -214,8 +196,6 @@ export class ParticleSystemMeshKernels {
     // Poisson solver kernel
     this.poissonKernel = new KPoisson({
       gl: this.gl,
-      inDensitySpectrum: this.densitySpectrumTexture,
-      outPotentialSpectrum: this.potentialSpectrumTexture,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
@@ -231,10 +211,6 @@ export class ParticleSystemMeshKernels {
     // Gradient kernel
     this.gradientKernel = new KGradient({
       gl: this.gl,
-      inPotentialSpectrum: this.potentialSpectrumTexture,
-      outForceSpectrumX: this.forceSpectrumX,
-      outForceSpectrumY: this.forceSpectrumY,
-      outForceSpectrumZ: this.forceSpectrumZ,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
@@ -244,8 +220,6 @@ export class ParticleSystemMeshKernels {
     // FFT kernel for inverse transforms (reused for x, y, z)
     this.fftInverseKernel = new KFFT({
       gl: this.gl,
-      inComplex: null,  // set per-frame
-      outReal: null,    // set per-frame
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
@@ -256,11 +230,6 @@ export class ParticleSystemMeshKernels {
     // Force sampling kernel
     this.forceSampleKernel = new KForceSample({
       gl: this.gl,
-      inPosition: null,
-      inForceGridX: this.forceGridX,
-      inForceGridY: this.forceGridY,
-      inForceGridZ: this.forceGridZ,
-      outForce: this.forceTexture,
       particleCount: this.options.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
@@ -273,10 +242,6 @@ export class ParticleSystemMeshKernels {
     // Near-field kernel
     this.nearFieldKernel = new KNearField({
       gl: this.gl,
-      inMassGrid: this.massGridTexture,
-      outForceX: this.nearFieldForceX,
-      outForceY: this.nearFieldForceY,
-      outForceZ: this.nearFieldForceZ,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
@@ -289,11 +254,6 @@ export class ParticleSystemMeshKernels {
     // Near-field force sampling kernel (accumulate mode)
     this.nearFieldSampleKernel = new KForceSample({
       gl: this.gl,
-      inPosition: null,
-      inForceGridX: this.nearFieldForceX,
-      inForceGridY: this.nearFieldForceY,
-      inForceGridZ: this.nearFieldForceZ,
-      outForce: this.forceTexture,
       particleCount: this.options.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
@@ -306,10 +266,6 @@ export class ParticleSystemMeshKernels {
     // Create velocity and position integrator kernels
     this.velocityKernel = new KIntegrateVelocity({
       gl: this.gl,
-      inVelocity: null,
-      inForce: null,
-      inPosition: null,
-      outVelocity: null,
       width: this.textureWidth,
       height: this.textureHeight,
       dt: this.options.dt,
@@ -320,9 +276,6 @@ export class ParticleSystemMeshKernels {
 
     this.positionKernel = new KIntegratePosition({
       gl: this.gl,
-      inPosition: null,
-      inVelocity: null,
-      outPosition: null,
       width: this.textureWidth,
       height: this.textureHeight,
       dt: this.options.dt
@@ -423,22 +376,32 @@ export class ParticleSystemMeshKernels {
   }
   
   _integratePhysics() {
-    // This would use velocity and position integrator kernels
-    // For now, we'll implement a simple version inline
-    // In a complete implementation, this would use KIntegrateVelocity and KIntegratePosition
-    // similar to monopole-kernels
-    
-    if (!this.velocityTexture || !this.positionTexture) {
-      throw new Error('Ping-pong textures missing');
-    }
+    // Update velocities
+    if (!this.velocityKernel) throw new Error('Velocity kernel missing');
+    if (!this.velocityTexture || !this.positionTexture) throw new Error('Textures missing');
 
-    // TODO: Implement integrator kernels or reuse from monopole-kernels
-    // For now, this is a placeholder that swaps textures
+    this.velocityKernel.inVelocity = this.velocityTexture;
+    this.velocityKernel.inPosition = this.positionTexture;
+    this.velocityKernel.inForce = this.forceSampleKernel.outForce;
+    this.velocityKernel.outVelocity = this.velocityTextureWrite;
+    this.velocityKernel.run();
+
+    // Swap velocity textures
     {
       const tmp = this.velocityTexture;
       this.velocityTexture = this.velocityTextureWrite;
       this.velocityTextureWrite = tmp;
     }
+
+    // Update positions
+    if (!this.positionKernel) throw new Error('Position kernel missing');
+
+    this.positionKernel.inPosition = this.positionTexture;
+    this.positionKernel.inVelocity = this.velocityTexture;
+    this.positionKernel.outPosition = this.positionTextureWrite;
+    this.positionKernel.run();
+
+    // Swap position textures
     {
       const tmp = this.positionTexture;
       this.positionTexture = this.positionTextureWrite;
@@ -446,40 +409,7 @@ export class ParticleSystemMeshKernels {
     }
   }
   
-  /**
-   * Get current position texture for rendering
-   */
-    getPositionTexture() {
-    if (!this.positionTexture) return null;
-    return this.positionTexture;
-  }
-  
-  /**
-   * Get all position textures
-   */
-  getPositionTextures() {
-    return [this.positionTexture, this.positionTextureWrite];
-  }
-  
-  /**
-   * Get current ping-pong index
-   */
-  getCurrentIndex() {
-    return 0;
-  }
 
-  /**
-   * Expose kernels for external inspection or configuration
-   */
-  // getKernels() and getColorTexture() removed: use instance properties
-  // (e.g. `.colorTexture`, `.depositKernel`) for inspection/access.
-  
-  /**
-   * Get texture dimensions
-   */
-  getTextureSize() {
-    return { width: this.textureWidth, height: this.textureHeight };
-  }
   
   /**
    * Dispose all resources

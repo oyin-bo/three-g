@@ -33,7 +33,8 @@ export class KDeposit {
    *   gridSize?: number,
    *   slicesPerRow?: number,
    *   worldBounds?: {min: [number,number,number], max: [number,number,number]},
-   *   assignment?: 'ngp' | 'cic'
+   *   assignment?: 'ngp' | 'cic',
+   *   disableFloatBlend?: boolean
    * }} options
    */
   constructor(options) {
@@ -61,6 +62,9 @@ export class KDeposit {
     
     // Assignment method
     this.assignment = options.assignment || 'ngp';
+    
+    // Float blend flag
+    this.disableFloatBlend = options.disableFloatBlend || false;
     
     // Compile and link shader program
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);

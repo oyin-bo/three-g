@@ -328,40 +328,7 @@ export class ParticleSystemQuadrupoleKernels {
     }
   }
   
-  /**
-   * Get current position texture for rendering
-   */
-  getPositionTexture() {
-    if (!this.positionTexture) return null;
-    return this.positionTexture;
-  }
-  
-  /**
-   * Get all position textures
-   */
-  getPositionTextures() {
-    return [this.positionTexture, this.positionTextureWrite];
-  }
-  
-  /**
-   * Get current ping-pong index
-   */
-  getCurrentIndex() {
-    return 0;
-  }
 
-  /**
-   * Expose kernels for external inspection or configuration
-   */
-  // getKernels() and getColorTexture() removed: use instance properties
-  // (e.g. `.colorTexture`, `.aggregatorKernel`) for inspection/access.
-  
-  /**
-   * Get texture dimensions
-   */
-  getTextureSize() {
-    return { width: this.textureWidth, height: this.textureHeight };
-  }
   
   /**
    * Dispose all resources

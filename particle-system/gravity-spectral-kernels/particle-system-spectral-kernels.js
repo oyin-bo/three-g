@@ -102,18 +102,6 @@ export class ParticleSystemSpectralKernels {
     this.velocityTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
     this.velocityTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
 
-    // Create PM grid textures
-    this.massGridTexture = createTexture2D(this.gl, this.textureSize, this.textureSize, this.gl.R32F);
-    this.densitySpectrumTexture = createComplexTexture(this.gl, this.textureSize, this.textureSize);
-    this.potentialSpectrumTexture = createComplexTexture(this.gl, this.textureSize, this.textureSize);
-    this.forceSpectrumX = createComplexTexture(this.gl, this.textureSize, this.textureSize);
-    this.forceSpectrumY = createComplexTexture(this.gl, this.textureSize, this.textureSize);
-    this.forceSpectrumZ = createComplexTexture(this.gl, this.textureSize, this.textureSize);
-    this.forceGridX = createTexture2D(this.gl, this.textureSize, this.textureSize);
-    this.forceGridY = createTexture2D(this.gl, this.textureSize, this.textureSize);
-    this.forceGridZ = createTexture2D(this.gl, this.textureSize, this.textureSize);
-    this.forceTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-
     // Upload particle data
     const { positions, velocities } = this.particleData;
     const velDataVal = velocities || new Float32Array(positions.length);
@@ -155,8 +143,6 @@ export class ParticleSystemSpectralKernels {
     // 1. Deposit kernel
     this.depositKernel = new KDeposit({
       gl: this.gl,
-      inPosition: null,  // set per-frame
-      outMassGrid: null, // will be set to internal texture
       particleCount: this.options.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
@@ -171,8 +157,6 @@ export class ParticleSystemSpectralKernels {
     // 2. Forward FFT kernel
     this.fftForwardKernel = new KFFT({
       gl: this.gl,
-      inReal: null,      // will be mass grid
-      outComplex: null,  // will be density spectrum
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureSize,
@@ -182,8 +166,6 @@ export class ParticleSystemSpectralKernels {
     // 3. Poisson solver kernel    
     this.poissonKernel = new KPoisson({
       gl: this.gl,
-      inDensitySpectrum: null,     // will be density spectrum
-      outPotentialSpectrum: null,  // will be potential spectrum
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureSize,
@@ -195,10 +177,6 @@ export class ParticleSystemSpectralKernels {
     // 4. Gradient kernel
     this.gradientKernel = new KGradient({
       gl: this.gl,
-      inPotentialSpectrum: null,   // will be potential spectrum
-      outForceSpectrumX: null,     // will be force spectrum X
-      outForceSpectrumY: null,     // will be force spectrum Y
-      outForceSpectrumZ: null,     // will be force spectrum Z
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureSize,
@@ -208,8 +186,6 @@ export class ParticleSystemSpectralKernels {
     // 5. Inverse FFT kernels (one per axis)
     this.fftInverseX = new KFFT({
       gl: this.gl,
-      inComplex: null,   // will be force spectrum X
-      outReal: null,     // will be force grid X
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureSize,
@@ -218,8 +194,6 @@ export class ParticleSystemSpectralKernels {
     
     this.fftInverseY = new KFFT({
       gl: this.gl,
-      inComplex: null,   // will be force spectrum Y
-      outReal: null,     // will be force grid Y
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureSize,
@@ -228,8 +202,6 @@ export class ParticleSystemSpectralKernels {
     
     this.fftInverseZ = new KFFT({
       gl: this.gl,
-      inComplex: null,   // will be force spectrum Z
-      outReal: null,     // will be force grid Z
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureSize,
@@ -239,11 +211,6 @@ export class ParticleSystemSpectralKernels {
     // 6. Force sampling kernel
     this.forceSampleKernel = new KForceSample({
       gl: this.gl,
-      inPosition: null,      // set per-frame
-      inForceGridX: null,    // will be force grid X
-      inForceGridY: null,    // will be force grid Y
-      inForceGridZ: null,    // will be force grid Z
-      outForce: null,        // will be force texture
       particleCount: this.options.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
@@ -255,10 +222,6 @@ export class ParticleSystemSpectralKernels {
     // 7. Integration kernels (reuse from monopole)
     this.velocityKernel = new KIntegrateVelocity({
       gl: this.gl,
-      inVelocity: null,
-      inForce: null,
-      inPosition: null,
-      outVelocity: null,
       width: this.textureWidth,
       height: this.textureHeight,
       dt: this.options.dt,
@@ -269,9 +232,6 @@ export class ParticleSystemSpectralKernels {
     
     this.positionKernel = new KIntegratePosition({
       gl: this.gl,
-      inPosition: null,
-      inVelocity: null,
-      outPosition: null,
       width: this.textureWidth,
       height: this.textureHeight,
       dt: this.options.dt
@@ -320,23 +280,39 @@ export class ParticleSystemSpectralKernels {
   
   _computePMForces() {
     // Set current position for deposit and force sample
-  this.depositKernel.inPosition = this.positionTexture;
-  this.forceSampleKernel.inPosition = this.positionTexture;
+    this.depositKernel.inPosition = this.positionTexture;
+    this.forceSampleKernel.inPosition = this.positionTexture;
     
     // Run PM/FFT pipeline
     this.depositKernel.run();           // Step 1: Deposit particles to grid
-    this.fftForwardKernel.run();        // Step 2: Forward FFT
-    this.poissonKernel.run();           // Step 3: Solve Poisson
-    this.gradientKernel.run();          // Step 4: Compute gradient
-    this.fftInverseX.run();             // Step 5a: Inverse FFT X
-    this.fftInverseY.run();             // Step 5b: Inverse FFT Y
-    this.fftInverseZ.run();             // Step 5c: Inverse FFT Z
-    this.forceSampleKernel.run();       // Step 6: Sample forces
     
-    // Wire force result into velocity integrator
-    if (this.velocityKernel) {
-      this.velocityKernel.inForce = this.forceTexture;
-    }
+    // Wire deposit output into FFT forward
+    this.fftForwardKernel.inReal = this.depositKernel.outMassGrid;
+    this.fftForwardKernel.run();        // Step 2: Forward FFT
+    
+    // Wire FFT output into Poisson
+    this.poissonKernel.inDensitySpectrum = this.fftForwardKernel.outComplex;
+    this.poissonKernel.run();           // Step 3: Solve Poisson
+    
+    // Wire Poisson output into Gradient
+    this.gradientKernel.inPotentialSpectrum = this.poissonKernel.outPotentialSpectrum;
+    this.gradientKernel.run();          // Step 4: Compute gradient
+    
+    // Wire gradient outputs into inverse FFTs
+    this.fftInverseX.inComplex = this.gradientKernel.outForceSpectrumX;
+    this.fftInverseX.run();             // Step 5a: Inverse FFT X
+    
+    this.fftInverseY.inComplex = this.gradientKernel.outForceSpectrumY;
+    this.fftInverseY.run();             // Step 5b: Inverse FFT Y
+    
+    this.fftInverseZ.inComplex = this.gradientKernel.outForceSpectrumZ;
+    this.fftInverseZ.run();             // Step 5c: Inverse FFT Z
+    
+    // Wire FFT outputs into force sampler
+    this.forceSampleKernel.inForceGridX = this.fftInverseX.outReal;
+    this.forceSampleKernel.inForceGridY = this.fftInverseY.outReal;
+    this.forceSampleKernel.inForceGridZ = this.fftInverseZ.outReal;
+    this.forceSampleKernel.run();       // Step 6: Sample forces
   }
   
   _integratePhysics() {
@@ -346,6 +322,7 @@ export class ParticleSystemSpectralKernels {
 
     this.velocityKernel.inVelocity = this.velocityTexture;
     this.velocityKernel.inPosition = this.positionTexture;
+    this.velocityKernel.inForce = this.forceSampleKernel.outForce;
     this.velocityKernel.outVelocity = this.velocityTextureWrite;
     this.velocityKernel.run();
 
@@ -372,60 +349,13 @@ export class ParticleSystemSpectralKernels {
     }
   }
   
-  /**
-   * Get current position texture for rendering
-   */
-  getPositionTexture() {
-    if (!this.positionTexture) return null;
-    return this.positionTexture;
-  }
-  
-  /**
-   * Get all position textures
-   */
-  getPositionTextures() {
-    return [this.positionTexture, this.positionTextureWrite];
-  }
-  
-  /**
-   * Get current ping-pong index
-   */
-  getCurrentIndex() {
-    return 0;
-  }
 
-  /**
-   * Expose kernels for external inspection or configuration
-   */
-  // getKernels() and getColorTexture() removed: use instance properties
-  // (e.g. `.colorTexture`, `.depositKernel`) for inspection/access.
-  
-  /**
-   * Get texture dimensions
-   */
-  getTextureSize() {
-    return { width: this.textureWidth, height: this.textureHeight };
-  }
   
   /**
    * Dispose all resources
    */
   dispose() {
-    const gl = this.gl;
-
-    // Clean up PM textures
-    if (this.massGridTexture) gl.deleteTexture(this.massGridTexture);
-    if (this.densitySpectrumTexture) gl.deleteTexture(this.densitySpectrumTexture);
-    if (this.potentialSpectrumTexture) gl.deleteTexture(this.potentialSpectrumTexture);
-    if (this.forceSpectrumX) gl.deleteTexture(this.forceSpectrumX);
-    if (this.forceSpectrumY) gl.deleteTexture(this.forceSpectrumY);
-    if (this.forceSpectrumZ) gl.deleteTexture(this.forceSpectrumZ);
-    if (this.forceGridX) gl.deleteTexture(this.forceGridX);
-    if (this.forceGridY) gl.deleteTexture(this.forceGridY);
-    if (this.forceGridZ) gl.deleteTexture(this.forceGridZ);
-    if (this.forceTexture) gl.deleteTexture(this.forceTexture);
-
-    // Dispose kernels
+    // Dispose kernels (they own their own textures)
     if (this.depositKernel) this.depositKernel.dispose();
     if (this.fftForwardKernel) this.fftForwardKernel.dispose();
     if (this.poissonKernel) this.poissonKernel.dispose();

@@ -113,10 +113,7 @@ outcome.animate = () => {
   }
 
   if (!isInitialized) {
-    const positionTexture =
-      physics instanceof ParticleSystemMonopoleKernels ?
-        physics.positionTexture :
-        physics.getPositionTexture();
+    const positionTexture = physics.positionTexture;
     positionTextureWrapper = new THREE.ExternalTexture(positionTexture);
 
     // Use pre-loaded global color texture
@@ -403,10 +400,7 @@ function recreatePhysicsAndMesh() {
   }
 
   const textureSize = { width: system.textureWidth, height: system.textureHeight };
-  const positionTexture =
-    system instanceof ParticleSystemMonopoleKernels ?
-      system.positionTexture :
-      system.getPositionTexture();
+  const positionTexture = system.positionTexture;
 
   // Dispose previous color texture if any
   if (colorTexGlobal) {
