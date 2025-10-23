@@ -44,6 +44,7 @@ export class KAggregator {
     // Resource slots - create textures if not provided per kernel contract
     this.inPosition = options.inPosition !== undefined ? options.inPosition : null;
     const { outA0, outA1, outA2 } = options;
+    // Use RGBA32F for MRT - floating-point precision required for particle data
     this.outA0 = (outA0 || outA0 === null) ? outA0 : createTextureRGBA32F(this.gl, this.octreeSize, this.octreeSize);
     this.outA1 = (outA1 || outA1 === null) ? outA1 : createTextureRGBA32F(this.gl, this.octreeSize, this.octreeSize);
     this.outA2 = (outA2 || outA2 === null) ? outA2 : createTextureRGBA32F(this.gl, this.octreeSize, this.octreeSize);
@@ -107,12 +108,15 @@ export class KAggregator {
     this.gl.vertexAttribPointer(0, 1, this.gl.FLOAT, false, 0, 0);
     this.gl.bindVertexArray(null);
     this.particleVAO = particleVAO;
-    
-    // Create an internal framebuffer (will be configured per-run). We keep
-    // a small shadow of attachments so run() can rebind only when they change.
+
+    // Create framebuffer with MRT attachments (no validation - matches monolithic pattern)
     this.outFramebuffer = this.gl.createFramebuffer();
-    /** @type {{ a0: WebGLTexture, a1: WebGLTexture, a2: WebGLTexture } | null} */
-    this._fboShadow = null;
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.outFramebuffer);
+    this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, this.outA0, 0);
+    this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT1, this.gl.TEXTURE_2D, this.outA1, 0);
+    this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT2, this.gl.TEXTURE_2D, this.outA2, 0);
+    this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0, this.gl.COLOR_ATTACHMENT1, this.gl.COLOR_ATTACHMENT2]);
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
   }
   
   /**
@@ -131,44 +135,36 @@ export class KAggregator {
     if (!this.inPosition || !this.outA0 || !this.outA1 || !this.outA2) {
       throw new Error('KAggregator: missing required textures');
     }
+
+    // Clear any pending GL errors
+    while (gl.getError() !== gl.NO_ERROR) {}
     
     gl.useProgram(this.program);
     
-    // Ensure framebuffer attachments match our outputs. Reconfigure when
-    // attachments differ from the shadow to avoid redundant GL calls.
-    if (this._fboShadow?.a0 !== this.outA0 ||
-      this._fboShadow?.a1 !== this.outA1 ||
-      this._fboShadow?.a2 !== this.outA2) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
-      if (this.outA0) gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outA0, 0);
-      if (this.outA1) gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, this.outA1, 0);
-      if (this.outA2) gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, this.outA2, 0);
-      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
-      const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-      if (status !== gl.FRAMEBUFFER_COMPLETE) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        throw new Error(`MRT framebuffer incomplete: ${status}`);
-      }
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-      this._fboShadow = { a0: this.outA0, a1: this.outA1, a2: this.outA2 };
+    // Unbind all texture units to avoid feedback
+    for (let i = 0; i < 8; i++) {
+      gl.activeTexture(gl.TEXTURE0 + i);
+      gl.bindTexture(gl.TEXTURE_2D, null);
     }
-
-    // Bind output framebuffer (MRT)
+    
+    // Bind framebuffer and set viewport with MRT
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
-    // Reassert draw buffers on the bound FBO (robust across context changes)
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
     gl.viewport(0, 0, this.octreeSize, this.octreeSize);
+    gl.disable(gl.SCISSOR_TEST);
     
-    // Clear outputs
+    // Setup GL state for rendering (match monolithic exactly)
+    gl.disable(gl.DEPTH_TEST);
+    gl.depthMask(false);
+    gl.colorMask(true, true, true, true);
+    gl.disable(gl.CULL_FACE);
+    gl.disable(gl.SCISSOR_TEST);
+    
+    // Clear output textures
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     
-    // Setup GL state for additive blending
-    gl.disable(gl.DEPTH_TEST);
-    gl.disable(gl.SCISSOR_TEST);
-    gl.colorMask(true, true, true, true);
-    
+    // Enable additive blending for accumulation
     if (!this.disableFloatBlend) {
       gl.enable(gl.BLEND);
       gl.blendEquation(gl.FUNC_ADD);
@@ -180,32 +176,34 @@ export class KAggregator {
     // Bind position texture
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.inPosition);
-    gl.uniform1i(gl.getUniformLocation(this.program, 'u_positions'), 0);
+    const u_positions = gl.getUniformLocation(this.program, 'u_positions');
+    gl.uniform1i(u_positions, 0);
     
     // Set uniforms
-    gl.uniform2f(gl.getUniformLocation(this.program, 'u_texSize'), 
-      this.particleTexWidth, this.particleTexHeight);
-    gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMin'),
+    const u_texSize = gl.getUniformLocation(this.program, 'u_texSize');
+    const u_worldMin = gl.getUniformLocation(this.program, 'u_worldMin');
+    const u_worldMax = gl.getUniformLocation(this.program, 'u_worldMax');
+    const u_gridSize = gl.getUniformLocation(this.program, 'u_gridSize');
+    const u_slicesPerRow = gl.getUniformLocation(this.program, 'u_slicesPerRow');
+    
+    gl.uniform2f(u_texSize, this.particleTexWidth, this.particleTexHeight);
+    gl.uniform3f(u_worldMin,
       this.worldBounds.min[0], this.worldBounds.min[1], this.worldBounds.min[2]);
-    gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMax'),
+    gl.uniform3f(u_worldMax,
       this.worldBounds.max[0], this.worldBounds.max[1], this.worldBounds.max[2]);
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
+    gl.uniform1f(u_gridSize, this.gridSize);
+    gl.uniform1f(u_slicesPerRow, this.slicesPerRow);
     
     // Draw particles as points
     gl.bindVertexArray(this.particleVAO);
     gl.drawArrays(gl.POINTS, 0, this.particleCount);
     gl.bindVertexArray(null);
     
-    // Disable blend
+    // Cleanup
     gl.disable(gl.BLEND);
-    
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, null);
-    gl.useProgram(null);
-    
-    // Unbind
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
   
   /**
@@ -222,8 +220,6 @@ export class KAggregator {
     if (this.outA0) gl.deleteTexture(this.outA0);
     if (this.outA1) gl.deleteTexture(this.outA1);
     if (this.outA2) gl.deleteTexture(this.outA2);
-
-    this._fboShadow = null;
   }
 }
 
@@ -236,6 +232,30 @@ export class KAggregator {
 function createTextureRGBA32F(gl, width, height) {
   const fmt = gl.RGBA32F;
   const tp = gl.FLOAT;
+
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0, gl.RGBA, tp, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  return texture;
+}
+
+/**
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ * @returns {WebGLTexture}
+ */
+function createTextureRGBA8(gl, width, height) {
+  const fmt = gl.RGBA8;
+  const tp = gl.UNSIGNED_BYTE;
 
   const texture = gl.createTexture();
   if (!texture) throw new Error('Failed to create texture');

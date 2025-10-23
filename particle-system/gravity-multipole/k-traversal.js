@@ -154,6 +154,8 @@ export class KTraversal {
   run() {
     const gl = this.gl;
     
+    console.log(`[KTraversal.run] START: texW=${this.particleTexWidth}, texH=${this.particleTexHeight}, numLevels=${this.numLevels}`);
+    
     if (!this.inPosition || !this.outForce) {
       throw new Error('KTraversal: missing required textures');
     }
@@ -199,13 +201,18 @@ export class KTraversal {
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_particleCount'), particleCount);
     
     // Bind all octree level textures (A0 only for monopole)
+    console.log(`[KTraversal] Binding ${this.numLevels} level textures. inLevelA0 length: ${this.inLevelA0.length}`);
     for (let i = 0; i < this.numLevels; i++) {
       const unit = gl.TEXTURE1 + i;
       gl.activeTexture(unit);
       // Only bind if texture exists, otherwise bind null
       const texture = this.inLevelA0[i] || null;
+      const hasTexture = !!texture;
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.uniform1i(gl.getUniformLocation(this.program, `u_quadtreeLevel${i}`), i + 1);
+      if (i < 3 || i === this.numLevels - 1) {
+        console.log(`  Level ${i}: u_quadtreeLevel${i} -> TEXTURE${i+1}, texture=${hasTexture}, gridSize=${this.levelConfigs[i].gridSize}`);
+      }
     }
     
     // Set level configuration uniforms
@@ -245,6 +252,13 @@ export class KTraversal {
     // Draw
     gl.bindVertexArray(this.quadVAO);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    
+    // DEBUG: Check for GL errors
+    const err = gl.getError();
+    if (err !== gl.NO_ERROR) {
+      console.error('[KTraversal] WebGL error after drawArrays:', err);
+    }
+    
     gl.bindVertexArray(null);
 
     for (let i = 0; i < this.numLevels; i++) {

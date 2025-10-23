@@ -146,7 +146,12 @@ export class KPyramidBuild {
 
     // Bind output framebuffer (MRT)
     this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.outFramebuffer);
+    this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0, this.gl.COLOR_ATTACHMENT1, this.gl.COLOR_ATTACHMENT2]);
     this.gl.viewport(0, 0, this.outSize, this.outSize);
+    
+    // Clear outputs before rendering
+    this.gl.clearColor(0, 0, 0, 0);
+    this.gl.clear(this.gl.COLOR_BUFFER_BIT);
 
     // Setup GL state
     this.gl.disable(this.gl.DEPTH_TEST);
