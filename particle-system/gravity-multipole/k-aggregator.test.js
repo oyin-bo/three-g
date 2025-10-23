@@ -82,10 +82,6 @@ test('KAggregator: single particle aggregation', async () => {
   const slicesPerRow = 2;
   const octreeSize = gridSize * slicesPerRow; // 8×8
   
-  const outA0 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA1 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA2 = createTestTexture(gl, octreeSize, octreeSize, null);
-  
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({
     min: [-2, -2, -2],
     max: [2, 2, 2]
@@ -94,9 +90,6 @@ test('KAggregator: single particle aggregation', async () => {
   const kernel = new KAggregator({
     gl,
     inPosition: posTex,
-    outA0,
-    outA1,
-    outA2,
     particleCount,
     particleTexWidth,
     particleTexHeight,
@@ -109,9 +102,9 @@ test('KAggregator: single particle aggregation', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, outA0, octreeSize, octreeSize);
-  const resultA1 = readTexture(gl, outA1, octreeSize, octreeSize);
-  const resultA2 = readTexture(gl, outA2, octreeSize, octreeSize);
+  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
+  const resultA1 = readTexture(gl, kernel.outA1, octreeSize, octreeSize);
+  const resultA2 = readTexture(gl, kernel.outA2, octreeSize, octreeSize);
   
   assertAllFinite(resultA0, 'A0 must be finite');
   assertAllFinite(resultA1, 'A1 must be finite');
@@ -154,16 +147,11 @@ test('KAggregator: multiple particles same voxel with blending', async () => {
   const slicesPerRow = 2;
   const octreeSize = gridSize * slicesPerRow;
   
-  const outA0 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA1 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA2 = createTestTexture(gl, octreeSize, octreeSize, null);
-  
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
   
   const kernel = new KAggregator({
     gl,
     inPosition: posTex,
-    outA0, outA1, outA2,
     particleCount,
     particleTexWidth,
     particleTexHeight,
@@ -176,7 +164,7 @@ test('KAggregator: multiple particles same voxel with blending', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, outA0, octreeSize, octreeSize);
+  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
   
   // Center voxel should accumulate all three particles
   const [a0_r, a0_g, a0_b, a0_a] = readVoxel(resultA0, 2, 2, 2, gridSize, slicesPerRow);
@@ -245,16 +233,11 @@ test('KAggregator: particles in different voxels', async () => {
   const slicesPerRow = 2;
   const octreeSize = gridSize * slicesPerRow;
   
-  const outA0 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA1 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA2 = createTestTexture(gl, octreeSize, octreeSize, null);
-  
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
   
   const kernel = new KAggregator({
     gl,
     inPosition: posTex,
-    outA0, outA1, outA2,
     particleCount,
     particleTexWidth,
     particleTexHeight,
@@ -267,7 +250,7 @@ test('KAggregator: particles in different voxels', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, outA0, octreeSize, octreeSize);
+  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
   
   // Check corner voxels have mass
   const corner000 = readVoxel(resultA0, 0, 0, 0, gridSize, slicesPerRow);
@@ -355,16 +338,11 @@ test('KAggregator: quadrupole moments', async () => {
   const slicesPerRow = 2;
   const octreeSize = gridSize * slicesPerRow;
   
-  const outA0 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA1 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA2 = createTestTexture(gl, octreeSize, octreeSize, null);
-  
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
   
   const kernel = new KAggregator({
     gl,
     inPosition: posTex,
-    outA0, outA1, outA2,
     particleCount,
     particleTexWidth,
     particleTexHeight,
@@ -377,9 +355,9 @@ test('KAggregator: quadrupole moments', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, outA0, octreeSize, octreeSize);
-  const resultA1 = readTexture(gl, outA1, octreeSize, octreeSize);
-  const resultA2 = readTexture(gl, outA2, octreeSize, octreeSize);
+  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
+  const resultA1 = readTexture(gl, kernel.outA1, octreeSize, octreeSize);
+  const resultA2 = readTexture(gl, kernel.outA2, octreeSize, octreeSize);
   
   // Particle maps to voxel (3, 3, 3) since it's at positive coords
   const [a0_r, a0_g, a0_b, a0_a] = readVoxel(resultA0, 3, 3, 3, gridSize, slicesPerRow);
@@ -428,16 +406,11 @@ test('KAggregator: out of bounds particles', async () => {
   const slicesPerRow = 2;
   const octreeSize = gridSize * slicesPerRow;
   
-  const outA0 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA1 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA2 = createTestTexture(gl, octreeSize, octreeSize, null);
-  
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
   
   const kernel = new KAggregator({
     gl,
     inPosition: posTex,
-    outA0, outA1, outA2,
     particleCount,
     particleTexWidth,
     particleTexHeight,
@@ -450,7 +423,7 @@ test('KAggregator: out of bounds particles', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, outA0, octreeSize, octreeSize);
+  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
   
   // Center voxel should have one particle
   const center = readVoxel(resultA0, 2, 2, 2, gridSize, slicesPerRow);
@@ -485,16 +458,11 @@ test('KAggregator: zero mass particles', async () => {
   const slicesPerRow = 2;
   const octreeSize = gridSize * slicesPerRow;
   
-  const outA0 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA1 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA2 = createTestTexture(gl, octreeSize, octreeSize, null);
-  
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
   
   const kernel = new KAggregator({
     gl,
     inPosition: posTex,
-    outA0, outA1, outA2,
     particleCount,
     particleTexWidth,
     particleTexHeight,
@@ -507,7 +475,7 @@ test('KAggregator: zero mass particles', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, outA0, octreeSize, octreeSize);
+  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
   
   // Center voxel should be empty (zero mass particle doesn't contribute)
   const center = readVoxel(resultA0, 2, 2, 2, gridSize, slicesPerRow);
@@ -549,16 +517,11 @@ test('KAggregator: large particle count', async () => {
   const slicesPerRow = 4;
   const octreeSize = gridSize * slicesPerRow;
   
-  const outA0 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA1 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const outA2 = createTestTexture(gl, octreeSize, octreeSize, null);
-  
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
   
   const kernel = new KAggregator({
     gl,
     inPosition: posTex,
-    outA0, outA1, outA2,
     particleCount,
     particleTexWidth,
     particleTexHeight,
@@ -571,7 +534,7 @@ test('KAggregator: large particle count', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, outA0, octreeSize, octreeSize);
+  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
   
   assertAllFinite(resultA0, 'Result must be finite');
   

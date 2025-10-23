@@ -98,11 +98,6 @@ test('KPyramidBuild: single voxel 2x2x2 reduction', async () => {
     return [voxelIndex * 10.0, voxelIndex * 20.0, voxelIndex * 30.0, voxelIndex * 40.0];
   });
   
-  // Create output textures
-  const outA0 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA1 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA2 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  
   // Create and run kernel
   const kernel = new KPyramidBuild({
     gl,
@@ -111,18 +106,15 @@ test('KPyramidBuild: single voxel 2x2x2 reduction', async () => {
     outSlicesPerRow: parentSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
-    inA2: childA2,
-    outA0,
-    outA1,
-    outA2
+    inA2: childA2
   });
   
   kernel.run();
   
   // Read results
-  const resultA0 = readTexture(gl, outA0, parentTextureSize, parentTextureSize);
-  const resultA1 = readTexture(gl, outA1, parentTextureSize, parentTextureSize);
-  const resultA2 = readTexture(gl, outA2, parentTextureSize, parentTextureSize);
+  const resultA0 = readTexture(gl, kernel.outA0, parentTextureSize, parentTextureSize);
+  const resultA1 = readTexture(gl, kernel.outA1, parentTextureSize, parentTextureSize);
+  const resultA2 = readTexture(gl, kernel.outA2, parentTextureSize, parentTextureSize);
   
   // Expected: sum of all 8 voxels (indices 0-7)
   // A0: [0+1+2+3+4+5+6+7, 0+2+4+6+8+10+12+14, ...]
@@ -202,10 +194,6 @@ test('KPyramidBuild: multiple voxel 4x4x4 to 2x2x2 reduction', async () => {
     return [0, 0, 0, 0];
   });
   
-  const outA0 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA1 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA2 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  
   const kernel = new KPyramidBuild({
     gl,
     outSize: parentTextureSize,
@@ -213,15 +201,12 @@ test('KPyramidBuild: multiple voxel 4x4x4 to 2x2x2 reduction', async () => {
     outSlicesPerRow: parentSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
-    inA2: childA2,
-    outA0,
-    outA1,
-    outA2
+    inA2: childA2
   });
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, outA0, parentTextureSize, parentTextureSize);
+  const resultA0 = readTexture(gl, kernel.outA0, parentTextureSize, parentTextureSize);
   
   // Check each parent voxel
   for (let pz = 0; pz < 2; pz++) {
@@ -270,10 +255,6 @@ test('KPyramidBuild: zero input produces zero output', async () => {
   const childA1 = fillVoxelTexture(gl, childGridSize, childSlicesPerRow, () => [0, 0, 0, 0]);
   const childA2 = fillVoxelTexture(gl, childGridSize, childSlicesPerRow, () => [0, 0, 0, 0]);
   
-  const outA0 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA1 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA2 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  
   const kernel = new KPyramidBuild({
     gl,
     outSize: parentTextureSize,
@@ -281,17 +262,14 @@ test('KPyramidBuild: zero input produces zero output', async () => {
     outSlicesPerRow: parentSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
-    inA2: childA2,
-    outA0,
-    outA1,
-    outA2
+    inA2: childA2
   });
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, outA0, parentTextureSize, parentTextureSize);
-  const resultA1 = readTexture(gl, outA1, parentTextureSize, parentTextureSize);
-  const resultA2 = readTexture(gl, outA2, parentTextureSize, parentTextureSize);
+  const resultA0 = readTexture(gl, kernel.outA0, parentTextureSize, parentTextureSize);
+  const resultA1 = readTexture(gl, kernel.outA1, parentTextureSize, parentTextureSize);
+  const resultA2 = readTexture(gl, kernel.outA2, parentTextureSize, parentTextureSize);
   
   assertAllFinite(resultA0, 'A0 must be finite');
   assertAllFinite(resultA1, 'A1 must be finite');
@@ -328,10 +306,6 @@ test('KPyramidBuild: uniform input scales correctly', async () => {
   const childA1 = fillVoxelTexture(gl, childGridSize, childSlicesPerRow, () => [0.1, 0.2, 0.3, 0.4]);
   const childA2 = fillVoxelTexture(gl, childGridSize, childSlicesPerRow, () => [10, 20, 30, 40]);
   
-  const outA0 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA1 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA2 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  
   const kernel = new KPyramidBuild({
     gl,
     outSize: parentTextureSize,
@@ -339,17 +313,14 @@ test('KPyramidBuild: uniform input scales correctly', async () => {
     outSlicesPerRow: parentSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
-    inA2: childA2,
-    outA0,
-    outA1,
-    outA2
+    inA2: childA2
   });
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, outA0, parentTextureSize, parentTextureSize);
-  const resultA1 = readTexture(gl, outA1, parentTextureSize, parentTextureSize);
-  const resultA2 = readTexture(gl, outA2, parentTextureSize, parentTextureSize);
+  const resultA0 = readTexture(gl, kernel.outA0, parentTextureSize, parentTextureSize);
+  const resultA1 = readTexture(gl, kernel.outA1, parentTextureSize, parentTextureSize);
+  const resultA2 = readTexture(gl, kernel.outA2, parentTextureSize, parentTextureSize);
   
   // Each parent aggregates 8 children
   assertClose(resultA0[0], uniformValue[0] * 8, 1e-4, 'A0.r');
@@ -394,10 +365,6 @@ test('KPyramidBuild: large grid 8x8x8 to 4x4x4 reduction', async () => {
   const childA1 = fillVoxelTexture(gl, childGridSize, childSlicesPerRow, () => [1, 1, 1, 1]);
   const childA2 = fillVoxelTexture(gl, childGridSize, childSlicesPerRow, () => [0.5, 0.5, 0.5, 0.5]);
   
-  const outA0 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA1 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA2 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  
   const kernel = new KPyramidBuild({
     gl,
     outSize: parentTextureSize,
@@ -405,17 +372,14 @@ test('KPyramidBuild: large grid 8x8x8 to 4x4x4 reduction', async () => {
     outSlicesPerRow: parentSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
-    inA2: childA2,
-    outA0,
-    outA1,
-    outA2
+    inA2: childA2
   });
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, outA0, parentTextureSize, parentTextureSize);
-  const resultA1 = readTexture(gl, outA1, parentTextureSize, parentTextureSize);
-  const resultA2 = readTexture(gl, outA2, parentTextureSize, parentTextureSize);
+  const resultA0 = readTexture(gl, kernel.outA0, parentTextureSize, parentTextureSize);
+  const resultA1 = readTexture(gl, kernel.outA1, parentTextureSize, parentTextureSize);
+  const resultA2 = readTexture(gl, kernel.outA2, parentTextureSize, parentTextureSize);
   
   assertAllFinite(resultA0, 'A0 must be finite');
   assertAllFinite(resultA1, 'A1 must be finite');
@@ -488,10 +452,6 @@ test('KPyramidBuild: sparse input with some empty voxels', async () => {
   
   const childA2 = fillVoxelTexture(gl, childGridSize, childSlicesPerRow, () => [0, 0, 0, 0]);
   
-  const outA0 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA1 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA2 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  
   const kernel = new KPyramidBuild({
     gl,
     outSize: parentTextureSize,
@@ -499,17 +459,14 @@ test('KPyramidBuild: sparse input with some empty voxels', async () => {
     outSlicesPerRow: parentSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
-    inA2: childA2,
-    outA0,
-    outA1,
-    outA2
+    inA2: childA2
   });
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, outA0, parentTextureSize, parentTextureSize);
-  const resultA1 = readTexture(gl, outA1, parentTextureSize, parentTextureSize);
-  const resultA2 = readTexture(gl, outA2, parentTextureSize, parentTextureSize);
+  const resultA0 = readTexture(gl, kernel.outA0, parentTextureSize, parentTextureSize);
+  const resultA1 = readTexture(gl, kernel.outA1, parentTextureSize, parentTextureSize);
+  const resultA2 = readTexture(gl, kernel.outA2, parentTextureSize, parentTextureSize);
   
   // A0 should have only the (0,0,0) contribution
   assertClose(resultA0[0], 100, 1e-5, 'A0.r should be 100');
@@ -556,10 +513,6 @@ test('KPyramidBuild: negative and large values', async () => {
   const childA1 = fillVoxelTexture(gl, childGridSize, childSlicesPerRow, () => [-5, -10, -15, -20]);
   const childA2 = fillVoxelTexture(gl, childGridSize, childSlicesPerRow, () => [1e6, 2e6, 3e6, 4e6]);
   
-  const outA0 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA1 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  const outA2 = createTestTexture(gl, parentTextureSize, parentTextureSize, null);
-  
   const kernel = new KPyramidBuild({
     gl,
     outSize: parentTextureSize,
@@ -567,17 +520,14 @@ test('KPyramidBuild: negative and large values', async () => {
     outSlicesPerRow: parentSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
-    inA2: childA2,
-    outA0,
-    outA1,
-    outA2
+    inA2: childA2
   });
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, outA0, parentTextureSize, parentTextureSize);
-  const resultA1 = readTexture(gl, outA1, parentTextureSize, parentTextureSize);
-  const resultA2 = readTexture(gl, outA2, parentTextureSize, parentTextureSize);
+  const resultA0 = readTexture(gl, kernel.outA0, parentTextureSize, parentTextureSize);
+  const resultA1 = readTexture(gl, kernel.outA1, parentTextureSize, parentTextureSize);
+  const resultA2 = readTexture(gl, kernel.outA2, parentTextureSize, parentTextureSize);
   
   assertAllFinite(resultA0, 'A0 must be finite');
   assertAllFinite(resultA1, 'A1 must be finite');

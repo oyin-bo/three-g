@@ -116,16 +116,9 @@ test('KTraversal: two particle interaction', async () => {
   // Aggregate particles into octree
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
   
-  const octreeA0 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const octreeA1 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const octreeA2 = createTestTexture(gl, octreeSize, octreeSize, null);
-  
   const aggregator = new KAggregator({
     gl,
     inPosition: posTex,
-    outA0: octreeA0,
-    outA1: octreeA1,
-    outA2: octreeA2,
     particleCount,
     particleTexWidth,
     particleTexHeight,
@@ -139,14 +132,14 @@ test('KTraversal: two particle interaction', async () => {
   aggregator.run();
   
   //  Read octree to check aggregation results
-  const octreeCheck = readTexture(gl, octreeA0, octreeSize, octreeSize);
+  const octreeCheck = readTexture(gl, aggregator.outA0, octreeSize, octreeSize);
   
   const outForce = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
   
   const kernel = new KTraversal({
     gl,
     inPosition: posTex,
-    inLevelA0: [octreeA0],
+    inLevelA0: [aggregator.outA0],
     outForce,
     particleTexWidth,
     particleTexHeight,
@@ -426,16 +419,9 @@ test('KTraversal: softening prevents singularities', async () => {
   
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
   
-  const octreeA0 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const octreeA1 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const octreeA2 = createTestTexture(gl, octreeSize, octreeSize, null);
-  
   const aggregator = new KAggregator({
     gl,
     inPosition: posTex,
-    outA0: octreeA0,
-    outA1: octreeA1,
-    outA2: octreeA2,
     particleCount,
     particleTexWidth,
     particleTexHeight,
@@ -455,7 +441,7 @@ test('KTraversal: softening prevents singularities', async () => {
   const kernel1 = new KTraversal({
     gl,
     inPosition: posTex,
-    inLevelA0: [octreeA0],
+    inLevelA0: [aggregator.outA0],
     outForce: outForce1,
     particleTexWidth,
     particleTexHeight,
@@ -474,7 +460,7 @@ test('KTraversal: softening prevents singularities', async () => {
   const kernel2 = new KTraversal({
     gl,
     inPosition: posTex,
-    inLevelA0: [octreeA0],
+    inLevelA0: [aggregator.outA0],
     outForce: outForce2,
     particleTexWidth,
     particleTexHeight,

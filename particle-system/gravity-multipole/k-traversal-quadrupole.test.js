@@ -121,16 +121,9 @@ test('KTraversalQuadrupole: two particle interaction', async () => {
   // Aggregate particles into octree
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
   
-  const octreeA0 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const octreeA1 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const octreeA2 = createTestTexture(gl, octreeSize, octreeSize, null);
-  
   const aggregator = new KAggregator({
     gl,
     inPosition: posTex,
-    outA0: octreeA0,
-    outA1: octreeA1,
-    outA2: octreeA2,
     particleCount,
     particleTexWidth,
     particleTexHeight,
@@ -148,9 +141,9 @@ test('KTraversalQuadrupole: two particle interaction', async () => {
   const kernel = new KTraversalQuadrupole({
     gl,
     inPosition: posTex,
-    inLevelA0: [octreeA0],
-    inLevelA1: [octreeA1],
-    inLevelA2: [octreeA2],
+    inLevelA0: [aggregator.outA0],
+    inLevelA1: [aggregator.outA1],
+    inLevelA2: [aggregator.outA2],
     outForce,
     particleTexWidth,
     particleTexHeight,
@@ -214,16 +207,9 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
   
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
   
-  const octreeA0 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const octreeA1 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const octreeA2 = createTestTexture(gl, octreeSize, octreeSize, null);
-  
   const aggregator = new KAggregator({
     gl,
     inPosition: posTex,
-    outA0: octreeA0,
-    outA1: octreeA1,
-    outA2: octreeA2,
     particleCount,
     particleTexWidth,
     particleTexHeight,
@@ -242,9 +228,9 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
   const kernelQuad = new KTraversalQuadrupole({
     gl,
     inPosition: posTex,
-    inLevelA0: [octreeA0],
-    inLevelA1: [octreeA1],
-    inLevelA2: [octreeA2],
+    inLevelA0: [aggregator.outA0],
+    inLevelA1: [aggregator.outA1],
+    inLevelA2: [aggregator.outA2],
     outForce: outForceQuad,
     particleTexWidth,
     particleTexHeight,
@@ -269,9 +255,9 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
   const kernelMono = new KTraversalQuadrupole({
     gl,
     inPosition: posTex,
-    inLevelA0: [octreeA0],
-    inLevelA1: [octreeA1],
-    inLevelA2: [octreeA2],
+    inLevelA0: [aggregator.outA0],
+    inLevelA1: [aggregator.outA1],
+    inLevelA2: [aggregator.outA2],
     outForce: outForceMono,
     particleTexWidth,
     particleTexHeight,
@@ -393,16 +379,9 @@ test('KTraversalQuadrupole: zero mass particle', async () => {
   
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
   
-  const octreeA0 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const octreeA1 = createTestTexture(gl, octreeSize, octreeSize, null);
-  const octreeA2 = createTestTexture(gl, octreeSize, octreeSize, null);
-  
   const aggregator = new KAggregator({
     gl,
     inPosition: posTex,
-    outA0: octreeA0,
-    outA1: octreeA1,
-    outA2: octreeA2,
     particleCount: 2,
     particleTexWidth,
     particleTexHeight,
@@ -420,9 +399,9 @@ test('KTraversalQuadrupole: zero mass particle', async () => {
   const kernel = new KTraversalQuadrupole({
     gl,
     inPosition: posTex,
-    inLevelA0: [octreeA0],
-    inLevelA1: [octreeA1],
-    inLevelA2: [octreeA2],
+    inLevelA0: [aggregator.outA0],
+    inLevelA1: [aggregator.outA1],
+    inLevelA2: [aggregator.outA2],
     outForce,
     particleTexWidth,
     particleTexHeight,

@@ -211,7 +211,7 @@ export class KTraversal {
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.uniform1i(gl.getUniformLocation(this.program, `u_quadtreeLevel${i}`), i + 1);
       if (i < 3 || i === this.numLevels - 1) {
-        console.log(`  Level ${i}: u_quadtreeLevel${i} -> TEXTURE${i+1}, texture=${hasTexture}, gridSize=${this.levelConfigs[i].gridSize}`);
+        // console.log(`  Level ${i}: u_quadtreeLevel${i} -> TEXTURE${i+1}, texture=${hasTexture}, gridSize=${this.levelConfigs[i].gridSize}`);
       }
     }
     
