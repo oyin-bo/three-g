@@ -99,8 +99,9 @@ test('monopole-kernels.small-scale: single particle at rest remains stationary',
   const { canvas, gl } = createTestCanvas();
   
   // Create 1 particle at origin with zero velocity
-  const positions = new Float32Array([0, 0, 0, 1.0]); // x, y, z, mass
-  const velocities = new Float32Array([0, 0, 0, 0]);
+  const positions = new Float32Array(4);  // 1x1 texture = 4 floats
+  positions.set([0, 0, 0, 1.0]);
+  const velocities = new Float32Array(4);  // Padded to match texture
   
   const system = new ParticleSystemMonopoleKernels({
     gl,
@@ -138,14 +139,9 @@ test('monopole-kernels.small-scale: two particles attract each other', async () 
   const { canvas, gl } = createTestCanvas();
   
   // Create 2 particles separated along x-axis
-  const positions = new Float32Array([
-    -1, 0, 0, 1.0,  // Particle 0
-     1, 0, 0, 1.0   // Particle 1
-  ]);
-  const velocities = new Float32Array([
-    0, 0, 0, 0,
-    0, 0, 0, 0
-  ]);
+  const positions = new Float32Array(8);  // 2x2 texture = 8 floats
+  positions.set([-1, 0, 0, 1.0,  1, 0, 0, 1.0]);
+  const velocities = new Float32Array(8);  // Padded to match texture
   
   const system = new ParticleSystemMonopoleKernels({
     gl,
@@ -193,7 +189,8 @@ test('monopole-kernels.small-scale: three-body equilateral triangle maintains sh
   const a = 1.0; // side length
   const h = a * Math.sqrt(3) / 2; // height
   
-  const positions = new Float32Array([
+  const positions = new Float32Array(16);  // 2x2 texture = 16 floats
+  positions.set([
     -a/2,  -h/3, 0, 1.0,  // Bottom left
      a/2,  -h/3, 0, 1.0,  // Bottom right
      0,   2*h/3, 0, 1.0   // Top
@@ -201,7 +198,8 @@ test('monopole-kernels.small-scale: three-body equilateral triangle maintains sh
   
   // Set up circular orbit velocities (perpendicular to radius, equal magnitude)
   const v = 0.02; // orbital speed
-  const velocities = new Float32Array([
+  const velocities = new Float32Array(16);  // Padded to match texture
+  velocities.set([
      v * Math.cos(Math.PI/3),  v * Math.sin(Math.PI/3), 0, 0,
      v * Math.cos(Math.PI),    v * Math.sin(Math.PI), 0, 0,
     -v * Math.cos(Math.PI/6), -v * Math.sin(Math.PI/6), 0, 0
@@ -257,7 +255,11 @@ test('monopole-kernels.small-scale: ten particles in cluster contract inward', a
   const { canvas, gl } = createTestCanvas();
   
   // Create 10 particles randomly distributed in small sphere
-  const positions = new Float32Array(10 * 4);
+  const particleCount = 10;
+  const textureWidth = Math.ceil(Math.sqrt(particleCount));
+  const textureHeight = Math.ceil(particleCount / textureWidth);
+  const positions = new Float32Array(textureWidth * textureHeight * 4);
+  
   for (let i = 0; i < 10; i++) {
     const theta = Math.random() * 2 * Math.PI;
     const phi = Math.acos(2 * Math.random() - 1);
@@ -269,7 +271,7 @@ test('monopole-kernels.small-scale: ten particles in cluster contract inward', a
     positions[i * 4 + 3] = 1.0; // mass
   }
   
-  const velocities = new Float32Array(10 * 4); // all zeros
+  const velocities = new Float32Array(textureWidth * textureHeight * 4); // all zeros
   
   const system = new ParticleSystemMonopoleKernels({
     gl,
@@ -336,9 +338,9 @@ test('monopole-kernels.small-scale: ten particles in cluster contract inward', a
 test('monopole-kernels.small-scale: empty system does not crash', async () => {
   const { canvas, gl } = createTestCanvas();
   
-  // Create empty particle arrays
-  const positions = new Float32Array(0);
-  const velocities = new Float32Array(0);
+  // Create empty particle arrays (minimum 1x1 texture = 4 floats)
+  const positions = new Float32Array(4);
+  const velocities = new Float32Array(4);
   
   // This test verifies the system handles edge case gracefully
   let systemCreated = false;

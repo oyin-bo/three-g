@@ -60,7 +60,7 @@ void main() {
   vec3 norm = (pos.xyz - u_worldMin) / worldExtent;
   // Clamp to valid range, ensuring symmetric treatment of all axes
   norm = clamp(norm, vec3(0.0), vec3(0.9999));
-  vec3 voxelCoord = floor(norm * u_gridSize + 0.5);
+  vec3 voxelCoord = floor(norm * u_gridSize);
   // Ensure voxel is within bounds (defensive)
   voxelCoord = clamp(voxelCoord, vec3(0.0), vec3(u_gridSize - 1.0));
   

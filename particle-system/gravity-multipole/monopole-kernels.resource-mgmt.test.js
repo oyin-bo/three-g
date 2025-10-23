@@ -33,8 +33,10 @@ test('monopole-kernels.resource-mgmt: dispose cleans up all GPU resources', asyn
   const { canvas, gl } = createTestCanvas();
   
   const particleCount = 100;
-  const positions = new Float32Array(particleCount * 4);
-  const velocities = new Float32Array(particleCount * 4);
+  const textureWidth = Math.ceil(Math.sqrt(particleCount));
+  const textureHeight = Math.ceil(particleCount / textureWidth);
+  const positions = new Float32Array(textureWidth * textureHeight * 4);
+  const velocities = new Float32Array(textureWidth * textureHeight * 4);
   
   let seed = 999;
   function random() {
@@ -112,8 +114,10 @@ test('monopole-kernels.resource-mgmt: system can be recreated with same context'
   const particleCount = 50;
   
   function createParticleData() {
-    const positions = new Float32Array(particleCount * 4);
-    const velocities = new Float32Array(particleCount * 4);
+    const textureWidth = Math.ceil(Math.sqrt(particleCount));
+    const textureHeight = Math.ceil(particleCount / textureWidth);
+    const positions = new Float32Array(textureWidth * textureHeight * 4);
+    const velocities = new Float32Array(textureWidth * textureHeight * 4);
     
     let seed = 111 + Math.random() * 1000;
     function random() {
@@ -242,8 +246,10 @@ test('monopole-kernels.resource-mgmt: multiple systems with different contexts',
   const particleCount = 25;
   
   function createParticleData(seed) {
-    const positions = new Float32Array(particleCount * 4);
-    const velocities = new Float32Array(particleCount * 4);
+    const textureWidth = Math.ceil(Math.sqrt(particleCount));
+    const textureHeight = Math.ceil(particleCount / textureWidth);
+    const positions = new Float32Array(textureWidth * textureHeight * 4);
+    const velocities = new Float32Array(textureWidth * textureHeight * 4);
     
     let s = /** @type {number} */ (seed);
     function random() {

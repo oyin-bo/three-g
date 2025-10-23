@@ -160,10 +160,12 @@ test('monopole-kernels.conservation: energy approximately conserved over time', 
   const { canvas, gl } = createTestCanvas();
   
   const particleCount = 50;
+  const textureWidth = Math.ceil(Math.sqrt(particleCount));
+  const textureHeight = Math.ceil(particleCount / textureWidth);
   
-  // Create initial distribution
-  const positions = new Float32Array(particleCount * 4);
-  const velocities = new Float32Array(particleCount * 4);
+  // Create initial distribution (padded to texture size)
+  const positions = new Float32Array(textureWidth * textureHeight * 4);
+  const velocities = new Float32Array(textureWidth * textureHeight * 4);
   
   let seed = 789;
   function random() {
@@ -241,10 +243,12 @@ test('monopole-kernels.conservation: momentum conserved in isolated system', asy
   const { canvas, gl } = createTestCanvas();
   
   const particleCount = 30;
+  const textureWidth = Math.ceil(Math.sqrt(particleCount));
+  const textureHeight = Math.ceil(particleCount / textureWidth);
   
-  // Create symmetric distribution to minimize initial momentum
-  const positions = new Float32Array(particleCount * 4);
-  const velocities = new Float32Array(particleCount * 4);
+  // Create symmetric distribution to minimize initial momentum (padded to texture size)
+  const positions = new Float32Array(textureWidth * textureHeight * 4);
+  const velocities = new Float32Array(textureWidth * textureHeight * 4);
   
   let seed = 234;
   function random() {

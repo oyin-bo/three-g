@@ -66,11 +66,12 @@ function readParticleData(system, index) {
  */
 test('monopole-kernels.convergence: smaller timestep improves accuracy', async () => {
   // Reference configuration: two particles in free fall
-  const initialPositions = new Float32Array([
+  const initialPositions = new Float32Array(8);  // 2x2 texture = 8 floats
+  initialPositions.set([
     2, 0, 0, 1.0,
     0, 0, 0, 10.0 // Heavy central mass
   ]);
-  const initialVelocities = new Float32Array([0, 0, 0, 0, 0, 0, 0, 0]);
+  const initialVelocities = new Float32Array(8);  // Padded to match texture
   
   const G = 0.001;
   const targetTime = 0.5; // Total simulation time
@@ -125,9 +126,11 @@ test('monopole-kernels.convergence: smaller timestep improves accuracy', async (
 test('monopole-kernels.convergence: theta parameter controls approximation quality', async () => {
   // Test with clustered particles where theta affects force calculation
   const particleCount = 30;
+  const textureWidth = Math.ceil(Math.sqrt(particleCount));
+  const textureHeight = Math.ceil(particleCount / textureWidth);
   
-  const positions = new Float32Array(particleCount * 4);
-  const velocities = new Float32Array(particleCount * 4);
+  const positions = new Float32Array(textureWidth * textureHeight * 4);
+  const velocities = new Float32Array(textureWidth * textureHeight * 4);
   
   let seed = 888;
   function random() {
@@ -217,15 +220,11 @@ test('monopole-kernels.convergence: theta parameter controls approximation quali
  */
 test('monopole-kernels.convergence: softening affects close encounters', async () => {
   // Two particles with close approach
-  const positions = new Float32Array([
-    -0.5, 0, 0, 1.0,
-     0.5, 0, 0, 1.0
-  ]);
+  const positions = new Float32Array(8);  // 2x2 texture = 8 floats
+  positions.set([-0.5, 0, 0, 1.0,  0.5, 0, 0, 1.0]);
   
-  const velocities = new Float32Array([
-    0.2, 0, 0, 0,
-    -0.2, 0, 0, 0
-  ]);
+  const velocities = new Float32Array(8);
+  velocities.set([0.2, 0, 0, 0,  -0.2, 0, 0, 0]);
   
   const G = 0.001;
   const softeningValues = [0.01, 0.1, 0.5];

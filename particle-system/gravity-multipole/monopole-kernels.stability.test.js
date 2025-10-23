@@ -75,10 +75,12 @@ test('monopole-kernels.stability: high velocity particles remain stable', async 
   const { canvas, gl } = createTestCanvas();
   
   const particleCount = 20;
+  const textureWidth = Math.ceil(Math.sqrt(particleCount));
+  const textureHeight = Math.ceil(particleCount / textureWidth);
   
-  // Create particles with high velocities
-  const positions = new Float32Array(particleCount * 4);
-  const velocities = new Float32Array(particleCount * 4);
+  // Create particles with high velocities (padded to texture size)
+  const positions = new Float32Array(textureWidth * textureHeight * 4);
+  const velocities = new Float32Array(textureWidth * textureHeight * 4);
   
   let seed = 111;
   function random() {
@@ -147,8 +149,11 @@ test('monopole-kernels.stability: very small timestep produces stable results', 
   const { canvas, gl } = createTestCanvas();
   
   const particleCount = 10;
+  const textureWidth = Math.ceil(Math.sqrt(particleCount));
+  const textureHeight = Math.ceil(particleCount / textureWidth);
   
-  const positions = new Float32Array([
+  const positions = new Float32Array(textureWidth * textureHeight * 4);
+  positions.set([
     -1, 0, 0, 1.0,
      1, 0, 0, 1.0,
      0, -1, 0, 1.0,
@@ -161,7 +166,7 @@ test('monopole-kernels.stability: very small timestep produces stable results', 
      0.5,  0.5, 0, 1.0
   ]);
   
-  const velocities = new Float32Array(particleCount * 4); // all zeros
+  const velocities = new Float32Array(textureWidth * textureHeight * 4); // all zeros
   
   // Very small timestep
   const system = new ParticleSystemMonopoleKernels({
@@ -207,9 +212,11 @@ test('monopole-kernels.stability: large timestep handled without crash', async (
   const { canvas, gl } = createTestCanvas();
   
   const particleCount = 10;
+  const textureWidth = Math.ceil(Math.sqrt(particleCount));
+  const textureHeight = Math.ceil(particleCount / textureWidth);
   
-  const positions = new Float32Array(particleCount * 4);
-  const velocities = new Float32Array(particleCount * 4);
+  const positions = new Float32Array(textureWidth * textureHeight * 4);
+  const velocities = new Float32Array(textureWidth * textureHeight * 4);
   
   let seed = 333;
   function random() {
@@ -283,8 +290,9 @@ test('monopole-kernels.stability: handles single and minimal particle counts', a
   
   // Test with 1 particle
   {
-    const positions = new Float32Array([0, 0, 0, 1.0]);
-    const velocities = new Float32Array([0, 0, 0, 0]);
+    const positions = new Float32Array(4);  // 1x1 texture = 4 floats
+    positions.set([0, 0, 0, 1.0]);
+    const velocities = new Float32Array(4);  // Padded to match texture
     
     const system = new ParticleSystemMonopoleKernels({
       gl,
@@ -309,14 +317,10 @@ test('monopole-kernels.stability: handles single and minimal particle counts', a
   
   // Test with 2 particles (minimal interaction)
   {
-    const positions = new Float32Array([
-      -1, 0, 0, 1.0,
-       1, 0, 0, 1.0
-    ]);
-    const velocities = new Float32Array([
-      0, 0.1, 0, 0,
-      0, -0.1, 0, 0
-    ]);
+    const positions = new Float32Array(8);  // 2x2 texture = 8 floats
+    positions.set([-1, 0, 0, 1.0,  1, 0, 0, 1.0]);
+    const velocities = new Float32Array(8);  // Padded to match texture
+    velocities.set([0, 0.1, 0, 0,  0, -0.1, 0, 0]);
     
     const system = new ParticleSystemMonopoleKernels({
       gl,

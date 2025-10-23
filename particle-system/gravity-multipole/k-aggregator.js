@@ -8,8 +8,8 @@
  * Follows the WebGL2 Kernel contract from docs/8-webgl-kernels.md.
  */
 
-import aggregationVert from './shaders/aggregation.vert.js';
-import aggregationFrag from './shaders/aggregation.frag.js';
+import aggregationVert from '../shaders/aggregation.vert.js';
+import aggregationFrag from '../shaders/aggregation.frag.js';
 
 
 export class KAggregator {

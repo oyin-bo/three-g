@@ -8,7 +8,7 @@
  */
 
 import fsQuadVert from '../shaders/fullscreen.vert.js';
-import posIntegrateFrag from './shaders/pos_integrate.frag.js';
+import posIntegrateFrag from '../shaders/pos_integrate.frag.js';
 
 export class KIntegratePosition {
   /**

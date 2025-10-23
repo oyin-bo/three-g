@@ -27,7 +27,7 @@ function createTestCanvas() {
 }
 
 /**
- * Generate uniform particle distribution in a cube
+ * Generate uniform particle distribution in a cube (padded to texture size)
  * @param {number} count
  * @param {[number,number,number]} min
  * @param {[number,number,number]} max
@@ -42,8 +42,12 @@ function generateUniformParticles(count, min, max, seed = 42) {
     return (s >>> 0) / 4294967296;
   }
   
-  const positions = new Float32Array(count * 4);
-  const velocities = new Float32Array(count * 4);
+  const textureWidth = Math.ceil(Math.sqrt(count));
+  const textureHeight = Math.ceil(count / textureWidth);
+  const textureSize = textureWidth * textureHeight * 4;
+  
+  const positions = new Float32Array(textureSize);
+  const velocities = new Float32Array(textureSize);
   
   for (let i = 0; i < count; i++) {
     positions[i * 4 + 0] = min[0] + random() * (max[0] - min[0]);
@@ -236,10 +240,12 @@ test('monopole-kernels.large-scale: 1000 particles clustered remain bound', asyn
   const { canvas, gl } = createTestCanvas();
   
   const particleCount = 1000;
+  const textureWidth = Math.ceil(Math.sqrt(particleCount));
+  const textureHeight = Math.ceil(particleCount / textureWidth);
   
-  // Generate Plummer-like distribution (dense center, sparse edges)
-  const positions = new Float32Array(particleCount * 4);
-  const velocities = new Float32Array(particleCount * 4);
+  // Generate Plummer-like distribution (dense center, sparse edges) (padded to texture size)
+  const positions = new Float32Array(textureWidth * textureHeight * 4);
+  const velocities = new Float32Array(textureWidth * textureHeight * 4);
   
   let seed = 123;
   function random() {
@@ -316,9 +322,11 @@ test('monopole-kernels.large-scale: 10000 particles with hierarchy maintain stru
   const coreCount = 100;
   const haloCount = 9900;
   const totalCount = coreCount + haloCount;
+  const textureWidth = Math.ceil(Math.sqrt(totalCount));
+  const textureHeight = Math.ceil(totalCount / textureWidth);
   
-  const positions = new Float32Array(totalCount * 4);
-  const velocities = new Float32Array(totalCount * 4);
+  const positions = new Float32Array(textureWidth * textureHeight * 4);
+  const velocities = new Float32Array(textureWidth * textureHeight * 4);
   
   let seed = 456;
   function random() {

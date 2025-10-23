@@ -75,15 +75,12 @@ test('monopole-kernels.known-solutions: binary circular orbit maintains separati
   // Circular orbit velocity: v = sqrt(G*M / (2*a)) where M = 2m
   const v = Math.sqrt(G * 2 * m / (2 * a));
   
-  const positions = new Float32Array([
-    -a, 0, 0, m,  // Particle 0
-     a, 0, 0, m   // Particle 1
-  ]);
+  // Padded to 2x2 texture = 8 floats
+  const positions = new Float32Array(8);
+  positions.set([-a, 0, 0, m,  a, 0, 0, m]);
   
-  const velocities = new Float32Array([
-     0,  v, 0, 0,  // Particle 0 moves +y
-     0, -v, 0, 0   // Particle 1 moves -y
-  ]);
+  const velocities = new Float32Array(8);
+  velocities.set([0,  v, 0, 0,  0, -v, 0, 0]);
   
   const system = new ParticleSystemMonopoleKernels({
     gl,
@@ -155,15 +152,12 @@ test('monopole-kernels.known-solutions: binary eccentric orbit shows periapse/ap
   const M = 2 * m;
   const vp = Math.sqrt(G * M * (1 + e) / a);
   
-  const positions = new Float32Array([
-    -rp, 0, 0, m,  // Particle 0 at periapse
-     rp, 0, 0, m   // Particle 1 at periapse
-  ]);
+  // Padded to 2x2 texture = 8 floats
+  const positions = new Float32Array(8);
+  positions.set([-rp, 0, 0, m,  rp, 0, 0, m]);
   
-  const velocities = new Float32Array([
-     0,  vp/2, 0, 0,  // Each particle gets half the orbital velocity
-     0, -vp/2, 0, 0
-  ]);
+  const velocities = new Float32Array(8);
+  velocities.set([0,  vp/2, 0, 0,  0, -vp/2, 0, 0]);
   
   const system = new ParticleSystemMonopoleKernels({
     gl,
@@ -231,16 +225,12 @@ test('monopole-kernels.known-solutions: free fall matches analytical solution', 
   const r0 = 3.0;  // initial distance
   const G = 0.001;
   
-  // Particle starts at rest
-  const positions = new Float32Array([
-    r0, 0, 0, m,      // Test particle
-    0,  0, 0, M       // Central mass (heavy, stays near origin)
-  ]);
+  // Padded to 2x2 texture = 8 floats
+  const positions = new Float32Array(8);
+  positions.set([r0, 0, 0, m,  0, 0, 0, M]);
   
-  const velocities = new Float32Array([
-    0, 0, 0, 0,
-    0, 0, 0, 0
-  ]);
+  const velocities = new Float32Array(8);
+  velocities.set([0, 0, 0, 0,  0, 0, 0, 0]);
   
   const system = new ParticleSystemMonopoleKernels({
     gl,
