@@ -165,13 +165,12 @@ export class KAggregator {
     gl.clear(gl.COLOR_BUFFER_BIT);
     
     // Enable additive blending for accumulation
-    if (!this.disableFloatBlend) {
-      gl.enable(gl.BLEND);
-      gl.blendEquation(gl.FUNC_ADD);
-      gl.blendFunc(gl.ONE, gl.ONE);
-    } else {
-      gl.disable(gl.BLEND);
-    }
+    // Note: Even without EXT_float_blend, we must enable blending for accumulation to work.
+    // Without the extension, precision may be reduced, but particles will still accumulate.
+    // Disabling blending entirely would cause only the last particle to be visible.
+    gl.enable(gl.BLEND);
+    gl.blendEquation(gl.FUNC_ADD);
+    gl.blendFunc(gl.ONE, gl.ONE);
     
     // Bind position texture
     gl.activeTexture(gl.TEXTURE0);

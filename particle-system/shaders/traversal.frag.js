@@ -104,19 +104,23 @@ void main() {
     norm = clamp(norm, vec3(0.0), vec3(1.0 - (1.0 / gridSize)));
     ivec3 myVoxel = ivec3(floor(norm * gridSize));
 
-    // Sample full 3D neighborhood (27 voxels including center)
-    // Include center voxel to allow same-voxel particle interactions
-    const int R = 1;
-    int parentLevel = level + 1;
-    bool hasParent = (parentLevel < u_numLevels) && (level >= 1);
-    ivec3 parentVoxel = myVoxel / 2;
-    vec4 acceptedSiblingA0Sum = vec4(0.0);
-    for (int dz = -R; dz <= R; dz++) {
-      for (int dy = -R; dy <= R; dy++) {
-        for (int dx = -R; dx <= R; dx++) {
-          // Include center voxel for same-voxel interactions
-          
-          ivec3 neighborVoxel = myVoxel + ivec3(dx, dy, dz);
+    // Sample voxels at this level
+    // If this is the coarsest level, check ALL voxels (no parent to provide far-field approximation)
+    // Otherwise, only check local neighborhood (far voxels handled by parent levels)
+    bool isCoarsestLevel = (level == u_numLevels - 1);
+    int R = isCoarsestLevel ? int(gridSize) : 1;
+    
+    int startDx = isCoarsestLevel ? 0 : -1;
+    int startDy = isCoarsestLevel ? 0 : -1;
+    int startDz = isCoarsestLevel ? 0 : -1;
+    int endDx = isCoarsestLevel ? int(gridSize) - 1 : min(1, int(gridSize) - 1);
+    int endDy = isCoarsestLevel ? int(gridSize) - 1 : min(1, int(gridSize) - 1);
+    int endDz = isCoarsestLevel ? int(gridSize) - 1 : min(1, int(gridSize) - 1);
+    
+    for (int vz = startDz; vz <= endDz; vz++) {
+      for (int vy = startDy; vy <= endDy; vy++) {
+        for (int vx = startDx; vx <= endDx; vx++) {
+          ivec3 neighborVoxel = isCoarsestLevel ? ivec3(vx, vy, vz) : (myVoxel + ivec3(vx, vy, vz));
           
           // Bounds check
           if (neighborVoxel.x < 0 || neighborVoxel.y < 0 || neighborVoxel.z < 0 ||
@@ -137,7 +141,7 @@ void main() {
           
           // If the node is too close to approximate, we must go to a finer level.
           // The force from this node's children will be accounted for at the next level down.
-          if ((s / max(d, eps)) >= u_theta) {
+          if ((s / max(d, eps)) > u_theta) {
             continue;
           }
           

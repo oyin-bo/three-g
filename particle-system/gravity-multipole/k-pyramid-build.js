@@ -39,15 +39,21 @@ export class KPyramidBuild {
     this.outGridSize = outGridSize;
     this.outSlicesPerRow = outSlicesPerRow;
 
-    // Input textures are 2x larger because pyramid reduction is 2×2×2 → 1
-    const inSize = this.outSize * 2;
-    this.inA0 = (inA0 || inA0 === null) ? inA0 : createTextureRGBA32F(this.gl, inSize, inSize);
-    this.inA1 = (inA1 || inA1 === null) ? inA1 : createTextureRGBA32F(this.gl, inSize, inSize);
-    this.inA2 = (inA2 || inA2 === null) ? inA2 : createTextureRGBA32F(this.gl, inSize, inSize);
+    const { width: outWidth, height: outHeight } = textureDimensions(this.outGridSize, this.outSlicesPerRow);
+    this.outTextureWidth = outWidth;
+    this.outTextureHeight = outHeight;
 
-    this.outA0 = (outA0 || outA0 === null) ? outA0 : createTextureRGBA32F(this.gl, this.outSize || 1, this.outSize || 1);
-    this.outA1 = (outA1 || outA1 === null) ? outA1 : createTextureRGBA32F(this.gl, this.outSize || 1, this.outSize || 1);
-    this.outA2 = (outA2 || outA2 === null) ? outA2 : createTextureRGBA32F(this.gl, this.outSize || 1, this.outSize || 1);
+    const childGridSize = this.outGridSize * 2;
+    const childSlicesPerRow = this.outSlicesPerRow * 2;
+    const { width: inWidth, height: inHeight } = textureDimensions(childGridSize, childSlicesPerRow);
+
+    this.inA0 = (inA0 || inA0 === null) ? inA0 : createTextureRGBA32F(this.gl, inWidth, inHeight);
+    this.inA1 = (inA1 || inA1 === null) ? inA1 : createTextureRGBA32F(this.gl, inWidth, inHeight);
+    this.inA2 = (inA2 || inA2 === null) ? inA2 : createTextureRGBA32F(this.gl, inWidth, inHeight);
+
+    this.outA0 = (outA0 || outA0 === null) ? outA0 : createTextureRGBA32F(this.gl, this.outTextureWidth || 1, this.outTextureHeight || 1);
+    this.outA1 = (outA1 || outA1 === null) ? outA1 : createTextureRGBA32F(this.gl, this.outTextureWidth || 1, this.outTextureHeight || 1);
+    this.outA2 = (outA2 || outA2 === null) ? outA2 : createTextureRGBA32F(this.gl, this.outTextureWidth || 1, this.outTextureHeight || 1);
 
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
     if (!vert) throw new Error('Failed to create vertex shader');
@@ -147,7 +153,7 @@ export class KPyramidBuild {
     // Bind output framebuffer (MRT)
     this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.outFramebuffer);
     this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0, this.gl.COLOR_ATTACHMENT1, this.gl.COLOR_ATTACHMENT2]);
-    this.gl.viewport(0, 0, this.outSize, this.outSize);
+    this.gl.viewport(0, 0, this.outTextureWidth, this.outTextureHeight);
     
     // Clear outputs before rendering
     this.gl.clearColor(0, 0, 0, 0);
@@ -207,6 +213,17 @@ export class KPyramidBuild {
 
     this._fboShadow = null;
   }
+}
+
+/**
+ * @param {number} gridSize
+ * @param {number} slicesPerRow
+ */
+function textureDimensions(gridSize, slicesPerRow) {
+  const width = gridSize * slicesPerRow;
+  const sliceRows = Math.ceil(gridSize / slicesPerRow);
+  const height = gridSize * sliceRows;
+  return { width, height };
 }
 
 /**
