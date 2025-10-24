@@ -13,7 +13,7 @@ precision highp float;
 in vec2 v_uv;
 out vec4 outColor;
 
-uniform sampler2D u_inputTexture;
+uniform sampler2D u_spectrum;
 uniform int u_axis;          // 0=X, 1=Y, 2=Z
 uniform int u_stage;         // FFT stage (0 to log2(N)-1)
 uniform int u_inverse;       // 0=forward, 1=inverse
@@ -27,10 +27,10 @@ const float TWO_PI = 6.28318530718;
 // Convert 2D texture coords to 3D voxel coords
 ivec3 texCoordToVoxel(vec2 uv, float gridSize, float slicesPerRow) {
   vec2 texel = uv * gridSize * slicesPerRow;
-  int sliceIndex = int(texel.y / gridSize) * int(slicesPerRow) + int(texel.x / gridSize);
-  int iz = sliceIndex;
   int ix = int(mod(texel.x, gridSize));
   int iy = int(mod(texel.y, gridSize));
+  int sliceRow = int(texel.y / gridSize);
+  int iz = sliceRow * int(slicesPerRow) + int(texel.x / gridSize);
   return ivec3(ix, iy, iz);
 }
 
@@ -97,8 +97,8 @@ void main() {
   vec2 currentUV = v_uv;
   vec2 partnerUV = voxelToTexCoord(partnerVoxel, u_gridSize, u_slicesPerRow);
   
-  vec4 current = texture(u_inputTexture, currentUV);
-  vec4 partner = texture(u_inputTexture, partnerUV);
+  vec4 current = texture(u_spectrum, currentUV);
+  vec4 partner = texture(u_spectrum, partnerUV);
   
   vec2 currentComplex = current.rg;
   vec2 partnerComplex = partner.rg;

@@ -6,7 +6,7 @@ import { KGradient } from './k-gradient.js';
 import { getGL, createTestTexture, readTexture, assertClose, assertAllFinite, disposeKernel, resetGL } from '../test-utils.js';
 
 /**
- * Helper: create complex spectrum texture
+ * Helper: create complex spectrum texture (RG32F)
  * @param {WebGL2RenderingContext} gl
  * @param {number} gridSize
  * @param {number} slicesPerRow
@@ -33,7 +33,50 @@ function createSpectrumTexture(gl, gridSize, slicesPerRow, valueFunc) {
     }
   }
   
-  return createTestTexture(gl, textureSize, textureSize, data);
+  const tex = gl.createTexture();
+  if (!tex) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, textureSize, textureSize, 0, gl.RG, gl.FLOAT, data);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  
+  return tex;
+}
+
+/**
+ * Helper: read RG32F complex texture
+ * @param {WebGL2RenderingContext} gl
+ * @param {WebGLTexture} texture
+ * @param {number} width
+ * @param {number} height
+ * @returns {Float32Array}
+ */
+function readComplexTexture(gl, texture, width, height) {
+  const fbo = gl.createFramebuffer();
+  if (!fbo) throw new Error('Failed to create framebuffer');
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(
+    gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, 
+    gl.TEXTURE_2D, texture, 0
+  );
+  
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.deleteFramebuffer(fbo);
+    throw new Error(`Framebuffer incomplete: status ${status}`);
+  }
+  
+  const pixels = new Float32Array(width * height * 2);
+  gl.readPixels(0, 0, width, height, gl.RG, gl.FLOAT, pixels);
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  
+  return pixels;
 }
 
 /**
@@ -51,9 +94,9 @@ test('KGradient: constant potential produces zero gradient', async () => {
     return (x === 0 && y === 0 && z === 0) ? [1.0, 0] : [0, 0];
   });
   
-  const outForceX = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceY = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceZ = createTestTexture(gl, textureSize, textureSize, null);
+  const outForceX = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceY = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceZ = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const worldSize = [1.0, 1.0, 1.0];
   
@@ -71,15 +114,15 @@ test('KGradient: constant potential produces zero gradient', async () => {
   
   kernel.run();
   
-  const resultX = readTexture(gl, outForceX, textureSize, textureSize);
-  const resultY = readTexture(gl, outForceY, textureSize, textureSize);
-  const resultZ = readTexture(gl, outForceZ, textureSize, textureSize);
+  const resultX = readComplexTexture(gl, outForceX, textureSize, textureSize);
+  const resultY = readComplexTexture(gl, outForceY, textureSize, textureSize);
+  const resultZ = readComplexTexture(gl, outForceZ, textureSize, textureSize);
   
   // Gradient of constant should be nearly zero
   for (let i = 0; i < resultX.length; i++) {
-    assertClose(resultX[i], 0, 0.1, `ForceX[${i}] should be near zero`);
-    assertClose(resultY[i], 0, 0.1, `ForceY[${i}] should be near zero`);
-    assertClose(resultZ[i], 0, 0.1, `ForceZ[${i}] should be near zero`);
+    assertClose(resultX[i], 0, 0.1, `Force[${i}] should be near zero`);
+    assertClose(resultY[i], 0, 0.1, `Force[${i}] should be near zero`);
+    assertClose(resultZ[i], 0, 0.1, `Force[${i}] should be near zero`);
   }
   
   disposeKernel(kernel);
@@ -104,9 +147,9 @@ test('KGradient: linear potential produces constant gradient', async () => {
     return [0, 0];
   });
   
-  const outForceX = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceY = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceZ = createTestTexture(gl, textureSize, textureSize, null);
+  const outForceX = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceY = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceZ = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const worldSize = [1.0, 1.0, 1.0];
   
@@ -124,9 +167,9 @@ test('KGradient: linear potential produces constant gradient', async () => {
   
   kernel.run();
   
-  const resultX = readTexture(gl, outForceX, textureSize, textureSize);
-  const resultY = readTexture(gl, outForceY, textureSize, textureSize);
-  const resultZ = readTexture(gl, outForceZ, textureSize, textureSize);
+  const resultX = readComplexTexture(gl, outForceX, textureSize, textureSize);
+  const resultY = readComplexTexture(gl, outForceY, textureSize, textureSize);
+  const resultZ = readComplexTexture(gl, outForceZ, textureSize, textureSize);
   
   // All results should be finite
   assertAllFinite(resultX, 'ForceX should be finite');
@@ -151,9 +194,9 @@ test('KGradient: output is complex spectrum format', async () => {
     return [Math.random(), Math.random()];
   });
   
-  const outForceX = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceY = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceZ = createTestTexture(gl, textureSize, textureSize, null);
+  const outForceX = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceY = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceZ = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const kernel = new KGradient({
     gl,
@@ -169,9 +212,9 @@ test('KGradient: output is complex spectrum format', async () => {
   
   kernel.run();
   
-  const resultX = readTexture(gl, outForceX, textureSize, textureSize);
-  const resultY = readTexture(gl, outForceY, textureSize, textureSize);
-  const resultZ = readTexture(gl, outForceZ, textureSize, textureSize);
+  const resultX = readComplexTexture(gl, outForceX, textureSize, textureSize);
+  const resultY = readComplexTexture(gl, outForceY, textureSize, textureSize);
+  const resultZ = readComplexTexture(gl, outForceZ, textureSize, textureSize);
   
   // For RG32F textures, each voxel has real and imaginary parts
   assert.ok(resultX.length === textureSize * textureSize * 2, 'Output should have 2 channels per voxel');
@@ -204,9 +247,9 @@ test('KGradient: gradient components are independent', async () => {
     return [real, imag];
   });
   
-  const outForceX = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceY = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceZ = createTestTexture(gl, textureSize, textureSize, null);
+  const outForceX = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceY = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceZ = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const kernel = new KGradient({
     gl,
@@ -222,9 +265,9 @@ test('KGradient: gradient components are independent', async () => {
   
   kernel.run();
   
-  const resultX = readTexture(gl, outForceX, textureSize, textureSize);
-  const resultY = readTexture(gl, outForceY, textureSize, textureSize);
-  const resultZ = readTexture(gl, outForceZ, textureSize, textureSize);
+  const resultX = readComplexTexture(gl, outForceX, textureSize, textureSize);
+  const resultY = readComplexTexture(gl, outForceY, textureSize, textureSize);
+  const resultZ = readComplexTexture(gl, outForceZ, textureSize, textureSize);
   
   // Components should differ (not all the same)
   const sumX = resultX.reduce((a, b) => a + Math.abs(b), 0);
@@ -264,9 +307,9 @@ test('KGradient: world size affects force magnitudes', async () => {
   
   for (const worldSize of worldSizes) {
     const inPotential = createInput();
-    const outForceX = createTestTexture(gl, textureSize, textureSize, null);
-    const outForceY = createTestTexture(gl, textureSize, textureSize, null);
-    const outForceZ = createTestTexture(gl, textureSize, textureSize, null);
+    const outForceX = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+    const outForceY = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+    const outForceZ = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
     
     const kernel = new KGradient({
       gl,
@@ -282,7 +325,7 @@ test('KGradient: world size affects force magnitudes', async () => {
     
     kernel.run();
     
-    const result = readTexture(gl, outForceX, textureSize, textureSize);
+    const result = readComplexTexture(gl, outForceX, textureSize, textureSize);
     results.push({
       worldSize,
       magnitude: result.reduce((a, b) => a + Math.abs(b), 0)
@@ -312,9 +355,9 @@ test('KGradient: handles larger grid (16×16×16)', async () => {
     return [Math.sin(x * 0.1), Math.cos(y * 0.1)];
   });
   
-  const outForceX = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceY = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceZ = createTestTexture(gl, textureSize, textureSize, null);
+  const outForceX = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceY = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceZ = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const kernel = new KGradient({
     gl,
@@ -330,9 +373,9 @@ test('KGradient: handles larger grid (16×16×16)', async () => {
   
   kernel.run();
   
-  const resultX = readTexture(gl, outForceX, textureSize, textureSize);
-  const resultY = readTexture(gl, outForceY, textureSize, textureSize);
-  const resultZ = readTexture(gl, outForceZ, textureSize, textureSize);
+  const resultX = readComplexTexture(gl, outForceX, textureSize, textureSize);
+  const resultY = readComplexTexture(gl, outForceY, textureSize, textureSize);
+  const resultZ = readComplexTexture(gl, outForceZ, textureSize, textureSize);
   
   assertAllFinite(resultX, 'ForceX should be finite for large grid');
   assertAllFinite(resultY, 'ForceY should be finite for large grid');
@@ -358,9 +401,9 @@ test('KGradient: symmetric input produces symmetric output', async () => {
     return [Math.exp(-r2 * 0.1), 0];
   });
   
-  const outForceX = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceY = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceZ = createTestTexture(gl, textureSize, textureSize, null);
+  const outForceX = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceY = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceZ = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const kernel = new KGradient({
     gl,
@@ -376,9 +419,9 @@ test('KGradient: symmetric input produces symmetric output', async () => {
   
   kernel.run();
   
-  const resultX = readTexture(gl, outForceX, textureSize, textureSize);
-  const resultY = readTexture(gl, outForceY, textureSize, textureSize);
-  const resultZ = readTexture(gl, outForceZ, textureSize, textureSize);
+  const resultX = readComplexTexture(gl, outForceX, textureSize, textureSize);
+  const resultY = readComplexTexture(gl, outForceY, textureSize, textureSize);
+  const resultZ = readComplexTexture(gl, outForceZ, textureSize, textureSize);
   
   // Check that results are finite
   assertAllFinite(resultX, 'ForceX should be finite');
@@ -402,9 +445,9 @@ test('KGradient: zero potential produces zero force', async () => {
   // All zeros
   const inPotential = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
-  const outForceX = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceY = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceZ = createTestTexture(gl, textureSize, textureSize, null);
+  const outForceX = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceY = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceZ = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const kernel = new KGradient({
     gl,
@@ -420,9 +463,9 @@ test('KGradient: zero potential produces zero force', async () => {
   
   kernel.run();
   
-  const resultX = readTexture(gl, outForceX, textureSize, textureSize);
-  const resultY = readTexture(gl, outForceY, textureSize, textureSize);
-  const resultZ = readTexture(gl, outForceZ, textureSize, textureSize);
+  const resultX = readComplexTexture(gl, outForceX, textureSize, textureSize);
+  const resultY = readComplexTexture(gl, outForceY, textureSize, textureSize);
+  const resultZ = readComplexTexture(gl, outForceZ, textureSize, textureSize);
   
   // All components should be near zero
   for (let i = 0; i < resultX.length; i++) {
@@ -452,9 +495,9 @@ test('KGradient: separates directional components', async () => {
     return [val, 0];
   });
   
-  const outForceX = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceY = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceZ = createTestTexture(gl, textureSize, textureSize, null);
+  const outForceX = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceY = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceZ = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const kernel = new KGradient({
     gl,
@@ -470,9 +513,9 @@ test('KGradient: separates directional components', async () => {
   
   kernel.run();
   
-  const resultX = readTexture(gl, outForceX, textureSize, textureSize);
-  const resultY = readTexture(gl, outForceY, textureSize, textureSize);
-  const resultZ = readTexture(gl, outForceZ, textureSize, textureSize);
+  const resultX = readComplexTexture(gl, outForceX, textureSize, textureSize);
+  const resultY = readComplexTexture(gl, outForceY, textureSize, textureSize);
+  const resultZ = readComplexTexture(gl, outForceZ, textureSize, textureSize);
   
   // X component should have significant energy (gradient in x direction)
   const energyX = resultX.reduce((a, b) => a + b*b, 0);
@@ -499,9 +542,9 @@ test('KGradient: remains stable with small input magnitudes', async () => {
     return [Math.sin(x * 0.01) * 1e-6, Math.cos(y * 0.01) * 1e-6];
   });
   
-  const outForceX = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceY = createTestTexture(gl, textureSize, textureSize, null);
-  const outForceZ = createTestTexture(gl, textureSize, textureSize, null);
+  const outForceX = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceY = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outForceZ = createSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const kernel = new KGradient({
     gl,
@@ -517,9 +560,9 @@ test('KGradient: remains stable with small input magnitudes', async () => {
   
   kernel.run();
   
-  const resultX = readTexture(gl, outForceX, textureSize, textureSize);
-  const resultY = readTexture(gl, outForceY, textureSize, textureSize);
-  const resultZ = readTexture(gl, outForceZ, textureSize, textureSize);
+  const resultX = readComplexTexture(gl, outForceX, textureSize, textureSize);
+  const resultY = readComplexTexture(gl, outForceY, textureSize, textureSize);
+  const resultZ = readComplexTexture(gl, outForceZ, textureSize, textureSize);
   
   // Should not produce NaN or Inf
   assertAllFinite(resultX, 'ForceX should be finite even with small inputs');

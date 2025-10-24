@@ -6,7 +6,7 @@ import { KForceSample } from './k-force-sample.js';
 import { getGL, createTestTexture, readTexture, assertClose, assertAllFinite, disposeKernel, resetGL } from '../test-utils.js';
 
 /**
- * Helper: create force grid texture (real-valued, not complex)
+ * Helper: create force grid texture (real-valued, stored in RG32F R channel)
  * @param {WebGL2RenderingContext} gl
  * @param {number} gridSize
  * @param {number} slicesPerRow
@@ -14,7 +14,7 @@ import { getGL, createTestTexture, readTexture, assertClose, assertAllFinite, di
  */
 function createForceTexture(gl, gridSize, slicesPerRow, valueFunc) {
   const textureSize = gridSize * slicesPerRow;
-  const data = new Float32Array(textureSize * textureSize);
+  const data = new Float32Array(textureSize * textureSize * 2); // RG32F: 2 floats per texel
   
   for (let vz = 0; vz < gridSize; vz++) {
     const sliceRow = Math.floor(vz / slicesPerRow);
@@ -24,14 +24,25 @@ function createForceTexture(gl, gridSize, slicesPerRow, valueFunc) {
       for (let vx = 0; vx < gridSize; vx++) {
         const texelX = sliceCol * gridSize + vx;
         const texelY = sliceRow * gridSize + vy;
-        const idx = texelY * textureSize + texelX;
+        const idx = (texelY * textureSize + texelX) * 2;
         
-        data[idx] = valueFunc(vx, vy, vz);
+        data[idx] = valueFunc(vx, vy, vz); // R channel
+        data[idx + 1] = 0; // G channel (unused padding)
       }
     }
   }
   
-  return createTestTexture(gl, textureSize, textureSize, data);
+  const tex = gl.createTexture();
+  if (!tex) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, textureSize, textureSize, 0, gl.RG, gl.FLOAT, data);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  
+  return tex;
 }
 
 /**

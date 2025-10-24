@@ -39,6 +39,80 @@ function fillGridTexture(gl, gridSize, slicesPerRow, valueFunc) {
 }
 
 /**
+ * Helper: create complex (RG32F) spectrum texture with test data
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} gridSize
+ * @param {number} slicesPerRow
+ * @param {(x: number, y: number, z: number) => [number, number]} valueFunc
+ */
+function createComplexSpectrumTexture(gl, gridSize, slicesPerRow, valueFunc) {
+  const textureSize = gridSize * slicesPerRow;
+  const data = new Float32Array(textureSize * textureSize * 2);
+  
+  for (let vz = 0; vz < gridSize; vz++) {
+    const sliceRow = Math.floor(vz / slicesPerRow);
+    const sliceCol = vz % slicesPerRow;
+    
+    for (let vy = 0; vy < gridSize; vy++) {
+      for (let vx = 0; vx < gridSize; vx++) {
+        const texelX = sliceCol * gridSize + vx;
+        const texelY = sliceRow * gridSize + vy;
+        const idx = (texelY * textureSize + texelX) * 2;
+        
+        const [real, imag] = valueFunc(vx, vy, vz);
+        data[idx] = real;
+        data[idx + 1] = imag;
+      }
+    }
+  }
+  
+  const tex = gl.createTexture();
+  if (!tex) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, textureSize, textureSize, 0, gl.RG, gl.FLOAT, data);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  
+  return tex;
+}
+
+/**
+ * Helper: read RG32F complex texture and return as interleaved real/imag array
+ * @param {WebGL2RenderingContext} gl
+ * @param {WebGLTexture} texture
+ * @param {number} width
+ * @param {number} height
+ * @returns {Float32Array}
+ */
+function readComplexTexture(gl, texture, width, height) {
+  const fbo = gl.createFramebuffer();
+  if (!fbo) throw new Error('Failed to create framebuffer');
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(
+    gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, 
+    gl.TEXTURE_2D, texture, 0
+  );
+  
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.deleteFramebuffer(fbo);
+    throw new Error(`Framebuffer incomplete: status ${status}`);
+  }
+  
+  const pixels = new Float32Array(width * height * 2);
+  gl.readPixels(0, 0, width, height, gl.RG, gl.FLOAT, pixels);
+  
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  
+  return pixels;
+}
+
+/**
  * Test 1: Forward FFT on uniform field
  */
 test('KFFT: forward FFT preserves total energy for uniform field', async () => {
@@ -50,7 +124,7 @@ test('KFFT: forward FFT preserves total energy for uniform field', async () => {
   
   // Uniform field: all voxels = 1.0
   const inReal = fillGridTexture(gl, gridSize, slicesPerRow, () => 1.0);
-  const outComplex = createTestTexture(gl, textureSize, textureSize, null);
+  const outComplex = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const kernel = new KFFT({
     gl,
@@ -64,7 +138,7 @@ test('KFFT: forward FFT preserves total energy for uniform field', async () => {
   
   kernel.run();
   
-  const result = readTexture(gl, outComplex, textureSize, textureSize);
+  const result = readComplexTexture(gl, outComplex, textureSize, textureSize);
   
   // DC component (index 0) should contain sum of input
   const dcReal = result[0];
@@ -95,7 +169,7 @@ test('KFFT: forward FFT spike creates non-zero spectrum', async () => {
     return x === 4 && y === 4 && z === 4 ? 1.0 : 0.0;
   });
   
-  const outComplex = createTestTexture(gl, textureSize, textureSize, null);
+  const outComplex = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const kernel = new KFFT({
     gl,
@@ -109,7 +183,7 @@ test('KFFT: forward FFT spike creates non-zero spectrum', async () => {
   
   kernel.run();
   
-  const result = readTexture(gl, outComplex, textureSize, textureSize);
+  const result = readComplexTexture(gl, outComplex, textureSize, textureSize);
   
   // Should have non-zero DC component
   const dcReal = result[0];
@@ -142,8 +216,8 @@ test('KFFT: forward-inverse roundtrip recovers original (uniform field)', async 
   const testValue = 2.5;
   const inReal = fillGridTexture(gl, gridSize, slicesPerRow, () => testValue);
   
-  const intermediate = createTestTexture(gl, textureSize, textureSize, null);
-  const outReal = createTestTexture(gl, textureSize, textureSize, null);
+  const intermediate = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outReal = fillGridTexture(gl, gridSize, slicesPerRow, () => 0);
   
   // Forward FFT
   const forward = new KFFT({
@@ -201,8 +275,8 @@ test('KFFT: forward-inverse roundtrip recovers spike', async () => {
     return x === 2 && y === 2 && z === 2 ? 1.0 : 0.0;
   });
   
-  const intermediate = createTestTexture(gl, textureSize, textureSize, null);
-  const outReal = createTestTexture(gl, textureSize, textureSize, null);
+  const intermediate = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outReal = fillGridTexture(gl, gridSize, slicesPerRow, () => 0);
   
   const forward = new KFFT({
     gl,
@@ -257,7 +331,7 @@ test('KFFT: handles larger grid size (16×16×16)', async () => {
     return (x + y + z) * 0.01;
   });
   
-  const outComplex = createTestTexture(gl, textureSize, textureSize, null);
+  const outComplex = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const kernel = new KFFT({
     gl,
@@ -271,7 +345,7 @@ test('KFFT: handles larger grid size (16×16×16)', async () => {
   
   kernel.run();
   
-  const result = readTexture(gl, outComplex, textureSize, textureSize);
+  const result = readComplexTexture(gl, outComplex, textureSize, textureSize);
   assertAllFinite(result, 'All output values should be finite for large grid');
   
   disposeKernel(kernel);
@@ -293,7 +367,7 @@ test('KFFT: handles oscillatory field correctly', async () => {
     return ((x + y + z) % 2) * 2.0 - 1.0;
   });
   
-  const outComplex = createTestTexture(gl, textureSize, textureSize, null);
+  const outComplex = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const kernel = new KFFT({
     gl,
@@ -307,7 +381,7 @@ test('KFFT: handles oscillatory field correctly', async () => {
   
   kernel.run();
   
-  const result = readTexture(gl, outComplex, textureSize, textureSize);
+  const result = readComplexTexture(gl, outComplex, textureSize, textureSize);
   
   // Should have DC = 0 for checkerboard
   assertClose(result[0], 0, 0.1, 'DC component should be near zero for checkerboard');
@@ -334,8 +408,8 @@ test('KFFT: successive roundtrips remain stable', async () => {
   let current = original;
   
   for (let round = 0; round < 3; round++) {
-    const intermediate = createTestTexture(gl, textureSize, textureSize, null);
-    const output = createTestTexture(gl, textureSize, textureSize, null);
+    const intermediate = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+    const output = fillGridTexture(gl, gridSize, slicesPerRow, () => 0);
     
     const forward = new KFFT({
       gl,
@@ -386,8 +460,8 @@ test('KFFT: inverse FFT produces real-valued output', async () => {
     return Math.sin(x) + Math.cos(y) + (z * 0.1);
   });
   
-  const spectrum = createTestTexture(gl, textureSize, textureSize, null);
-  const outReal = createTestTexture(gl, textureSize, textureSize, null);
+  const spectrum = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const outReal = fillGridTexture(gl, gridSize, slicesPerRow, () => 0);
   
   const forward = new KFFT({
     gl,
@@ -438,7 +512,7 @@ test('KFFT: Parseval identity holds approximately', async () => {
     return Math.sin(x * Math.PI / gridSize) + 0.5;
   });
   
-  const outComplex = createTestTexture(gl, textureSize, textureSize, null);
+  const outComplex = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   const kernel = new KFFT({
     gl,
@@ -452,7 +526,7 @@ test('KFFT: Parseval identity holds approximately', async () => {
   
   kernel.run();
   
-  const spectrum = readTexture(gl, outComplex, textureSize, textureSize);
+  const spectrum = readComplexTexture(gl, outComplex, textureSize, textureSize);
   
   // Calculate energy in frequency domain
   let spectralEnergy = 0;
@@ -481,8 +555,8 @@ test('KFFT: same input produces consistent output across instances', async () =>
     return (x * y + z) * 0.1;
   });
   
-  const out1 = createTestTexture(gl, textureSize, textureSize, null);
-  const out2 = createTestTexture(gl, textureSize, textureSize, null);
+  const out1 = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const out2 = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   
   // Create two separate kernel instances
   const kernel1 = new KFFT({
@@ -507,8 +581,8 @@ test('KFFT: same input produces consistent output across instances', async () =>
   });
   kernel2.run();
   
-  const result1 = readTexture(gl, out1, textureSize, textureSize);
-  const result2 = readTexture(gl, out2, textureSize, textureSize);
+  const result1 = readComplexTexture(gl, out1, textureSize, textureSize);
+  const result2 = readComplexTexture(gl, out2, textureSize, textureSize);
   
   // Results should be identical
   for (let i = 0; i < result1.length; i++) {
