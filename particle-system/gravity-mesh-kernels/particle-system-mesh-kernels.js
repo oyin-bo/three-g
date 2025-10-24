@@ -186,6 +186,7 @@ export class ParticleSystemMeshKernels {
     // FFT kernel for forward transform
     this.fftForwardKernel = new KFFT({
       gl: this.gl,
+      grid: null,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
@@ -220,6 +221,7 @@ export class ParticleSystemMeshKernels {
     // FFT kernel for inverse transforms (reused for x, y, z)
     this.fftInverseKernel = new KFFT({
       gl: this.gl,
+      grid: null,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
