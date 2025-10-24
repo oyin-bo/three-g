@@ -244,7 +244,7 @@ test('mesh-kernels.debug: multiple steps change particle state', async () => {
                   Math.abs(finalVel[2] - initialVel[2]);
   
   assert.ok(velDiff > 0.001, 
-    `Velocities should change after simulation: diff=${velDiff.toFixed(6)}`);
+    `Velocities should change after simulation: diff=${velDiff.toFixed(6)}, initial=[${initialVel[0].toFixed(6)},${initialVel[1].toFixed(6)},${initialVel[2].toFixed(6)}], final=[${finalVel[0].toFixed(6)},${finalVel[1].toFixed(6)},${finalVel[2].toFixed(6)}]`);
   
   system.dispose();
   canvas.remove();
@@ -289,5 +289,247 @@ test('mesh-kernels.debug: assignment method parameter works', async () => {
   assert.ok(systemCIC, 'System should accept cic assignment method');
   systemCIC.dispose();
   
+  canvas.remove();
+});
+
+/**
+ * DIAGNOSTIC: Test - Kernel deposit interrogation
+ * Verify that mass deposition is actually occurring during step
+ */
+test('mesh-kernels.debug.diagnostic: kernel mass deposit', async () => {
+  const { canvas, gl } = createTestCanvas();
+  
+  const positions = new Float32Array(8);
+  positions.set([0, 0, 0, 100.0,  0.5, 0.5, 0.5, 50.0]);  // Two particles with mass
+  const velocities = new Float32Array(8);
+  
+  const system = new ParticleSystemMeshKernels({
+    gl,
+    particleData: { positions, velocities },
+    worldBounds: { min: [-5, -5, -5], max: [5, 5, 5] },
+    dt: 0.01,
+    gravityStrength: 0.001,
+    softening: 0.1,
+    mesh: { gridSize: 16, assignment: 'cic' }
+  });
+  
+  // Run one step and interrogate deposit kernel
+  system._depositMass();
+  
+  if (!system.depositKernel || !system.depositKernel.outGrid) {
+    throw new Error('depositKernel.outGrid is null after _depositMass');
+  }
+  
+  const depositOutput = new Float32Array(16 * 8 * 16 * 8 * 4);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, system.depositKernel.outGrid, 0);
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.deleteFramebuffer(fbo);
+    throw new Error(`Deposit kernel FBO incomplete: status=${status} (expected ${gl.FRAMEBUFFER_COMPLETE})`);
+  }
+  
+  gl.readPixels(0, 0, 128, 128, gl.RGBA, gl.FLOAT, depositOutput);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  
+  // Check that deposit output has non-zero mass
+  let totalMassDeposited = 0;
+  let nonZeroVoxels = 0;
+  
+  for (let i = 0; i < depositOutput.length; i += 4) {
+    const mass = depositOutput[i + 3];  // Mass in alpha
+    if (mass > 0) {
+      totalMassDeposited += mass;
+      nonZeroVoxels++;
+    }
+  }
+  
+  assert.ok(totalMassDeposited > 0, 
+    `Deposit kernel should have deposited mass: total=${totalMassDeposited}, nonZeroVoxels=${nonZeroVoxels}, expectedMass=150`);
+  
+  system.dispose();
+  canvas.remove();
+});
+
+/**
+ * DIAGNOSTIC: Test - Kernel FFT interrogation
+ * Verify FFT is transforming the density field to spectrum
+ */
+test('mesh-kernels.debug.diagnostic: kernel FFT transformation', async () => {
+  const { canvas, gl } = createTestCanvas();
+  
+  const positions = new Float32Array(8);
+  positions.set([0, 0, 0, 100.0,  0.5, 0.5, 0.5, 50.0]);
+  const velocities = new Float32Array(8);
+  
+  const system = new ParticleSystemMeshKernels({
+    gl,
+    particleData: { positions, velocities },
+    worldBounds: { min: [-5, -5, -5], max: [5, 5, 5] },
+    dt: 0.01,
+    gravityStrength: 0.001,
+    softening: 0.1,
+    mesh: { gridSize: 16, assignment: 'cic' }
+  });
+  
+  // Run deposit and FFT forward
+  system._depositMass();
+  system.fftForwardKernel.grid = system.depositKernel.outGrid;
+  system.fftForwardKernel.run();
+  
+  if (!system.fftForwardKernel.spectrum) {
+    throw new Error('FFT spectrum is null after forward transform');
+  }
+  
+  // Read spectrum (RG32F format)
+  const spectrumOutput = new Float32Array(128 * 128 * 2);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, system.fftForwardKernel.spectrum, 0);
+  
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.deleteFramebuffer(fbo);
+    throw new Error(`FFT spectrum FBO incomplete: status=${status}`);
+  }
+  
+  gl.readPixels(0, 0, 128, 128, gl.RG, gl.FLOAT, spectrumOutput);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  
+  // Check spectrum DC component
+  const dcReal = spectrumOutput[0];
+  const dcImag = spectrumOutput[1];
+  
+  assert.ok(Number.isFinite(dcReal) && Number.isFinite(dcImag),
+    `FFT DC component should be finite: real=${dcReal}, imag=${dcImag}`);
+  
+  assert.ok(Math.abs(dcReal) > 0 || Math.abs(dcImag) > 0,
+    `FFT spectrum should have non-zero DC component: real=${dcReal.toFixed(6)}, imag=${dcImag.toFixed(6)}`);
+  
+  system.dispose();
+  canvas.remove();
+});
+
+/**
+ * DIAGNOSTIC: Test - Force grid output
+ * Verify that force grids contain non-zero forces
+ */
+test('mesh-kernels.debug.diagnostic: force grid computation', async () => {
+  const { canvas, gl } = createTestCanvas();
+  
+  const positions = new Float32Array(8);
+  positions.set([0, 0, 0, 100.0,  1, 0, 0, 50.0]);  // Two particles at different positions
+  const velocities = new Float32Array(8);
+  
+  const system = new ParticleSystemMeshKernels({
+    gl,
+    particleData: { positions, velocities },
+    worldBounds: { min: [-5, -5, -5], max: [5, 5, 5] },
+    dt: 0.01,
+    gravityStrength: 0.001,
+    softening: 0.1,
+    mesh: { gridSize: 16, assignment: 'cic' }
+  });
+  
+  // Run full mesh force computation up to gradient
+  system._depositMass();
+  system.fftForwardKernel.grid = system.depositKernel.outGrid;
+  system.fftForwardKernel.run();
+  system.poissonKernel.inDensitySpectrum = system.fftForwardKernel.spectrum;
+  system.poissonKernel.run();
+  system.gradientKernel.inPotentialSpectrum = system.poissonKernel.outPotentialSpectrum;
+  system.gradientKernel.run();
+  
+  if (!system.gradientKernel.outForceSpectrumX) {
+    throw new Error('Gradient kernel outForceSpectrumX is null');
+  }
+  
+  // Read force spectrum X
+  const forceSpecX = new Float32Array(128 * 128 * 4);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, system.gradientKernel.outForceSpectrumX, 0);
+  
+  gl.readPixels(0, 0, 128, 128, gl.RGBA, gl.FLOAT, forceSpecX);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  
+  // Check for non-zero forces
+  let maxForce = 0;
+  let nonZeroCount = 0;
+  
+  for (let i = 0; i < forceSpecX.length; i++) {
+    const val = Math.abs(forceSpecX[i]);
+    if (val > 0) nonZeroCount++;
+    maxForce = Math.max(maxForce, val);
+  }
+  
+  assert.ok(maxForce > 0,
+    `Force grid should have non-zero values: maxForce=${maxForce}, nonZeroCount=${nonZeroCount}, expectedNonZero>=1`);
+  
+  system.dispose();
+  canvas.remove();
+});
+
+/**
+ * DIAGNOSTIC: Test - Sampled forces at particles
+ * Verify that forces are actually being sampled at particle positions
+ */
+test('mesh-kernels.debug.diagnostic: force sampling at particles', async () => {
+  const { canvas, gl } = createTestCanvas();
+  
+  const positions = new Float32Array(8);
+  positions.set([0, 0, 0, 100.0,  1, 0, 0, 50.0]);
+  const velocities = new Float32Array(8);
+  
+  const system = new ParticleSystemMeshKernels({
+    gl,
+    particleData: { positions, velocities },
+    worldBounds: { min: [-5, -5, -5], max: [5, 5, 5] },
+    dt: 0.01,
+    gravityStrength: 0.001,
+    softening: 0.1,
+    mesh: { gridSize: 16, assignment: 'cic' }
+  });
+  
+  // Run through full force computation
+  system._depositMass();
+  system._computeMeshForces();
+  system._sampleForces();
+  
+  if (!system.forceSampleKernel.outForce) {
+    throw new Error('forceSampleKernel.outForce is null');
+  }
+  
+  // Read sampled forces
+  const sampledForces = new Float32Array(2 * 4);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, system.forceSampleKernel.outForce, 0);
+  
+  gl.readPixels(0, 0, 2, 1, gl.RGBA, gl.FLOAT, sampledForces);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  
+  // Check that at least one force component is non-zero
+  const force0Magnitude = Math.sqrt(
+    sampledForces[0]*sampledForces[0] + 
+    sampledForces[1]*sampledForces[1] + 
+    sampledForces[2]*sampledForces[2]
+  );
+  const force1Magnitude = Math.sqrt(
+    sampledForces[4]*sampledForces[4] + 
+    sampledForces[5]*sampledForces[5] + 
+    sampledForces[6]*sampledForces[6]
+  );
+  
+  assert.ok(force0Magnitude > 0 || force1Magnitude > 0,
+    `Sampled forces should be non-zero: particle0_mag=${force0Magnitude.toFixed(8)}, particle1_mag=${force1Magnitude.toFixed(8)}, particle0_force=[${sampledForces[0].toFixed(8)},${sampledForces[1].toFixed(8)},${sampledForces[2].toFixed(8)}], particle1_force=[${sampledForces[4].toFixed(8)},${sampledForces[5].toFixed(8)},${sampledForces[6].toFixed(8)}]`);
+  
+  system.dispose();
   canvas.remove();
 });

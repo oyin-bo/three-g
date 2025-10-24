@@ -168,15 +168,20 @@ test('mesh-kernels.small-scale: two particles attract each other', async () => {
   // Verify particles moved toward each other
   // Particle 0 should move in +x direction (toward particle 1)
   assert.ok(final0.position[0] > initial0.position[0], 
-    `Particle 0 should move right: ${initial0.position[0]} -> ${final0.position[0]}`);
+    `Particle 0 should move right: pos[${initial0.position[0].toFixed(6)} -> ${final0.position[0].toFixed(6)}], vel=[${final0.velocity[0].toFixed(8)},${final0.velocity[1].toFixed(8)},${final0.velocity[2].toFixed(8)}]`);
   
   // Particle 1 should move in -x direction (toward particle 0)
   assert.ok(final1.position[0] < initial1.position[0], 
-    `Particle 1 should move left: ${initial1.position[0]} -> ${final1.position[0]}`);
+    `Particle 1 should move left: pos[${initial1.position[0].toFixed(6)} -> ${final1.position[0].toFixed(6)}], vel=[${final1.velocity[0].toFixed(8)},${final1.velocity[1].toFixed(8)},${final1.velocity[2].toFixed(8)}]`);
   
-  // Check velocity direction
-  assert.ok(final0.velocity[0] > 0, 'Particle 0 velocity should be positive (rightward)');
-  assert.ok(final1.velocity[0] < 0, 'Particle 1 velocity should be negative (leftward)');
+  // Check velocity direction with magnitudes
+  const vel0Mag = Math.sqrt(final0.velocity[0]*final0.velocity[0] + final0.velocity[1]*final0.velocity[1] + final0.velocity[2]*final0.velocity[2]);
+  const vel1Mag = Math.sqrt(final1.velocity[0]*final1.velocity[0] + final1.velocity[1]*final1.velocity[1] + final1.velocity[2]*final1.velocity[2]);
+  
+  assert.ok(final0.velocity[0] > 0, 
+    `Particle 0 velocity should be positive (rightward): vx=${final0.velocity[0].toFixed(8)}, mag=${vel0Mag.toFixed(8)}`);
+  assert.ok(final1.velocity[0] < 0, 
+    `Particle 1 velocity should be negative (leftward): vx=${final1.velocity[0].toFixed(8)}, mag=${vel1Mag.toFixed(8)}`);
   
   disposeSystem(system, canvas);
 });
@@ -236,8 +241,19 @@ test('mesh-kernels.small-scale: ten particles in cluster contract inward', async
   const finalRadius = getAverageRadius();
   
   // Verify system contracted (particles moved inward)
+  // Gather diagnostics for failure message
+  const radiusDifference = initialRadius - finalRadius;
+  const radiusRatio = finalRadius / initialRadius;
+  const particleDetails = [];
+  
+  for (let i = 0; i < 10; i++) {
+    const p = readParticleData(system, i);
+    const r = Math.sqrt(p.position[0]**2 + p.position[1]**2 + p.position[2]**2);
+    particleDetails.push(`p${i}:r=${r.toFixed(4)},v_mag=${Math.sqrt(p.velocity[0]**2 + p.velocity[1]**2 + p.velocity[2]**2).toFixed(6)}`);
+  }
+  
   assert.ok(finalRadius < initialRadius, 
-    `Cluster should contract: initial radius=${initialRadius.toFixed(3)}, final radius=${finalRadius.toFixed(3)}`);
+    `Cluster should contract: initial=${initialRadius.toFixed(4)}, final=${finalRadius.toFixed(4)}, diff=${radiusDifference.toFixed(4)}, ratio=${radiusRatio.toFixed(4)}, particles=[${particleDetails.join(',')}]`);
   
   // Check no NaN or Inf values
   for (let i = 0; i < 10; i++) {
