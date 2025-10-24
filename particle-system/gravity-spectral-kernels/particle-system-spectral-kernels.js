@@ -25,8 +25,8 @@ import { KIntegratePosition } from '../gravity-multipole/k-integrate-position.js
 
 export class ParticleSystemSpectralKernels {
   /**
-   * @param {WebGL2RenderingContext} gl
    * @param {{
+   *   gl: WebGL2RenderingContext,
    *   particleData: { positions: Float32Array, velocities?: Float32Array|null, colors?: Uint8Array|null },
    *   particleCount?: number,
    *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
@@ -40,22 +40,22 @@ export class ParticleSystemSpectralKernels {
    *   assignment?: 'NGP'|'CIC'
    * }} options
    */
-  constructor(gl, options) {
-    this.gl = gl;
-    
-    if (!(gl instanceof WebGL2RenderingContext)) {
+  constructor(options) {
+    this.gl = options.gl;
+
+    if (!(this.gl instanceof WebGL2RenderingContext)) {
       throw new Error('ParticleSystemSpectralKernels requires WebGL2RenderingContext');
     }
-    
+
     if (!options.particleData) {
       throw new Error('ParticleSystemSpectralKernels requires particleData with positions');
     }
-    
+
     const particleCount = options.particleData.positions.length / 4;
-    
+
     // Infer bounds from particle positions if not provided
     const inferredBounds = this._inferBounds(options.particleData.positions);
-    
+
     this.options = {
       particleCount,
       worldBounds: options.worldBounds || inferredBounds,
@@ -68,15 +68,15 @@ export class ParticleSystemSpectralKernels {
       gridSize: options.gridSize || 64,
       assignment: options.assignment || 'CIC'
     };
-    
+
     this.particleData = options.particleData;
     this.frameCount = 0;
-    
+
     // Calculate texture dimensions
     this.textureWidth = Math.ceil(Math.sqrt(particleCount));
     this.textureHeight = Math.ceil(particleCount / this.textureWidth);
     this.actualTextureSize = this.textureWidth * this.textureHeight;
-    
+
     // PM grid configuration
     this.gridSize = this.options.gridSize;
     this.slicesPerRow = Math.ceil(Math.sqrt(this.gridSize));
@@ -139,7 +139,7 @@ export class ParticleSystemSpectralKernels {
       bounds.max[2] - bounds.min[2]
     ];
     const fourPiG = 4 * Math.PI * this.options.gravityStrength;
-    
+
     // 1. Deposit kernel
     this.depositKernel = new KDeposit({
       gl: this.gl,
@@ -153,7 +153,7 @@ export class ParticleSystemSpectralKernels {
       assignment: this.options.assignment,
       disableFloatBlend: this.disableFloatBlend
     });
-    
+
     // 2. Forward FFT kernel
     this.fftForwardKernel = new KFFT({
       gl: this.gl,
@@ -162,7 +162,7 @@ export class ParticleSystemSpectralKernels {
       textureSize: this.textureSize,
       inverse: false
     });
-    
+
     // 3. Poisson solver kernel    
     this.poissonKernel = new KPoisson({
       gl: this.gl,
@@ -173,7 +173,7 @@ export class ParticleSystemSpectralKernels {
       worldSize: /** @type {[number, number, number]} */ (worldSize),
       assignment: this.options.assignment
     });
-    
+
     // 4. Gradient kernel
     this.gradientKernel = new KGradient({
       gl: this.gl,
@@ -182,7 +182,7 @@ export class ParticleSystemSpectralKernels {
       textureSize: this.textureSize,
       worldSize: /** @type {[number, number, number]} */ (worldSize)
     });
-    
+
     // 5. Inverse FFT kernels (one per axis)
     this.fftInverseX = new KFFT({
       gl: this.gl,
@@ -191,7 +191,7 @@ export class ParticleSystemSpectralKernels {
       textureSize: this.textureSize,
       inverse: true
     });
-    
+
     this.fftInverseY = new KFFT({
       gl: this.gl,
       gridSize: this.gridSize,
@@ -199,7 +199,7 @@ export class ParticleSystemSpectralKernels {
       textureSize: this.textureSize,
       inverse: true
     });
-    
+
     this.fftInverseZ = new KFFT({
       gl: this.gl,
       gridSize: this.gridSize,
@@ -207,7 +207,7 @@ export class ParticleSystemSpectralKernels {
       textureSize: this.textureSize,
       inverse: true
     });
-    
+
     // 6. Force sampling kernel
     this.forceSampleKernel = new KForceSample({
       gl: this.gl,
@@ -218,7 +218,7 @@ export class ParticleSystemSpectralKernels {
       slicesPerRow: this.slicesPerRow,
       worldBounds: this.options.worldBounds
     });
-    
+
     // 7. Integration kernels (reuse from monopole)
     this.velocityKernel = new KIntegrateVelocity({
       gl: this.gl,
@@ -229,7 +229,7 @@ export class ParticleSystemSpectralKernels {
       maxSpeed: this.options.maxSpeed,
       maxAccel: this.options.maxAccel
     });
-    
+
     this.positionKernel = new KIntegratePosition({
       gl: this.gl,
       width: this.textureWidth,
@@ -237,7 +237,7 @@ export class ParticleSystemSpectralKernels {
       dt: this.options.dt
     });
   }
-  
+
   /**
    * Infer world bounds from particle positions
    * @param {Float32Array} positions
@@ -264,57 +264,57 @@ export class ParticleSystemSpectralKernels {
       max: [maxX + marginX, maxY + marginY, maxZ + marginZ]
     });
   }
-  
+
   /**
    * Step the simulation forward one frame
    */
   step() {
     // 1. Compute PM forces
     this._computePMForces();
-    
+
     // 2. Integrate physics
     this._integratePhysics();
-    
+
     this.frameCount++;
   }
-  
+
   _computePMForces() {
     // Set current position for deposit and force sample
     this.depositKernel.inPosition = this.positionTexture;
     this.forceSampleKernel.inPosition = this.positionTexture;
-    
+
     // Run PM/FFT pipeline
     this.depositKernel.run();           // Step 1: Deposit particles to grid
-    
+
     // Wire deposit output into FFT forward
     this.fftForwardKernel.inReal = this.depositKernel.outMassGrid;
     this.fftForwardKernel.run();        // Step 2: Forward FFT
-    
+
     // Wire FFT output into Poisson
     this.poissonKernel.inDensitySpectrum = this.fftForwardKernel.outComplex;
     this.poissonKernel.run();           // Step 3: Solve Poisson
-    
+
     // Wire Poisson output into Gradient
     this.gradientKernel.inPotentialSpectrum = this.poissonKernel.outPotentialSpectrum;
     this.gradientKernel.run();          // Step 4: Compute gradient
-    
+
     // Wire gradient outputs into inverse FFTs
     this.fftInverseX.inComplex = this.gradientKernel.outForceSpectrumX;
     this.fftInverseX.run();             // Step 5a: Inverse FFT X
-    
+
     this.fftInverseY.inComplex = this.gradientKernel.outForceSpectrumY;
     this.fftInverseY.run();             // Step 5b: Inverse FFT Y
-    
+
     this.fftInverseZ.inComplex = this.gradientKernel.outForceSpectrumZ;
     this.fftInverseZ.run();             // Step 5c: Inverse FFT Z
-    
+
     // Wire FFT outputs into force sampler
     this.forceSampleKernel.inForceGridX = this.fftInverseX.outReal;
     this.forceSampleKernel.inForceGridY = this.fftInverseY.outReal;
     this.forceSampleKernel.inForceGridZ = this.fftInverseZ.outReal;
     this.forceSampleKernel.run();       // Step 6: Sample forces
   }
-  
+
   _integratePhysics() {
     // Update velocities
     if (!this.velocityKernel) throw new Error('Velocity kernel missing');
@@ -348,9 +348,9 @@ export class ParticleSystemSpectralKernels {
       this.positionTextureWrite = tmp;
     }
   }
-  
 
-  
+
+
   /**
    * Dispose all resources
    */
@@ -384,34 +384,13 @@ function createTexture2D(gl, width, height, internalFormat, type) {
   if (!texture) throw new Error('Failed to create texture');
 
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0, 
-                fmt === gl.R32F ? gl.RED : gl.RGBA, tp, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0,
+    fmt === gl.R32F ? gl.RED : gl.RGBA, tp, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.bindTexture(gl.TEXTURE_2D, null);
 
-  return texture;
-}
-
-/**
- * Create a complex RG32F texture for FFT spectra
- * @param {WebGL2RenderingContext} gl
- * @param {number} width
- * @param {number} height
- */
-function createComplexTexture(gl, width, height) {
-  const texture = gl.createTexture();
-  if (!texture) throw new Error('Failed to create texture');
-  
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, width, height, 0, gl.RG, gl.FLOAT, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.bindTexture(gl.TEXTURE_2D, null);
-  
   return texture;
 }
