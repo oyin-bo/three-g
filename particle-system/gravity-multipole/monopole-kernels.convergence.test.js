@@ -173,12 +173,13 @@ test('monopole-kernels.convergence: basic physics simulation works', async () =>
   };
 
   // Voxel coordinate calculation
+  /** @type {(pos: number[]) => number[]} */
   const getVoxelCoords = (pos) => {
     const worldMin = system.options.worldBounds.min;
     const worldMax = system.options.worldBounds.max;
     const gridSize = system.octreeGridSize;
     const norm = pos.map((p, i) => (p - worldMin[i]) / (worldMax[i] - worldMin[i]));
-    return norm.map(n => Math.floor(n * gridSize));
+    return norm.map((n) => Math.floor(n * gridSize));
   };
 
   const initialVoxels = {
@@ -189,51 +190,52 @@ test('monopole-kernels.convergence: basic physics simulation works', async () =>
   const p0_mass = initialPositions[3];
   const p1_mass = initialPositions[7];
 
-  // Detailed diagnostic: mass of each particle's voxel at each aggregation level
-  const particleLevelMasses = (() => {
+  // Helper: get mass at a specific level for a particle position
+  /** @type {(particlePos: number[], level: number) => number} */
+  const getMassAtLevel = (particlePos, level) => {
     const gl = system.gl;
     const worldMin = system.options.worldBounds.min;
     const worldMax = system.options.worldBounds.max;
-    const numLevels = system.numLevels;
     const levelConfigs = system.levelConfigs;
+    
+    const config = levelConfigs[level];
+    const gridSize = config.gridSize;
+    const slicesPerRow = config.slicesPerRow;
 
-    const getMassAtLevel = (particlePos, level) => {
-      const config = levelConfigs[level];
-      const gridSize = config.gridSize;
-      const slicesPerRow = config.slicesPerRow;
+    const norm = particlePos.map((p, i) => (p - worldMin[i]) / (worldMax[i] - worldMin[i]));
+    const voxelCoord = norm.map((n) => Math.floor(n * gridSize));
 
-      const norm = particlePos.map((p, i) => (p - worldMin[i]) / (worldMax[i] - worldMin[i]));
-      const voxelCoord = norm.map(n => Math.floor(n * gridSize));
+    const sliceIndex = voxelCoord[2];
+    const sliceRow = Math.floor(sliceIndex / slicesPerRow);
+    const sliceCol = sliceIndex % slicesPerRow;
+    const texelX = sliceCol * gridSize + voxelCoord[0];
+    const texelY = sliceRow * gridSize + voxelCoord[1];
 
-      const sliceIndex = voxelCoord[2];
-      const sliceRow = Math.floor(sliceIndex / slicesPerRow);
-      const sliceCol = sliceIndex % slicesPerRow;
-      const texelX = sliceCol * gridSize + voxelCoord[0];
-      const texelY = sliceRow * gridSize + voxelCoord[1];
+    let texture;
+    if (level === 0) {
+      texture = system.aggregatorKernel.outA0;
+    } else {
+      texture = system.pyramidKernels[level - 1].outA0;
+    }
+    if (!texture) return NaN;
 
-      let texture;
-      if (level === 0) {
-        texture = system.aggregatorKernel.outA0;
-      } else {
-        texture = system.pyramidKernels[level - 1].outA0;
-      }
-      if (!texture) return NaN;
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    const pixelData = new Float32Array(4);
+    gl.readPixels(texelX, texelY, 1, 1, gl.RGBA, gl.FLOAT, pixelData);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    return pixelData[3]; // Mass is in the 'w' component
+  };
 
-      const fbo = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-      const pixelData = new Float32Array(4);
-      gl.readPixels(texelX, texelY, 1, 1, gl.RGBA, gl.FLOAT, pixelData);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.deleteFramebuffer(fbo);
-      return pixelData[3]; // Mass is in the 'w' component
-    };
-
+  // Detailed diagnostic: mass of each particle's voxel at each aggregation level
+  const particleLevelMasses = (() => {
     let report = '\nParticle Voxel Masses per Level:\n';
-    for (let level = 0; level < numLevels; level++) {
+    for (let level = 0; level < system.numLevels; level++) {
       const p0_mass = getMassAtLevel(initial.p0.position, level);
       const p1_mass = getMassAtLevel(initial.p1.position, level);
-      report += `  Level ${level} (gridSize=${levelConfigs[level].gridSize}): P0 Mass=${p0_mass.toFixed(3)}, P1 Mass=${p1_mass.toFixed(3)}\n`;
+      report += `  Level ${level} (gridSize=${system.levelConfigs[level].gridSize}): P0 Mass=${p0_mass.toFixed(3)}, P1 Mass=${p1_mass.toFixed(3)}\n`;
     }
     return report;
   })();
@@ -244,7 +246,34 @@ test('monopole-kernels.convergence: basic physics simulation works', async () =>
   const posChanged = Math.abs(final.p0.position[0] - initial.p0.position[0]) > 1e-6;
   const velChanged = Math.abs(final.p0.velocity[0] - initial.p0.velocity[0]) > 1e-6;
 
-  const formatVec = (vec) => `[${vec.map(v => v.toFixed(3)).join(',')}]`;
+  /** @type {(vec: number[]) => string} */
+  const formatVec = (vec) => `[${vec.map((v) => v.toFixed(3)).join(',')}]`;
+
+  // Enhanced diagnostic: show texture dimensions and level configs
+  const levelConfigDiag = (() => {
+    let diag = '\n  Level Configuration and Mass Propagation:\n';
+    for (let i = 0; i < system.numLevels; i++) {
+      const config = system.levelConfigs[i];
+      diag += `    Level ${i}: gridSize=${config.gridSize}, slicesPerRow=${config.slicesPerRow}, ` +
+              `textureSize=${config.gridSize * config.slicesPerRow}×${config.gridSize * Math.ceil(config.gridSize / config.slicesPerRow)}\n`;
+    }
+    return diag;
+  })();
+
+  const massPerLevelDiag = (() => {
+    let diag = '\n  Mass Propagation by Level:\n';
+    for (let level = 0; level < system.numLevels; level++) {
+      const p0_mass = getMassAtLevel(initial.p0.position, level);
+      const p1_mass = getMassAtLevel(initial.p1.position, level);
+      diag += `    Level ${level}: P0=${p0_mass.toFixed(3)}, P1=${p1_mass.toFixed(3)}`;
+      
+      if (level > 0 && p0_mass === 0 && getMassAtLevel(initial.p0.position, level - 1) > 0) {
+        diag += ` ← MASS LOST HERE (was present at Level ${level - 1})`;
+      }
+      diag += '\n';
+    }
+    return diag;
+  })();
 
   const report = `\n\nInitial State:\n` +
     `  P0 (mass ${p0_mass.toFixed(1)}): pos=${formatVec(initial.p0.position)}, vel=${formatVec(initial.p0.velocity)}, voxel=[${initialVoxels.p0.join(',')}]\n` +
@@ -252,8 +281,8 @@ test('monopole-kernels.convergence: basic physics simulation works', async () =>
     `\nFinal State:\n` +
     `  P0 (mass ${p0_mass.toFixed(1)}): pos=${formatVec(final.p0.position)}, vel=${formatVec(final.p0.velocity)}\n` +
     `  P1 (mass ${p1_mass.toFixed(1)}): pos=${formatVec(final.p1.position)}, vel=${formatVec(final.p1.velocity)}\n` +
-    `\nDiagnostics:\n` +
-    `${particleLevelMasses}`;
+    levelConfigDiag +
+    massPerLevelDiag;
 
   assert.ok(posChanged || velChanged, `Physics not working. ${report}`);
 });

@@ -17,6 +17,8 @@ export class KPyramidBuild {
    *   outSize: number,
    *   outGridSize: number,
    *   outSlicesPerRow: number,
+   *   inGridSize: number,
+   *   inSlicesPerRow: number,
    *   inA0?: WebGLTexture|null,
    *   inA1?: WebGLTexture|null,
    *   inA2?: WebGLTexture|null,
@@ -30,6 +32,8 @@ export class KPyramidBuild {
     outSize,
     outGridSize,
     outSlicesPerRow,
+    inGridSize,
+    inSlicesPerRow,
     inA0, inA1, inA2,
     outA0, outA1, outA2
   }) {
@@ -43,9 +47,10 @@ export class KPyramidBuild {
     this.outTextureWidth = outWidth;
     this.outTextureHeight = outHeight;
 
-    const childGridSize = this.outGridSize * 2;
-    const childSlicesPerRow = this.outSlicesPerRow * 2;
-    const { width: inWidth, height: inHeight } = textureDimensions(childGridSize, childSlicesPerRow);
+    // Input level dimensions (required - no guessing via doubling formula)
+    this.inGridSize = inGridSize;
+    this.inSlicesPerRow = inSlicesPerRow;
+    const { width: inWidth, height: inHeight } = textureDimensions(this.inGridSize, this.inSlicesPerRow);
 
     this.inA0 = (inA0 || inA0 === null) ? inA0 : createTextureRGBA32F(this.gl, inWidth, inHeight);
     this.inA1 = (inA1 || inA1 === null) ? inA1 : createTextureRGBA32F(this.gl, inWidth, inHeight);
@@ -181,6 +186,8 @@ export class KPyramidBuild {
     // Set uniforms
     this.gl.uniform1f(this.gl.getUniformLocation(this.program, 'u_gridSize'), this.outGridSize);
     this.gl.uniform1f(this.gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.outSlicesPerRow);
+    this.gl.uniform1f(this.gl.getUniformLocation(this.program, 'u_childGridSize'), this.inGridSize);
+    this.gl.uniform1f(this.gl.getUniformLocation(this.program, 'u_childSlicesPerRow'), this.inSlicesPerRow);
 
     // Draw
     this.gl.bindVertexArray(this.quadVAO);

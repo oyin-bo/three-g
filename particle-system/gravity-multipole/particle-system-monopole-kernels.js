@@ -174,7 +174,10 @@ export class ParticleSystemMonopoleKernels {
         // outA0/outA1/outA2 omitted - kernel will create them
         outSize: this.levelConfigs[i + 1].size,
         outGridSize: this.levelConfigs[i + 1].gridSize,
-        outSlicesPerRow: this.levelConfigs[i + 1].slicesPerRow
+        outSlicesPerRow: this.levelConfigs[i + 1].slicesPerRow,
+        // Pass actual input level dimensions (not guessed via doubling formula)
+        inGridSize: this.levelConfigs[i].gridSize,
+        inSlicesPerRow: this.levelConfigs[i].slicesPerRow
       }));
     }
 

@@ -363,15 +363,15 @@ function recreatePhysicsAndMesh() {
         break;
       }
       case 'quadrupole': {
-        system = new ParticleSystemQuadrupoleKernels(gl, {
+        system = new ParticleSystemQuadrupoleKernels({
+          gl,
           particleData,
           worldBounds,
           theta: 0.7,
           gravityStrength,
           softening: 0.002,
           dt: 10 / 60,
-          damping: 0.002,
-          enableQuadrupoles: true
+          damping: 0.002
         });
         console.log("[Demo Kernels] Created ParticleSystemQuadrupoleKernels");
         break;

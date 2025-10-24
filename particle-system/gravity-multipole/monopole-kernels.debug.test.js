@@ -48,14 +48,14 @@ test('monopole-kernels DEBUG: two-particle forces and motion', async () => {
   });
   
   // Step 0: Check initial aggregation
-  console.log('\n=== INITIAL STATE ===');
-  console.log('Particle 0: pos=(-1,0,0), mass=1');
-  console.log('Particle 1: pos=(1,0,0), mass=1');
-  console.log('worldBounds:', system.options.worldBounds);
-  console.log('gravityStrength:', system.options.gravityStrength);
-  console.log('softening:', system.options.softening);
-  console.log('numLevels:', system.numLevels);
-  console.log('theta:', system.options.theta);
+  // console.log('\n=== INITIAL STATE ===');
+  // console.log('Particle 0: pos=(-1,0,0), mass=1');
+  // console.log('Particle 1: pos=(1,0,0), mass=1');
+  // console.log('worldBounds:', system.options.worldBounds);
+  // console.log('gravityStrength:', system.options.gravityStrength);
+  // console.log('softening:', system.options.softening);
+  // console.log('numLevels:', system.numLevels);
+  // console.log('theta:', system.options.theta);
   
   // Manually run octree build
   system._buildOctree();
@@ -68,9 +68,9 @@ test('monopole-kernels DEBUG: two-particle forces and motion', async () => {
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, system.aggregatorKernel.outA0, 0);
   gl.readPixels(0, 0, 2, 1, gl.RGBA, gl.FLOAT, aggData);
   
-  console.log('\n=== AFTER AGGREGATION (L0) ===');
-  console.log('Voxel @ (0,0): rgba=', [aggData[0], aggData[1], aggData[2], aggData[3]]);
-  console.log('Voxel @ (1,0): rgba=', [aggData[4], aggData[5], aggData[6], aggData[7]]);
+  // console.log('\n=== AFTER AGGREGATION (L0) ===');
+  // console.log('Voxel @ (0,0): rgba=', [aggData[0], aggData[1], aggData[2], aggData[3]]);
+  // console.log('Voxel @ (1,0): rgba=', [aggData[4], aggData[5], aggData[6], aggData[7]]);
   
   // Count non-zero voxels in L0
   const octreeSize = system.aggregatorKernel.octreeSize;
@@ -86,7 +86,7 @@ test('monopole-kernels DEBUG: two-particle forces and motion', async () => {
       totalMass += a;
     }
   }
-  console.log('Non-zero voxels in L0:', nonZeroVoxels, ', total mass:', totalMass);
+  // console.log('Non-zero voxels in L0:', nonZeroVoxels, ', total mass:', totalMass);
   
   // Manually run force calculation
   system._calculateForces();
@@ -95,15 +95,15 @@ test('monopole-kernels DEBUG: two-particle forces and motion', async () => {
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, system.traversalKernel.outForce, 0);
   gl.readPixels(0, 0, 2, 1, gl.RGBA, gl.FLOAT, forceData);
   
-  console.log('\n=== AFTER TRAVERSAL (FORCE) ===');
-  console.log('Force on particle 0:', [forceData[0], forceData[1], forceData[2]]);
-  console.log('Force on particle 1:', [forceData[4], forceData[5], forceData[6]]);
+  // console.log('\n=== AFTER TRAVERSAL (FORCE) ===');
+  // console.log('Force on particle 0:', [forceData[0], forceData[1], forceData[2]]);
+  // console.log('Force on particle 1:', [forceData[4], forceData[5], forceData[6]]);
   
   if (forceData[0] === 0 && forceData[4] === 0) {
-    console.log('\n!!! ZERO FORCES - Investigating traversal inputs ===');
+    // console.log('\n!!! ZERO FORCES - Investigating traversal inputs ===');
     
     // Check if inLevelA0 textures are properly wired
-    console.log('inLevelA0 length:', system.traversalKernel.inLevelA0 ? system.traversalKernel.inLevelA0.length : 0);
+    // console.log('inLevelA0 length:', system.traversalKernel.inLevelA0 ? system.traversalKernel.inLevelA0.length : 0);
     if (system.traversalKernel.inLevelA0) {
       for (let L = 0; L < system.traversalKernel.inLevelA0.length; L++) {
         const tex = system.traversalKernel.inLevelA0[L];
@@ -111,9 +111,9 @@ test('monopole-kernels DEBUG: two-particle forces and motion', async () => {
           const sample = new Float32Array(4);
           gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
           gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, sample);
-          console.log(`Level ${L} sample @ (0,0):`, Array.from(sample));
+          // console.log(`Level ${L} sample @ (0,0):`, Array.from(sample));
         } else {
-          console.log(`Level ${L}: null texture`);
+          // console.log(`Level ${L}: null texture`);
         }
       }
     }
@@ -126,11 +126,11 @@ test('monopole-kernels DEBUG: two-particle forces and motion', async () => {
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, system.positionTexture, 0);
   gl.readPixels(0, 0, 2, 1, gl.RGBA, gl.FLOAT, finalPos);
   
-  console.log('\n=== AFTER INTEGRATION ===');
-  console.log('Final particle 0 pos:', [finalPos[0], finalPos[1], finalPos[2]]);
-  console.log('Final particle 1 pos:', [finalPos[4], finalPos[5], finalPos[6]]);
-  console.log('Delta particle 0:', [finalPos[0] - positions[0], finalPos[1] - positions[1], finalPos[2] - positions[2]]);
-  console.log('Delta particle 1:', [finalPos[4] - positions[4], finalPos[5] - positions[5], finalPos[6] - positions[6]]);
+  // console.log('\n=== AFTER INTEGRATION ===');
+  // console.log('Final particle 0 pos:', [finalPos[0], finalPos[1], finalPos[2]]);
+  // console.log('Final particle 1 pos:', [finalPos[4], finalPos[5], finalPos[6]]);
+  // console.log('Delta particle 0:', [finalPos[0] - positions[0], finalPos[1] - positions[1], finalPos[2] - positions[2]]);
+  // console.log('Delta particle 1:', [finalPos[4] - positions[4], finalPos[5] - positions[5], finalPos[6] - positions[6]]);
   
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);

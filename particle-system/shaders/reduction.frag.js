@@ -4,8 +4,10 @@ precision highp float;
 uniform sampler2D u_previousLevelA0;
 uniform sampler2D u_previousLevelA1;
 uniform sampler2D u_previousLevelA2;
-uniform float u_gridSize;       // current level grid size (e.g., 32 for L1)
-uniform float u_slicesPerRow;   // slices per row for current level (e.g., 4 for L1)
+uniform float u_gridSize;           // current level grid size (e.g., 32 for L1)
+uniform float u_slicesPerRow;       // slices per row for current level (e.g., 4 for L1)
+uniform float u_childGridSize;      // child (previous) level grid size (e.g., 64)
+uniform float u_childSlicesPerRow;  // child (previous) level slices per row (e.g., 8)
 
 layout(location = 0) out vec4 fragA0;
 layout(location = 1) out vec4 fragA1;
@@ -46,42 +48,38 @@ void main() {
   
   ivec3 parentVoxel = ivec3(vx, vy, vz);
   
-  // Parent grid is at half resolution in previous level
-  float childGridSize = u_gridSize * 2.0;
-  float childSlicesPerRow = u_slicesPerRow * 2.0;
-  
   // 8 children: 2x2x2 cube
   ivec3 childBase = parentVoxel * 2;
   
   // Fetch A0 (mass-weighted positions and mass) from all 8 children
-  vec4 a0_000 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(0,0,0), childGridSize, childSlicesPerRow), 0);
-  vec4 a0_001 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(0,0,1), childGridSize, childSlicesPerRow), 0);
-  vec4 a0_010 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(0,1,0), childGridSize, childSlicesPerRow), 0);
-  vec4 a0_011 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(0,1,1), childGridSize, childSlicesPerRow), 0);
-  vec4 a0_100 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(1,0,0), childGridSize, childSlicesPerRow), 0);
-  vec4 a0_101 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(1,0,1), childGridSize, childSlicesPerRow), 0);
-  vec4 a0_110 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(1,1,0), childGridSize, childSlicesPerRow), 0);
-  vec4 a0_111 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(1,1,1), childGridSize, childSlicesPerRow), 0);
+  vec4 a0_000 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(0,0,0), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a0_001 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(0,0,1), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a0_010 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(0,1,0), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a0_011 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(0,1,1), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a0_100 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(1,0,0), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a0_101 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(1,0,1), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a0_110 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(1,1,0), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a0_111 = texelFetch(u_previousLevelA0, voxelToTexel(childBase + ivec3(1,1,1), u_childGridSize, u_childSlicesPerRow), 0);
   
   // Fetch A1 (second moments: x², y², z², xy) from all 8 children
-  vec4 a1_000 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(0,0,0), childGridSize, childSlicesPerRow), 0);
-  vec4 a1_001 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(0,0,1), childGridSize, childSlicesPerRow), 0);
-  vec4 a1_010 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(0,1,0), childGridSize, childSlicesPerRow), 0);
-  vec4 a1_011 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(0,1,1), childGridSize, childSlicesPerRow), 0);
-  vec4 a1_100 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(1,0,0), childGridSize, childSlicesPerRow), 0);
-  vec4 a1_101 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(1,0,1), childGridSize, childSlicesPerRow), 0);
-  vec4 a1_110 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(1,1,0), childGridSize, childSlicesPerRow), 0);
-  vec4 a1_111 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(1,1,1), childGridSize, childSlicesPerRow), 0);
+  vec4 a1_000 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(0,0,0), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a1_001 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(0,0,1), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a1_010 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(0,1,0), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a1_011 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(0,1,1), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a1_100 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(1,0,0), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a1_101 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(1,0,1), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a1_110 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(1,1,0), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a1_111 = texelFetch(u_previousLevelA1, voxelToTexel(childBase + ivec3(1,1,1), u_childGridSize, u_childSlicesPerRow), 0);
   
   // Fetch A2 (second moments: xz, yz) from all 8 children
-  vec4 a2_000 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(0,0,0), childGridSize, childSlicesPerRow), 0);
-  vec4 a2_001 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(0,0,1), childGridSize, childSlicesPerRow), 0);
-  vec4 a2_010 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(0,1,0), childGridSize, childSlicesPerRow), 0);
-  vec4 a2_011 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(0,1,1), childGridSize, childSlicesPerRow), 0);
-  vec4 a2_100 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(1,0,0), childGridSize, childSlicesPerRow), 0);
-  vec4 a2_101 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(1,0,1), childGridSize, childSlicesPerRow), 0);
-  vec4 a2_110 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(1,1,0), childGridSize, childSlicesPerRow), 0);
-  vec4 a2_111 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(1,1,1), childGridSize, childSlicesPerRow), 0);
+  vec4 a2_000 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(0,0,0), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a2_001 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(0,0,1), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a2_010 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(0,1,0), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a2_011 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(0,1,1), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a2_100 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(1,0,0), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a2_101 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(1,0,1), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a2_110 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(1,1,0), u_childGridSize, u_childSlicesPerRow), 0);
+  vec4 a2_111 = texelFetch(u_previousLevelA2, voxelToTexel(childBase + ivec3(1,1,1), u_childGridSize, u_childSlicesPerRow), 0);
   
   // Aggregate: sum all 8 children for each attachment
   fragA0 = a0_000 + a0_001 + a0_010 + a0_011 + a0_100 + a0_101 + a0_110 + a0_111;
