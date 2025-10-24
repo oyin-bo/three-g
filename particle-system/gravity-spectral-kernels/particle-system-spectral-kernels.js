@@ -80,7 +80,17 @@ export class ParticleSystemSpectralKernels {
     // PM grid configuration
     this.gridSize = this.options.gridSize;
     this.slicesPerRow = Math.ceil(Math.sqrt(this.gridSize));
-    this.textureSize = this.gridSize * this.slicesPerRow;
+    
+    // For spectral method, we pack 3D grid into 2D texture using Z-slice layout.
+    // Mathematical property: when slicesPerRow = ceil(sqrt(gridSize)):
+    //   sliceRows = ceil(gridSize / slicesPerRow) ≈ ceil(sqrt(gridSize)) ≈ slicesPerRow
+    // Therefore textures naturally work out square:
+    //   textureWidth = gridSize × slicesPerRow
+    //   textureHeight = gridSize × sliceRows ≈ gridSize × slicesPerRow
+    // This is intentional - the formula ensures efficient square texture packing.
+    this.textureWidth3D = this.gridSize * this.slicesPerRow;
+    this.sliceRows3D = Math.ceil(this.gridSize / this.slicesPerRow);
+    this.textureHeight3D = this.gridSize * this.sliceRows3D;
 
     // Check WebGL2 support
     const colorBufferFloat = this.gl.getExtension('EXT_color_buffer_float');
@@ -140,16 +150,33 @@ export class ParticleSystemSpectralKernels {
     ];
     const fourPiG = 4 * Math.PI * this.options.gravityStrength;
 
+    // Create shared texture objects to wire kernels together
+    // These prevent auto-creation of textures inside kernels
+    // Textures are square: (gridSize×slicesPerRow) × (gridSize×sliceRows)
+    // where sliceRows ≈ slicesPerRow due to sqrt formula
+    this.massGridTexture = createTextureR32F(this.gl, this.textureWidth3D, this.textureHeight3D);
+    this.densitySpectrumTexture = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
+    this.potentialSpectrumTexture = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
+    this.forceSpectrumXTexture = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
+    this.forceSpectrumYTexture = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
+    this.forceSpectrumZTexture = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
+    this.forceGridXTexture = createTextureR32F(this.gl, this.textureWidth3D, this.textureHeight3D);
+    this.forceGridYTexture = createTextureR32F(this.gl, this.textureWidth3D, this.textureHeight3D);
+    this.forceGridZTexture = createTextureR32F(this.gl, this.textureWidth3D, this.textureHeight3D);
+    this.forceTextureOut = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
+
     // 1. Deposit kernel
     this.depositKernel = new KDeposit({
       gl: this.gl,
+      inPosition: this.positionTexture,
+      outMassGrid: this.massGridTexture,
       particleCount: this.options.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureSize,
-      worldBounds: this.options.worldBounds,
+      textureSize: this.textureWidth3D,
+      worldBounds: /** @type {any} */ (this.options.worldBounds),
       assignment: this.options.assignment,
       disableFloatBlend: this.disableFloatBlend
     });
@@ -157,18 +184,22 @@ export class ParticleSystemSpectralKernels {
     // 2. Forward FFT kernel
     this.fftForwardKernel = new KFFT({
       gl: this.gl,
+      inReal: this.massGridTexture,
+      outComplex: this.densitySpectrumTexture,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureSize,
+      textureSize: this.textureWidth3D,
       inverse: false
     });
 
     // 3. Poisson solver kernel    
     this.poissonKernel = new KPoisson({
       gl: this.gl,
+      inDensitySpectrum: this.densitySpectrumTexture,
+      outPotentialSpectrum: this.potentialSpectrumTexture,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureSize,
+      textureSize: this.textureWidth3D,
       gravitationalConstant: fourPiG,
       worldSize: /** @type {[number, number, number]} */ (worldSize),
       assignment: this.options.assignment
@@ -177,34 +208,44 @@ export class ParticleSystemSpectralKernels {
     // 4. Gradient kernel
     this.gradientKernel = new KGradient({
       gl: this.gl,
+      inPotentialSpectrum: this.potentialSpectrumTexture,
+      outForceSpectrumX: this.forceSpectrumXTexture,
+      outForceSpectrumY: this.forceSpectrumYTexture,
+      outForceSpectrumZ: this.forceSpectrumZTexture,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureSize,
+      textureSize: this.textureWidth3D,
       worldSize: /** @type {[number, number, number]} */ (worldSize)
     });
 
     // 5. Inverse FFT kernels (one per axis)
     this.fftInverseX = new KFFT({
       gl: this.gl,
+      inComplex: this.forceSpectrumXTexture,
+      outReal: this.forceGridXTexture,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureSize,
+      textureSize: this.textureWidth3D,
       inverse: true
     });
 
     this.fftInverseY = new KFFT({
       gl: this.gl,
+      inComplex: this.forceSpectrumYTexture,
+      outReal: this.forceGridYTexture,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureSize,
+      textureSize: this.textureWidth3D,
       inverse: true
     });
 
     this.fftInverseZ = new KFFT({
       gl: this.gl,
+      inComplex: this.forceSpectrumZTexture,
+      outReal: this.forceGridZTexture,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureSize,
+      textureSize: this.textureWidth3D,
       inverse: true
     });
 
@@ -216,7 +257,7 @@ export class ParticleSystemSpectralKernels {
       particleTexHeight: this.textureHeight,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      worldBounds: this.options.worldBounds
+      worldBounds: /** @type {any} */ (this.options.worldBounds)
     });
 
     // 7. Integration kernels (reuse from monopole)
@@ -386,6 +427,48 @@ function createTexture2D(gl, width, height, internalFormat, type) {
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0,
     fmt === gl.R32F ? gl.RED : gl.RGBA, tp, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  return texture;
+}
+
+/**
+ * Create R32F single-channel texture
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ */
+function createTextureR32F(gl, width, height) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, width, height, 0, gl.RED, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  return texture;
+}
+
+/**
+ * Create RG32F complex-number texture
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ */
+function createComplexTexture(gl, width, height) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, width, height, 0, gl.RG, gl.FLOAT, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

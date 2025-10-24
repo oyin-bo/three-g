@@ -10,6 +10,14 @@
 import pmDepositVertSrc from './shaders/pm-deposit.vert.js';
 import pmDepositFragSrc from './shaders/pm-deposit.frag.js';
 
+// Debug: log imports
+console.log('KDeposit shader imports:', {
+  vertType: typeof pmDepositVertSrc,
+  fragType: typeof pmDepositFragSrc,
+  vertLength: pmDepositVertSrc?.length,
+  fragLength: pmDepositFragSrc?.length
+});
+
 export class KDeposit {
   /**
    * @param {{
@@ -60,6 +68,10 @@ export class KDeposit {
     // Float blend flag
     this.disableFloatBlend = options.disableFloatBlend || false;
     
+    // Validate shader sources
+    if (!pmDepositVertSrc) throw new Error('Vertex shader source is undefined');
+    if (!pmDepositFragSrc) throw new Error('Fragment shader source is undefined');
+    
     // Compile and link shader program
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
     if (!vert) throw new Error('Failed to create vertex shader');
@@ -68,7 +80,7 @@ export class KDeposit {
     if (!this.gl.getShaderParameter(vert, this.gl.COMPILE_STATUS)) {
       const info = this.gl.getShaderInfoLog(vert);
       this.gl.deleteShader(vert);
-      throw new Error(`Vertex shader compile failed: ${info}`);
+      throw new Error(`Vertex shader compile failed: ${info || 'no error log'}`);
     }
 
     const frag = this.gl.createShader(this.gl.FRAGMENT_SHADER);
