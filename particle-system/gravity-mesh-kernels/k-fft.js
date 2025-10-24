@@ -151,10 +151,11 @@ export class KFFT {
       in vec2 v_uv;
       out vec4 outColor;
       uniform sampler2D u_complexTexture;
+      uniform float u_normalizeInverse;
 
       void main() {
         vec2 complexValue = texture(u_complexTexture, v_uv).rg;
-        float realPart = complexValue.r;
+        float realPart = complexValue.r * u_normalizeInverse;
         outColor = vec4(realPart, 0.0, 0.0, realPart);
       }
     `;

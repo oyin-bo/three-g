@@ -132,9 +132,10 @@ export class KFFT {
       in vec2 v_uv;
       out vec4 outColor;
       uniform sampler2D u_complexTexture;
+      uniform float u_normalizeInverse;  // Apply 1/N normalization factor
       void main() {
         vec2 complex = texture(u_complexTexture, v_uv).rg;
-        float realPart = complex.r;
+        float realPart = complex.r * u_normalizeInverse;
         outColor = vec4(realPart, 0.0, 0.0, 0.0);
       }
     `;
@@ -302,6 +303,9 @@ export class KFFT {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.workingTexture);
     gl.uniform1i(gl.getUniformLocation(this.complexToRealProgram, 'u_complexTexture'), 0);
+    // Apply normalization: 1/N³ = (1/N)³ for inverse FFT
+    const normalizeInverse = 1.0 / (this.gridSize * this.gridSize * this.gridSize);
+    gl.uniform1f(gl.getUniformLocation(this.complexToRealProgram, 'u_normalizeInverse'), normalizeInverse);
     gl.bindVertexArray(this.quadVAO);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
