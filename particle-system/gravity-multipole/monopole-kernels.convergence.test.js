@@ -157,7 +157,6 @@ test('monopole-kernels.convergence: smaller timestep improves accuracy', async (
  * Simple check that physics is working at all before running convergence tests
  */
 test('monopole-kernels.convergence: basic physics simulation works', async () => {
-  return;
   const { canvas, gl } = createTestCanvas();
   
   const initialPositions = new Float32Array(8);
@@ -252,26 +251,6 @@ test('monopole-kernels.convergence: basic physics simulation works', async () =>
     return pixelData[3]; // Mass is in the 'w' component
   };
 
-  // Detailed diagnostic: mass of each particle's voxel at each aggregation level
-  const particleLevelMasses = (() => {
-    let report = '\nParticle Voxel Masses per Level:\n';
-    for (let level = 0; level < system.numLevels; level++) {
-      const p0_mass = getMassAtLevel(initial.p0.position, level);
-      const p1_mass = getMassAtLevel(initial.p1.position, level);
-      report += `  Level ${level} (gridSize=${system.levelConfigs[level].gridSize}): P0 Mass=${p0_mass.toFixed(3)}, P1 Mass=${p1_mass.toFixed(3)}\n`;
-    }
-    return report;
-  })();
-
-  system.dispose();
-  canvas.remove();
-
-  const posChanged = Math.abs(final.p0.position[0] - initial.p0.position[0]) > 1e-6;
-  const velChanged = Math.abs(final.p0.velocity[0] - initial.p0.velocity[0]) > 1e-6;
-
-  /** @type {(vec: number[]) => string} */
-  const formatVec = (vec) => `[${vec.map((v) => v.toFixed(3)).join(',')}]`;
-
   // Enhanced diagnostic: show texture dimensions and level configs
   const levelConfigDiag = (() => {
     let diag = '\n  Level Configuration and Mass Propagation:\n';
@@ -297,6 +276,15 @@ test('monopole-kernels.convergence: basic physics simulation works', async () =>
     }
     return diag;
   })();
+
+  system.dispose();
+  canvas.remove();
+
+  const posChanged = Math.abs(final.p0.position[0] - initial.p0.position[0]) > 1e-6;
+  const velChanged = Math.abs(final.p0.velocity[0] - initial.p0.velocity[0]) > 1e-6;
+
+  /** @type {(vec: number[]) => string} */
+  const formatVec = (vec) => `[${vec.map((v) => v.toFixed(3)).join(',')}]`;
 
   const report = `\n\nInitial State:\n` +
     `  P0 (mass ${p0_mass.toFixed(1)}): pos=${formatVec(initial.p0.position)}, vel=${formatVec(initial.p0.velocity)}, voxel=[${initialVoxels.p0.join(',')}]\n` +
