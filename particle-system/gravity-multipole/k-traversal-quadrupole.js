@@ -36,19 +36,19 @@ export class KTraversalQuadrupole {
     this.inPosition = (options.inPosition || options.inPosition === null)
       ? options.inPosition
       : createTextureRGBA32F(this.gl, options.particleTexWidth || 0, options.particleTexHeight || 0);
-    
+
     this.inLevelA0 = (options.inLevelA0 || options.inLevelA0 === null)
       ? options.inLevelA0
       : [];
-    
+
     this.inLevelA1 = (options.inLevelA1 || options.inLevelA1 === null)
       ? options.inLevelA1
       : [];
-    
+
     this.inLevelA2 = (options.inLevelA2 || options.inLevelA2 === null)
       ? options.inLevelA2
       : [];
-    
+
     this.outForce = (options.outForce || options.outForce === null)
       ? options.outForce
       : createTextureRGBA32F(this.gl, options.particleTexWidth || 0, options.particleTexHeight || 0);
@@ -59,6 +59,12 @@ export class KTraversalQuadrupole {
 
     // Octree configuration
     this.numLevels = options.numLevels || 7;
+    // CRITICAL: Cap numLevels at 4 because buildTraversalQuadrupoleShader limits to 4 levels
+    // (3 arrays × 4 levels = 12 texture units, staying under WebGL2 minimum of 16)
+    if (this.numLevels > 4) {
+      console.warn(`KTraversalQuadrupole: capping numLevels from ${this.numLevels} to 4 (texture unit limit)`);
+      this.numLevels = 4;
+    }
     this.levelConfigs = options.levelConfigs || [];
 
     // World bounds
@@ -288,7 +294,9 @@ export class KTraversalQuadrupole {
 
 /** @param {number} levelCount */
 function buildTraversalQuadrupoleShader(levelCount) {
-  const maxL = Math.max(1, Math.min(levelCount | 0, 8));
+  // Clamp to 4 levels max to stay within 16 texture unit limit (3×4=12 samplers)
+  // WebGL2 guarantees minimum of 16 texture image units for fragment shaders
+  const maxL = Math.max(1, Math.min(levelCount | 0, 4));
   const decls =
     /** @param {string} prefix */
     (prefix) => Array.from(

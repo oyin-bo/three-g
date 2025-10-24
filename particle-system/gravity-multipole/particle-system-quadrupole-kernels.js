@@ -67,6 +67,7 @@ export class ParticleSystemQuadrupoleKernels {
 
     // Octree configuration
     this.numLevels = 7;
+    // CRITICAL: Will be capped to 4 in KTraversalQuadrupole due to texture unit limits
     this.octreeGridSize = 64;
     this.octreeSlicesPerRow = 8;
     this.L0Size = this.octreeGridSize * this.octreeSlicesPerRow;

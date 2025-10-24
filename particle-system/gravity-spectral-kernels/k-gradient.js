@@ -27,22 +27,22 @@ export class KGradient {
    */
   constructor(options) {
     this.gl = options.gl;
-    
+
     // Resource slots
     this.inPotentialSpectrum = (options.inPotentialSpectrum || options.inPotentialSpectrum === null) ? options.inPotentialSpectrum : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
     this.outForceSpectrumX = (options.outForceSpectrumX || options.outForceSpectrumX === null) ? options.outForceSpectrumX : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
     this.outForceSpectrumY = (options.outForceSpectrumY || options.outForceSpectrumY === null) ? options.outForceSpectrumY : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
     this.outForceSpectrumZ = (options.outForceSpectrumZ || options.outForceSpectrumZ === null) ? options.outForceSpectrumZ : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
-    
+
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || 8;
     this.textureSize = options.textureSize || (this.gridSize * this.slicesPerRow);
-    
+
     // World size
-    this.worldSize = options.worldSize || [100.0, 100.0, 100.0];
-    
-    // Compile and link shader program
+    this.worldSize = options.worldSize || [4, 4, 4];
+
+    // Compile shader program
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
     if (!vert) throw new Error('Failed to create vertex shader');
     this.gl.shaderSource(vert, fsQuadVert);
@@ -50,7 +50,7 @@ export class KGradient {
     if (!this.gl.getShaderParameter(vert, this.gl.COMPILE_STATUS)) {
       const info = this.gl.getShaderInfoLog(vert);
       this.gl.deleteShader(vert);
-      throw new Error(`Vertex shader compile failed: ${info}`);
+      throw new Error(`Vertex shader compile failed: ${info || 'no error log'}`);
     }
 
     const frag = this.gl.createShader(this.gl.FRAGMENT_SHADER);
@@ -84,90 +84,90 @@ export class KGradient {
     const buffer = this.gl.createBuffer();
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
     const quadVertices = new Float32Array([
-      -1, -1,  1, -1,  -1, 1,  1, 1
+      -1, -1, 1, -1, -1, 1, 1, 1
     ]);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, quadVertices, this.gl.STATIC_DRAW);
     this.gl.enableVertexAttribArray(0);
     this.gl.vertexAttribPointer(0, 2, this.gl.FLOAT, false, 0, 0);
     this.gl.bindVertexArray(null);
     this.quadVAO = quadVAO;
-    
+
     // Create framebuffers (one per axis)
     this.outFramebufferX = this.gl.createFramebuffer();
     this.outFramebufferY = this.gl.createFramebuffer();
     this.outFramebufferZ = this.gl.createFramebuffer();
-    
+
     /** @type {{ x: WebGLTexture, y: WebGLTexture, z: WebGLTexture } | null} */
     this._fboShadow = null;
   }
-  
+
   /**
    * Run the kernel (synchronous)
    */
   run() {
     const gl = this.gl;
-    
+
     if (!this.inPotentialSpectrum || !this.outForceSpectrumX || !this.outForceSpectrumY || !this.outForceSpectrumZ) {
       throw new Error('KGradient: missing required textures');
     }
-    
+
     gl.useProgram(this.program);
-    
+
     // Configure framebuffers if needed
-    if (!this._fboShadow || 
-        this._fboShadow.x !== this.outForceSpectrumX ||
-        this._fboShadow.y !== this.outForceSpectrumY ||
-        this._fboShadow.z !== this.outForceSpectrumZ) {
-      
+    if (!this._fboShadow ||
+      this._fboShadow.x !== this.outForceSpectrumX ||
+      this._fboShadow.y !== this.outForceSpectrumY ||
+      this._fboShadow.z !== this.outForceSpectrumZ) {
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebufferX);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outForceSpectrumX, 0);
       let status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
       if (status !== gl.FRAMEBUFFER_COMPLETE) throw new Error(`Framebuffer X incomplete: ${status}`);
-      
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebufferY);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outForceSpectrumY, 0);
       status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
       if (status !== gl.FRAMEBUFFER_COMPLETE) throw new Error(`Framebuffer Y incomplete: ${status}`);
-      
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebufferZ);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outForceSpectrumZ, 0);
       status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
       if (status !== gl.FRAMEBUFFER_COMPLETE) throw new Error(`Framebuffer Z incomplete: ${status}`);
-      
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      
-      this._fboShadow = { 
-        x: this.outForceSpectrumX, 
-        y: this.outForceSpectrumY, 
-        z: this.outForceSpectrumZ 
+
+      this._fboShadow = {
+        x: this.outForceSpectrumX,
+        y: this.outForceSpectrumY,
+        z: this.outForceSpectrumZ
       };
     }
 
     gl.viewport(0, 0, this.textureSize, this.textureSize);
-    
+
     // Setup GL state
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
     gl.colorMask(true, true, true, true);
-    
+
     // Bind input potential spectrum
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.inPotentialSpectrum);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_potentialSpectrum'), 0);
-    
+
     // Set common uniforms
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldSize'),
       this.worldSize[0], this.worldSize[1], this.worldSize[2]);
-    
+
     // Compute gradient for each axis
     const axes = [
       { index: 0, framebuffer: this.outFramebufferX },
       { index: 1, framebuffer: this.outFramebufferY },
       { index: 2, framebuffer: this.outFramebufferZ }
     ];
-    
+
     for (const axis of axes) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, axis.framebuffer);
       gl.uniform1i(gl.getUniformLocation(this.program, 'u_axis'), axis.index);
@@ -175,14 +175,14 @@ export class KGradient {
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       gl.bindVertexArray(null);
     }
-    
+
     // Cleanup
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, null);
     gl.useProgram(null);
   }
-  
+
   /**
    * Dispose all resources
    */

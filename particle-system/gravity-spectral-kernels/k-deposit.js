@@ -37,7 +37,7 @@ export class KDeposit {
    */
   constructor(options) {
     this.gl = options.gl;
-    
+
     // Resource slots - follow kernel contract: (truthy || === null) ? use : create
     this.inPosition = (options.inPosition || options.inPosition === null)
       ? options.inPosition
@@ -45,33 +45,31 @@ export class KDeposit {
     this.outMassGrid = (options.outMassGrid || options.outMassGrid === null)
       ? options.outMassGrid
       : createTextureR32F(this.gl, options.textureSize || 64, options.textureSize || 64);
-    
+
     // Particle configuration
     this.particleCount = options.particleCount || 0;
     this.particleTexWidth = options.particleTexWidth || 0;
     this.particleTexHeight = options.particleTexHeight || 0;
-    
+
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || 8;
     this.textureSize = options.textureSize || (this.gridSize * this.slicesPerRow);
-    
+
     // World bounds
     this.worldBounds = options.worldBounds || {
       min: [-2, -2, -2],
       max: [2, 2, 2]
     };
-    
+
     // Assignment method: NGP (0) or CIC (1)
     this.assignment = options.assignment || 'CIC';
-    
+
     // Float blend flag
     this.disableFloatBlend = options.disableFloatBlend || false;
-    
+
     // Validate shader sources
-    if (!pmDepositVertSrc) throw new Error('Vertex shader source is undefined');
-    if (!pmDepositFragSrc) throw new Error('Fragment shader source is undefined');
-    
+
     // Compile and link shader program
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
     if (!vert) throw new Error('Failed to create vertex shader');
@@ -120,25 +118,25 @@ export class KDeposit {
     this.gl.vertexAttribPointer(0, 1, this.gl.FLOAT, false, 0, 0);
     this.gl.bindVertexArray(null);
     this.particleVAO = particleVAO;
-    
+
     // Create framebuffer
     this.outFramebuffer = this.gl.createFramebuffer();
     /** @type {WebGLTexture | null} */
     this._fboShadow = null;
   }
-  
+
   /**
    * Run the kernel (synchronous)
    */
   run() {
     const gl = this.gl;
-    
+
     if (!this.inPosition || !this.outMassGrid) {
       throw new Error('KDeposit: missing required textures');
     }
-    
+
     gl.useProgram(this.program);
-    
+
     // Configure framebuffer if needed
     if (this._fboShadow !== this.outMassGrid) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
@@ -156,18 +154,18 @@ export class KDeposit {
     // Bind output framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
     gl.viewport(0, 0, this.textureSize, this.textureSize);
-    
+
     // Clear grid
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    
+
     // Setup GL state
     gl.disable(gl.DEPTH_TEST);
     gl.depthMask(false);
     gl.disable(gl.CULL_FACE);
     gl.disable(gl.SCISSOR_TEST);
     gl.colorMask(true, true, true, true);
-    
+
     // Enable additive blending for mass accumulation
     if (!this.disableFloatBlend) {
       gl.enable(gl.BLEND);
@@ -176,12 +174,12 @@ export class KDeposit {
     } else {
       gl.disable(gl.BLEND);
     }
-    
+
     // Bind position texture
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.inPosition);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_positionTexture'), 0);
-    
+
     // Set uniforms
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'),
       this.particleTexWidth, this.particleTexHeight);
@@ -192,10 +190,10 @@ export class KDeposit {
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMax'),
       this.worldBounds.max[0], this.worldBounds.max[1], this.worldBounds.max[2]);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_particleSize'), 1.0);
-    
+
     const assignmentMode = this.assignment === 'NGP' ? 0 : 1;
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_assignment'), assignmentMode);
-    
+
     // Draw particles
     gl.bindVertexArray(this.particleVAO);
     if (assignmentMode === 1) {
@@ -223,7 +221,7 @@ export class KDeposit {
     gl.useProgram(null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
-  
+
   /**
    * Dispose all resources
    */

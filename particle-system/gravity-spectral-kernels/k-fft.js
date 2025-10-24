@@ -30,21 +30,21 @@ export class KFFT {
    */
   constructor(options) {
     this.gl = options.gl;
-    
+
     // Resource slots
     this.inReal = (options.inReal || options.inReal === null) ? options.inReal : createTextureRGBA32F(this.gl, options.gridSize || 64, options.gridSize || 64);
     this.inComplex = (options.inComplex || options.inComplex === null) ? options.inComplex : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
     this.outComplex = (options.outComplex || options.outComplex === null) ? options.outComplex : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
     this.outReal = (options.outReal || options.outReal === null) ? options.outReal : createTextureRGBA32F(this.gl, options.gridSize || 64, options.gridSize || 64);
-    
+
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || 8;
     this.textureSize = options.textureSize || (this.gridSize * this.slicesPerRow);
-    
+
     // FFT direction
     this.inverse = options.inverse || false;
-    
+
     // Compile FFT shader program
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
     if (!vert) throw new Error('Failed to create vertex shader');
@@ -53,7 +53,7 @@ export class KFFT {
     if (!this.gl.getShaderParameter(vert, this.gl.COMPILE_STATUS)) {
       const info = this.gl.getShaderInfoLog(vert);
       this.gl.deleteShader(vert);
-      throw new Error(`Vertex shader compile failed: ${info}`);
+      throw new Error(`Vertex shader compile failed: ${info || 'no error log'}`);
     }
 
     const frag = this.gl.createShader(this.gl.FRAGMENT_SHADER);
@@ -91,7 +91,7 @@ export class KFFT {
         outColor = vec4(mass, 0.0, 0.0, 0.0);
       }
     `;
-    
+
     const vert2 = this.gl.createShader(this.gl.VERTEX_SHADER);
     if (!vert2) throw new Error('Failed to create vertex shader');
     this.gl.shaderSource(vert2, fsQuadVert);
@@ -138,7 +138,7 @@ export class KFFT {
         outColor = vec4(realPart, 0.0, 0.0, 0.0);
       }
     `;
-    
+
     const vert3 = this.gl.createShader(this.gl.VERTEX_SHADER);
     if (!vert3) throw new Error('Failed to create vertex shader');
     this.gl.shaderSource(vert3, fsQuadVert);
@@ -180,21 +180,21 @@ export class KFFT {
     const buffer = this.gl.createBuffer();
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
     const quadVertices = new Float32Array([
-      -1, -1,  1, -1,  -1, 1,  1, 1
+      -1, -1, 1, -1, -1, 1, 1, 1
     ]);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, quadVertices, this.gl.STATIC_DRAW);
     this.gl.enableVertexAttribArray(0);
     this.gl.vertexAttribPointer(0, 2, this.gl.FLOAT, false, 0, 0);
     this.gl.bindVertexArray(null);
     this.quadVAO = quadVAO;
-    
+
     // Create internal ping-pong textures for FFT stages
     this.workingTexture = this._createComplexTexture();
     this.pingPongTexture = this._createComplexTexture();
     this.workingFramebuffer = this.gl.createFramebuffer();
     this.pingPongFramebuffer = this.gl.createFramebuffer();
   }
-  
+
   /**
    * Create an RG32F complex texture
    * @private
@@ -212,7 +212,7 @@ export class KFFT {
     gl.bindTexture(gl.TEXTURE_2D, null);
     return tex;
   }
-  
+
   /**
    * Run the kernel (synchronous)
    * 
@@ -221,25 +221,25 @@ export class KFFT {
    */
   run() {
     const gl = this.gl;
-    
+
     if (this.inverse) {
       this._runInverse();
     } else {
       this._runForward();
     }
   }
-  
+
   /**
    * Forward FFT: real → complex spectrum
    * @private
    */
   _runForward() {
     const gl = this.gl;
-    
+
     if (!this.inReal || !this.outComplex) {
       throw new Error('KFFT forward: missing inReal or outComplex');
     }
-    
+
     // Step 1: Convert real to complex
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.workingFramebuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.workingTexture, 0);
@@ -253,45 +253,45 @@ export class KFFT {
     gl.bindVertexArray(this.quadVAO);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
-    
+
     // Step 2: Perform 3D FFT
     this._perform3DFFT(false);
-    
+
     // Step 3: Copy result to output
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.workingFramebuffer);
     gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.workingTexture, 0);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.pingPongFramebuffer);
     gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outComplex, 0);
-    gl.blitFramebuffer(0, 0, this.textureSize, this.textureSize, 
-                      0, 0, this.textureSize, this.textureSize,
-                      gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.blitFramebuffer(0, 0, this.textureSize, this.textureSize,
+      0, 0, this.textureSize, this.textureSize,
+      gl.COLOR_BUFFER_BIT, gl.NEAREST);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
   }
-  
+
   /**
    * Inverse FFT: complex spectrum → real
    * @private
    */
   _runInverse() {
     const gl = this.gl;
-    
+
     if (!this.inComplex || !this.outReal) {
       throw new Error('KFFT inverse: missing inComplex or outReal');
     }
-    
+
     // Step 1: Copy input to working texture
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.pingPongFramebuffer);
     gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.inComplex, 0);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.workingFramebuffer);
     gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.workingTexture, 0);
     gl.blitFramebuffer(0, 0, this.textureSize, this.textureSize,
-                      0, 0, this.textureSize, this.textureSize,
-                      gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    
+      0, 0, this.textureSize, this.textureSize,
+      gl.COLOR_BUFFER_BIT, gl.NEAREST);
+
     // Step 2: Perform inverse 3D FFT
     this._perform3DFFT(true);
-    
+
     // Step 3: Extract real part and write to output
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.pingPongFramebuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outReal, 0);
@@ -305,10 +305,10 @@ export class KFFT {
     gl.bindVertexArray(this.quadVAO);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
-    
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
-  
+
   /**
    * Perform separable 3D FFT using butterfly stages
    * @private
@@ -317,42 +317,42 @@ export class KFFT {
   _perform3DFFT(inverse) {
     const gl = this.gl;
     const numStages = Math.log2(this.gridSize);
-    
+
     gl.useProgram(this.fftProgram);
     gl.viewport(0, 0, this.textureSize, this.textureSize);
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
-    
+
     // Set common uniforms
     gl.uniform1f(gl.getUniformLocation(this.fftProgram, 'u_gridSize'), this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.fftProgram, 'u_slicesPerRow'), this.slicesPerRow);
     gl.uniform1i(gl.getUniformLocation(this.fftProgram, 'u_inverse'), inverse ? 1 : 0);
-    
+
     // Perform FFT along each axis (X, Y, Z)
     for (let axis = 0; axis < 3; axis++) {
       gl.uniform1i(gl.getUniformLocation(this.fftProgram, 'u_axis'), axis);
-      
+
       for (let stage = 0; stage < numStages; stage++) {
         gl.uniform1i(gl.getUniformLocation(this.fftProgram, 'u_stage'), stage);
-        
+
         // Ping-pong between working and pingPong textures
         const isEven = stage % 2 === 0;
         const srcTex = isEven ? this.workingTexture : this.pingPongTexture;
         const dstTex = isEven ? this.pingPongTexture : this.workingTexture;
         const dstFBO = isEven ? this.pingPongFramebuffer : this.workingFramebuffer;
-        
+
         gl.bindFramebuffer(gl.FRAMEBUFFER, dstFBO);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dstTex, 0);
-        
+
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, srcTex);
         gl.uniform1i(gl.getUniformLocation(this.fftProgram, 'u_spectrum'), 0);
-        
+
         gl.bindVertexArray(this.quadVAO);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.bindVertexArray(null);
       }
-      
+
       // After each axis, ensure result is in workingTexture for next axis
       const finalIsInPingPong = (numStages % 2) !== 0;
       if (finalIsInPingPong) {
@@ -361,16 +361,16 @@ export class KFFT {
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.workingFramebuffer);
         gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.workingTexture, 0);
         gl.blitFramebuffer(0, 0, this.textureSize, this.textureSize,
-                          0, 0, this.textureSize, this.textureSize,
-                          gl.COLOR_BUFFER_BIT, gl.NEAREST);
+          0, 0, this.textureSize, this.textureSize,
+          gl.COLOR_BUFFER_BIT, gl.NEAREST);
       }
     }
-    
+
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
-  
+
   /**
    * Dispose all resources
    */

@@ -42,7 +42,7 @@ export class KPoisson {
     this.gravitationalConstant = options.gravitationalConstant !== undefined ? options.gravitationalConstant : (4.0 * Math.PI * 0.0003);
     this.worldSize = options.worldSize || [100.0, 100.0, 100.0];
     this.assignment = options.assignment || 'CIC';
-    this.poissonUseDiscrete = options.poissonUseDiscrete !== undefined ? options.poissonUseDiscrete : true;
+    this.poissonUseDiscrete = options.poissonUseDiscrete !== undefined ? options.poissonUseDiscrete : false;
     this.treePMSigma = options.treePMSigma || 0.0;
     
     // Compile and link shader program
@@ -53,7 +53,7 @@ export class KPoisson {
     if (!this.gl.getShaderParameter(vert, this.gl.COMPILE_STATUS)) {
       const info = this.gl.getShaderInfoLog(vert);
       this.gl.deleteShader(vert);
-      throw new Error(`Vertex shader compile failed: ${info}`);
+      throw new Error(`Vertex shader compile failed: ${info || 'no error log'}`);
     }
 
     const frag = this.gl.createShader(this.gl.FRAGMENT_SHADER);
