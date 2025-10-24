@@ -58,13 +58,8 @@ export class KTraversalQuadrupole {
     this.particleTexHeight = options.particleTexHeight || 0;
 
     // Octree configuration
-    this.numLevels = options.numLevels || 7;
-    // CRITICAL: Cap numLevels at 4 because buildTraversalQuadrupoleShader limits to 4 levels
-    // (3 arrays × 4 levels = 12 texture units, staying under WebGL2 minimum of 16)
-    if (this.numLevels > 4) {
-      console.warn(`KTraversalQuadrupole: capping numLevels from ${this.numLevels} to 4 (texture unit limit)`);
-      this.numLevels = 4;
-    }
+    this.numLevels = options.numLevels || 4;
+    if (this.numLevels > 4) throw new Error('KTraversalQuadrupole: numLevels cannot exceed 4 due to texture unit limits');
     this.levelConfigs = options.levelConfigs || [];
 
     // World bounds
