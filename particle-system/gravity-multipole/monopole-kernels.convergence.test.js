@@ -41,14 +41,36 @@ function readParticleData(system, index) {
   const posTex = system.positionTexture;
   const velTex = system.velocityTexture;
   
+  if (!posTex || !velTex) {
+    throw new Error('Position or velocity texture not available');
+  }
+  
   const fbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, posTex, 0);
+  
+  // Check framebuffer status
+  const posStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (posStatus !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    throw new Error(`Position framebuffer incomplete: status=${posStatus}`);
+  }
+  
   const posPixels = new Float32Array(4);
   gl.readPixels(x, y, 1, 1, gl.RGBA, gl.FLOAT, posPixels);
   
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, velTex, 0);
+  
+  // Check framebuffer status for velocity
+  const velStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (velStatus !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    throw new Error(`Velocity framebuffer incomplete: status=${velStatus}`);
+  }
+  
   const velPixels = new Float32Array(4);
   gl.readPixels(x, y, 1, 1, gl.RGBA, gl.FLOAT, velPixels);
   
@@ -305,13 +327,15 @@ test('monopole-kernels.convergence: theta parameter controls approximation quali
     return (seed >>> 0) / 4294967296;
   }
   
-  // Create cluster at origin + test particle far away
+  // Create cluster at position [-3, 0, 0] + test particle at [3, 0, 0] 
+  // This places them far enough apart that they won't be in the same near-field neighborhood
   for (let i = 0; i < particleCount - 1; i++) {
     const theta = random() * 2 * Math.PI;
     const phi = Math.acos(2 * random() - 1);
-    const r = random() * 0.5;
+    const r = random() * 0.3;  // Smaller cluster radius
     
-    positions[i * 4 + 0] = r * Math.sin(phi) * Math.cos(theta);
+    // Cluster centered at [-3, 0, 0]
+    positions[i * 4 + 0] = -3.0 + r * Math.sin(phi) * Math.cos(theta);
     positions[i * 4 + 1] = r * Math.sin(phi) * Math.sin(theta);
     positions[i * 4 + 2] = r * Math.cos(phi);
     positions[i * 4 + 3] = 1.0;
@@ -322,9 +346,10 @@ test('monopole-kernels.convergence: theta parameter controls approximation quali
     velocities[i * 4 + 3] = 0;
   }
   
-  // Test particle far from cluster
+  // Test particle at [3, 0, 0] - far from cluster
+  // Distance: 6 units = ~27 L0 voxels, well outside 3x3x3 near-field neighborhood
   const testIdx = particleCount - 1;
-  positions[testIdx * 4 + 0] = 5.0;
+  positions[testIdx * 4 + 0] = 3.0;
   positions[testIdx * 4 + 1] = 0;
   positions[testIdx * 4 + 2] = 0;
   positions[testIdx * 4 + 3] = 1.0;
@@ -366,26 +391,30 @@ test('monopole-kernels.convergence: theta parameter controls approximation quali
   }
   
   // Lower theta (more accurate) should give different result than higher theta
+  // theta=0.9 (coarse, fast): accepts distant approximations, less accurate
+  // theta=0.2 (fine, slow): only accepts very close/small voxels, more accurate
   const diff_high_mid = Math.abs(testParticleFinalX[1] - testParticleFinalX[0]);
   const diff_mid_low = Math.abs(testParticleFinalX[2] - testParticleFinalX[1]);
   
   // First check if simulation is running at all
-  const particleMoved = Math.abs(testParticleFinalX[0] - 5.0) > 1e-6;
+  // Particle should move toward cluster (leftward, toward -3)
+  const particleMoved = Math.abs(testParticleFinalX[0] - 3.0) > 0.01;
   
   if (!particleMoved) {
-    assert.fail(`Simulation not working: test particle did not move from initial position 5.0. Results: ${testParticleFinalX.map(x => x.toFixed(4)).join(', ')}`);
+    assert.fail(`Simulation not working: test particle did not move from initial position 3.0. Results: ${testParticleFinalX.map(x => x.toFixed(4)).join(', ')}`);
   }
   
-  // At least one difference should be measurable (allow very small if particles barely move)
+  // At least one difference should be measurable
+  // Coarser theta should allow faster convergence or different approximation quality
   const maxDiff = Math.max(diff_high_mid, diff_mid_low);
   
-  assert.ok(maxDiff > 0.001 || maxDiff < 1e-10, 
+  assert.ok(maxDiff > 0.01, 
     `Theta should affect results: theta=0.9→${testParticleFinalX[0].toFixed(4)}, 0.5→${testParticleFinalX[1].toFixed(4)}, 0.2→${testParticleFinalX[2].toFixed(4)}`);
   
-  // All should show particle moved toward cluster
+  // All should show particle moved toward cluster (leftward)
   for (let i = 0; i < 3; i++) {
-    assert.ok(testParticleFinalX[i] < 5.0, 
-      `Particle should move toward cluster (theta=${thetaValues[i]}): ${testParticleFinalX[i].toFixed(3)} < 5.0`);
+    assert.ok(testParticleFinalX[i] < 3.0, 
+      `Particle should move toward cluster at -3 (theta=${thetaValues[i]}): ${testParticleFinalX[i].toFixed(3)} < 3.0`);
   }
 });
 

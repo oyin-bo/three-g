@@ -104,6 +104,8 @@ test('KPyramidBuild: single voxel 2x2x2 reduction', async () => {
     outSize: parentTextureSize,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2
@@ -199,6 +201,8 @@ test('KPyramidBuild: multiple voxel 4x4x4 to 2x2x2 reduction', async () => {
     outSize: parentTextureSize,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2
@@ -260,6 +264,8 @@ test('KPyramidBuild: zero input produces zero output', async () => {
     outSize: parentTextureSize,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2
@@ -311,6 +317,8 @@ test('KPyramidBuild: uniform input scales correctly', async () => {
     outSize: parentTextureSize,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2
@@ -370,6 +378,8 @@ test('KPyramidBuild: large grid 8x8x8 to 4x4x4 reduction', async () => {
     outSize: parentTextureSize,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2
@@ -457,6 +467,8 @@ test('KPyramidBuild: sparse input with some empty voxels', async () => {
     outSize: parentTextureSize,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2
@@ -518,6 +530,8 @@ test('KPyramidBuild: negative and large values', async () => {
     outSize: parentTextureSize,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2

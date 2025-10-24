@@ -119,6 +119,8 @@ test('KPyramidBuild: full pyramid chain L0→L1→L2', async () => {
     outSize: l1TexWidth,
     outGridSize: l1GridSize,
     outSlicesPerRow: l1SlicesPerRow,
+    inGridSize: l0GridSize,
+    inSlicesPerRow: l0SlicesPerRow,
     inA0: l0A0,
     inA1: l0A1,
     inA2: l0A2
@@ -140,6 +142,8 @@ test('KPyramidBuild: full pyramid chain L0→L1→L2', async () => {
     outSize: l2TexWidth,
     outGridSize: l2GridSize,
     outSlicesPerRow: l2SlicesPerRow,
+    inGridSize: l1GridSize,
+    inSlicesPerRow: l1SlicesPerRow,
     inA0: /** @type {WebGLTexture} */ (l1OutA0Texture),
     inA1: /** @type {WebGLTexture} */ (l1OutA1Texture),
     inA2: /** @type {WebGLTexture} */ (l1OutA2Texture)
@@ -179,6 +183,8 @@ test('KPyramidBuild: 4x4x4 child maps single voxel into 2x2x2 parent', async () 
     outSize: parentTextureSize,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2
@@ -227,6 +233,8 @@ test('KPyramidBuild: 8x8x8 child aggregates siblings into 4x4x4 parent', async (
     outSize: parentTextureSize,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2
@@ -281,6 +289,8 @@ test('KPyramidBuild: real system sizes 64x64x64 to 32x32x32', async () => {
     outSize: l1TexWidth,
     outGridSize: l1GridSize,
     outSlicesPerRow: l1SlicesPerRow,
+    inGridSize: l0GridSize,
+    inSlicesPerRow: l0SlicesPerRow,
     inA0: l0A0,
     inA1: l0A1,
     inA2: l0A2
@@ -334,6 +344,8 @@ test('KPyramidBuild: verify slice layout with non-square slicesPerRow', async ()
     outSize: parentTexWidth,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2
@@ -378,6 +390,8 @@ test('KPyramidBuild: multiple sequential runs produce consistent results', async
     outSize: parentTextureSize,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2
@@ -432,6 +446,8 @@ test('KPyramidBuild: additive blending accumulates correctly', async () => {
     outSize: parentTextureSize,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2
@@ -475,6 +491,8 @@ test('KPyramidBuild: framebuffer attachment is valid', async () => {
     outSize: parentTextureSize,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2
@@ -536,6 +554,8 @@ test('KPyramidBuild: blending state accumulates without overwriting', async () =
     outSize: parentTextureSize,
     outGridSize: parentGridSize,
     outSlicesPerRow: parentSlicesPerRow,
+    inGridSize: childGridSize,
+    inSlicesPerRow: childSlicesPerRow,
     inA0: childA0,
     inA1: childA1,
     inA2: childA2

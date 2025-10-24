@@ -725,12 +725,11 @@ test('KPyramidBuild.realistic: odd voxel coordinates map correctly', async () =>
   if (!kernel.outA0) throw new Error('kernel.outA0 should exist');
   const l1Result = readTexture(gl, kernel.outA0, l1Width, l1Height);
 
-  // Test 1: Min voxel [0,0,0] → [0,0,0] (mass 1.0)
+  // Both particles map to same parent voxel [22,16,10]
+  // L0 [45,33,21] (mass 7.0) → L1 [22,16,10]
+  // L0 [44,32,20] (mass 11.0) → L1 [22,16,10]
+  // So this parent should have accumulated both masses
   const oddMass = readVoxel(l1Result, 22, 16, 10, l1GridSize, l1SlicesPerRow)[3];
-  assertClose(oddMass, 7.0, 1e-4, 'Odd coordinate particle should map correctly');
-
-  // [44,32,20] → [22,16,10] (same parent!)
-  // So this parent should have both masses
   assertClose(oddMass, 7.0 + 11.0, 1e-4, 'Both particles should accumulate in same parent voxel');
 
   disposeKernel(kernel);
