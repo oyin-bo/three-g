@@ -327,6 +327,7 @@ export class KFFT {
     gl.uniform1f(gl.getUniformLocation(this.fftProgram, 'u_gridSize'), this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.fftProgram, 'u_slicesPerRow'), this.slicesPerRow);
     gl.uniform1i(gl.getUniformLocation(this.fftProgram, 'u_inverse'), inverse ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(this.fftProgram, 'u_numStages'), numStages);
 
     // Perform FFT along each axis (X, Y, Z)
     for (let axis = 0; axis < 3; axis++) {

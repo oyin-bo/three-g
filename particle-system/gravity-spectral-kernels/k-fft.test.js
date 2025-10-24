@@ -118,7 +118,7 @@ function readComplexTexture(gl, texture, width, height) {
 test('KFFT: forward FFT preserves total energy for uniform field', async () => {
   const gl = getGL();
   
-  const gridSize = 8;
+  const gridSize = 4;
   const slicesPerRow = 2;
   const textureSize = gridSize * slicesPerRow;
   
@@ -143,7 +143,7 @@ test('KFFT: forward FFT preserves total energy for uniform field', async () => {
   // DC component (index 0) should contain sum of input
   const dcReal = result[0];
   const dcImag = result[1];
-  const expectedSum = gridSize * gridSize * gridSize; // 8³ = 512
+  const expectedSum = gridSize * gridSize * gridSize; // 4³ = 64
   
   assertClose(dcReal, expectedSum, 1.0, 'DC component real part should equal sum');
   assertClose(dcImag, 0, 0.1, 'DC component imaginary part should be near zero');
@@ -160,13 +160,13 @@ test('KFFT: forward FFT preserves total energy for uniform field', async () => {
 test('KFFT: forward FFT spike creates non-zero spectrum', async () => {
   const gl = getGL();
   
-  const gridSize = 8;
+  const gridSize = 4;
   const slicesPerRow = 2;
   const textureSize = gridSize * slicesPerRow;
   
   // Single spike at center
   const inReal = fillGridTexture(gl, gridSize, slicesPerRow, (x, y, z) => {
-    return x === 4 && y === 4 && z === 4 ? 1.0 : 0.0;
+    return x === 2 && y === 2 && z === 2 ? 1.0 : 0.0;
   });
   
   const outComplex = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
