@@ -18,8 +18,8 @@ import { KIntegratePosition } from '../gravity-multipole/k-integrate-position.js
 
 export class ParticleSystemMeshKernels {
   /**
-   * @param {WebGL2RenderingContext} gl
    * @param {{
+   *   gl: WebGL2RenderingContext,
    *   particleData: { positions: Float32Array, velocities?: Float32Array|null, colors?: Uint8Array|null },
    *   particleCount?: number,
    *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
@@ -39,10 +39,10 @@ export class ParticleSystemMeshKernels {
    *   }
    * }} options
    */
-  constructor(gl, options) {
-    this.gl = gl;
-    
-    if (!(gl instanceof WebGL2RenderingContext)) {
+  constructor(options) {
+    this.gl = options.gl;
+
+    if (!(this.gl instanceof WebGL2RenderingContext)) {
       throw new Error('ParticleSystemMeshKernels requires WebGL2RenderingContext');
     }
     
