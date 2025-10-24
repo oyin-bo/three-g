@@ -26,7 +26,6 @@ export class KTraversalQuadrupole {
    *   theta?: number,
    *   gravityStrength?: number,
    *   softening?: number,
-   *   enableQuadrupoles?: boolean,
    *   useOccupancyMasks?: boolean
    * }} options
    */
@@ -72,7 +71,6 @@ export class KTraversalQuadrupole {
     this.theta = options.theta !== undefined ? options.theta : 0.5;
     this.gravityStrength = options.gravityStrength !== undefined ? options.gravityStrength : 0.0003;
     this.softening = options.softening !== undefined ? options.softening : 0.2;
-    this.enableQuadrupoles = options.enableQuadrupoles !== undefined ? options.enableQuadrupoles : true;
     this.useOccupancyMasks = options.useOccupancyMasks !== undefined ? options.useOccupancyMasks : false;
 
     // Create shader program with quadrupole shader
@@ -143,13 +141,11 @@ export class KTraversalQuadrupole {
       throw new Error(`KTraversalQuadrupole: expected ${this.numLevels} level A0 textures, got ${this.inLevelA0.length}`);
     }
 
-    if (this.enableQuadrupoles) {
-      if (this.inLevelA1.length < this.numLevels) {
-        throw new Error(`KTraversalQuadrupole: expected ${this.numLevels} level A1 textures, got ${this.inLevelA1.length}`);
-      }
-      if (this.inLevelA2.length < this.numLevels) {
-        throw new Error(`KTraversalQuadrupole: expected ${this.numLevels} level A2 textures, got ${this.inLevelA2.length}`);
-      }
+    if (this.inLevelA1.length < this.numLevels) {
+      throw new Error(`KTraversalQuadrupole: expected ${this.numLevels} level A1 textures, got ${this.inLevelA1.length}`);
+    }
+    if (this.inLevelA2.length < this.numLevels) {
+      throw new Error(`KTraversalQuadrupole: expected ${this.numLevels} level A2 textures, got ${this.inLevelA2.length}`);
     }
 
     gl.useProgram(this.program);
@@ -195,20 +191,18 @@ export class KTraversalQuadrupole {
       gl.uniform1i(gl.getUniformLocation(this.program, `u_levelA0_${i}`), 1 + i);
     }
 
-    // Bind A1 textures if quadrupoles enabled
-    if (this.enableQuadrupoles) {
-      for (let i = 0; i < maxLevels; i++) {
-        gl.activeTexture(gl.TEXTURE8 + i);
-        gl.bindTexture(gl.TEXTURE_2D, this.inLevelA1[i]);
-        gl.uniform1i(gl.getUniformLocation(this.program, `u_levelA1_${i}`), 8 + i);
-      }
+    // Bind A1 textures
+    for (let i = 0; i < maxLevels; i++) {
+      gl.activeTexture(gl.TEXTURE8 + i);
+      gl.bindTexture(gl.TEXTURE_2D, this.inLevelA1[i]);
+      gl.uniform1i(gl.getUniformLocation(this.program, `u_levelA1_${i}`), 8 + i);
+    }
 
-      // Bind A2 textures
-      for (let i = 0; i < maxLevels; i++) {
-        gl.activeTexture(gl.TEXTURE16 + i);
-        gl.bindTexture(gl.TEXTURE_2D, this.inLevelA2[i]);
-        gl.uniform1i(gl.getUniformLocation(this.program, `u_levelA2_${i}`), 16 + i);
-      }
+    // Bind A2 textures
+    for (let i = 0; i < maxLevels; i++) {
+      gl.activeTexture(gl.TEXTURE15 + i);
+      gl.bindTexture(gl.TEXTURE_2D, this.inLevelA2[i]);
+      gl.uniform1i(gl.getUniformLocation(this.program, `u_levelA2_${i}`), 15 + i);
     }
 
     // Set level configuration uniforms
@@ -248,7 +242,6 @@ export class KTraversalQuadrupole {
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_G'), this.gravityStrength);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_softening'), this.softening);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_numLevels'), this.numLevels);
-    gl.uniform1i(gl.getUniformLocation(this.program, 'u_enableQuadrupoles'), this.enableQuadrupoles ? 1 : 0);
 
     // Draw
     gl.bindVertexArray(this.quadVAO);
@@ -262,15 +255,13 @@ export class KTraversalQuadrupole {
       gl.activeTexture(gl.TEXTURE1 + i);
       gl.bindTexture(gl.TEXTURE_2D, null);
     }
-    if (this.enableQuadrupoles) {
-      for (let i = 0; i < maxLevels; i++) {
-        gl.activeTexture(gl.TEXTURE8 + i);
-        gl.bindTexture(gl.TEXTURE_2D, null);
-      }
-      for (let i = 0; i < maxLevels; i++) {
-        gl.activeTexture(gl.TEXTURE16 + i);
-        gl.bindTexture(gl.TEXTURE_2D, null);
-      }
+    for (let i = 0; i < maxLevels; i++) {
+      gl.activeTexture(gl.TEXTURE8 + i);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    }
+    for (let i = 0; i < maxLevels; i++) {
+      gl.activeTexture(gl.TEXTURE15 + i);
+      gl.bindTexture(gl.TEXTURE_2D, null);
     }
     gl.useProgram(null);
 
@@ -324,7 +315,6 @@ uniform vec3 u_worldMin;
 uniform vec3 u_worldMax;
 uniform float u_softening;
 uniform float u_G;
-uniform bool u_enableQuadrupoles;
 
 out vec4 fragColor;`;
 
@@ -400,7 +390,7 @@ void main() {
             float distCubed = distSq * sqrt(distSq);
             vec3 monopoleForce = -u_G * mass * r / distCubed;
             totalForce += monopoleForce;
-            if (u_enableQuadrupoles && level > 0) {
+            if (level > 0) {
               vec4 a1 = sampleLevelA1(level, texCoord);
               vec4 a2 = sampleLevelA2(level, texCoord);
               float qxx = a1.r - com.x * com.x * mass;

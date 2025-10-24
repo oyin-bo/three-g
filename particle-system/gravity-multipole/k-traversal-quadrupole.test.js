@@ -78,8 +78,7 @@ test('KTraversalQuadrupole: single particle no force', async () => {
     worldBounds,
     theta: 0.5,
     gravityStrength: 0.0003,
-    softening: 0.2,
-    enableQuadrupoles: true
+    softening: 0.2
   });
   
   kernel.run();
@@ -239,8 +238,7 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
     worldBounds,
     theta: 0.5,
     gravityStrength: 0.0003,
-    softening: 0.2,
-    enableQuadrupoles: true
+    softening: 0.2
   });
   
   kernelQuad.run();
@@ -266,8 +264,7 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
     worldBounds,
     theta: 0.5,
     gravityStrength: 0.0003,
-    softening: 0.2,
-    enableQuadrupoles: false
+    softening: 0.2
   });
   
   kernelMono.run();
@@ -344,8 +341,7 @@ test('KTraversalQuadrupole: multiple hierarchy levels', async () => {
     worldBounds,
     theta: 0.5,
     gravityStrength: 0.0003,
-    softening: 0.2,
-    enableQuadrupoles: true
+    softening: 0.2
   });
   
   kernel.run();

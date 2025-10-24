@@ -16,8 +16,8 @@ import { KTraversalQuadrupole } from './k-traversal-quadrupole.js';
 
 export class ParticleSystemQuadrupoleKernels {
   /**
-   * @param {WebGL2RenderingContext} gl
    * @param {{
+   *  gl: WebGL2RenderingContext,
    *   particleData: { positions: Float32Array, velocities?: Float32Array|null, colors?: Uint8Array|null },
    *   particleCount?: number,
    *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
@@ -28,23 +28,22 @@ export class ParticleSystemQuadrupoleKernels {
    *   damping?: number,
    *   maxSpeed?: number,
    *   maxAccel?: number,
-   *   enableQuadrupoles?: boolean,
    *   useOccupancyMasks?: boolean
    * }} options
    */
-  constructor(gl, options) {
-    this.gl = gl;
-    
-    if (!(gl instanceof WebGL2RenderingContext)) {
+  constructor(options) {
+    this.gl = options.gl;
+
+    if (!(this.gl instanceof WebGL2RenderingContext)) {
       throw new Error('ParticleSystemQuadrupoleKernels requires WebGL2RenderingContext');
     }
-    
+
     if (!options.particleData) {
       throw new Error('ParticleSystemQuadrupoleKernels requires particleData with positions');
     }
-    
+
     const particleCount = options.particleData.positions.length / 4;
-    
+
     this.options = {
       particleCount,
       worldBounds: options.worldBounds || { min: [-4, -4, 0], max: [4, 4, 2] },
@@ -55,18 +54,17 @@ export class ParticleSystemQuadrupoleKernels {
       damping: options.damping || 0.0,
       maxSpeed: options.maxSpeed || 2.0,
       maxAccel: options.maxAccel || 1.0,
-      enableQuadrupoles: options.enableQuadrupoles !== undefined ? options.enableQuadrupoles : true,
       useOccupancyMasks: options.useOccupancyMasks !== undefined ? options.useOccupancyMasks : false
     };
-    
+
     this.particleData = options.particleData;
     this.frameCount = 0;
-    
+
     // Calculate texture dimensions
     this.textureWidth = Math.ceil(Math.sqrt(particleCount));
     this.textureHeight = Math.ceil(particleCount / this.textureWidth);
     this.actualTextureSize = this.textureWidth * this.textureHeight;
-    
+
     // Octree configuration
     this.numLevels = 7;
     this.octreeGridSize = 64;
@@ -165,7 +163,9 @@ export class ParticleSystemQuadrupoleKernels {
         inA2: null,
         outSize: this.levelConfigs[i + 1].size,
         outGridSize: this.levelConfigs[i + 1].gridSize,
-        outSlicesPerRow: this.levelConfigs[i + 1].slicesPerRow
+        outSlicesPerRow: this.levelConfigs[i + 1].slicesPerRow,
+        inGridSize: this.levelConfigs[i].gridSize,
+        inSlicesPerRow: this.levelConfigs[i].slicesPerRow
       }));
     }
 
@@ -185,7 +185,6 @@ export class ParticleSystemQuadrupoleKernels {
       theta: this.options.theta,
       gravityStrength: this.options.gravityStrength,
       softening: this.options.softening,
-      enableQuadrupoles: this.options.enableQuadrupoles,
       useOccupancyMasks: this.options.useOccupancyMasks
     });
 
@@ -216,29 +215,29 @@ export class ParticleSystemQuadrupoleKernels {
       dt: this.options.dt
     });
   }
-  
+
   /**
    * Step the simulation forward one frame
    */
   step() {
     // 1. Build octree
     this._buildOctree();
-    
+
     // 2. Calculate forces
     this._calculateForces();
-    
+
     // 3. Integrate physics
     this._integratePhysics();
-    
+
     this.frameCount++;
   }
-  
+
   _buildOctree() {
     // Aggregate particles into L0
-  if (!this.aggregatorKernel) throw new Error('Aggregator kernel missing');
-  if (!this.positionTexture) throw new Error('Position texture missing');
+    if (!this.aggregatorKernel) throw new Error('Aggregator kernel missing');
+    if (!this.positionTexture) throw new Error('Position texture missing');
 
-  this.aggregatorKernel.inPosition = this.positionTexture;
+    this.aggregatorKernel.inPosition = this.positionTexture;
     this.aggregatorKernel.run();
 
     // Wire and run pyramid kernels sequentially
@@ -258,23 +257,23 @@ export class ParticleSystemQuadrupoleKernels {
       prevOut = { a0: kernel.outA0, a1: kernel.outA1, a2: kernel.outA2 };
     }
   }
-  
+
   _calculateForces() {
     // Run tree traversal to compute forces using quadrupole moments
-  if (!this.traversalKernel) throw new Error('Traversal kernel missing');
-  if (!this.positionTexture) throw new Error('Position texture missing');
+    if (!this.traversalKernel) throw new Error('Traversal kernel missing');
+    if (!this.positionTexture) throw new Error('Position texture missing');
 
     // Build arrays of A0, A1, A2 textures per level (aggregator + pyramid outputs)
     const levelA0s = [];
     const levelA1s = [];
     const levelA2s = [];
-    
+
     if (this.aggregatorKernel && this.aggregatorKernel.outA0) {
       levelA0s.push(this.aggregatorKernel.outA0);
       levelA1s.push(this.aggregatorKernel.outA1);
       levelA2s.push(this.aggregatorKernel.outA2);
     }
-    
+
     for (const k of this.pyramidKernels) {
       if (k && k.outA0) {
         levelA0s.push(k.outA0);
@@ -283,7 +282,7 @@ export class ParticleSystemQuadrupoleKernels {
       }
     }
 
-  this.traversalKernel.inPosition = this.positionTexture;
+    this.traversalKernel.inPosition = this.positionTexture;
     this.traversalKernel.inLevelA0 = levelA0s;
     this.traversalKernel.inLevelA1 = levelA1s;
     this.traversalKernel.inLevelA2 = levelA2s;
@@ -294,7 +293,7 @@ export class ParticleSystemQuadrupoleKernels {
       this.velocityKernel.inForce = this.traversalKernel.outForce || null;
     }
   }
-  
+
   _integratePhysics() {
     // Update velocities
     if (!this.velocityKernel) throw new Error('Velocity kernel missing');
@@ -327,22 +326,22 @@ export class ParticleSystemQuadrupoleKernels {
       this.positionTextureWrite = tmp;
     }
   }
-  
 
-  
+
+
   /**
    * Dispose all resources
    */
   dispose() {
     const gl = this.gl;
-    
+
     // Dispose kernels
     if (this.aggregatorKernel) this.aggregatorKernel.dispose();
     if (this.pyramidKernels) this.pyramidKernels.forEach(k => k.dispose());
     if (this.traversalKernel) this.traversalKernel.dispose();
     if (this.velocityKernel) this.velocityKernel.dispose();
     if (this.positionKernel) this.positionKernel.dispose();
-    
+
     // Clean up textures
     if (this.positionTexture) {
       gl.deleteTexture(this.positionTexture);
