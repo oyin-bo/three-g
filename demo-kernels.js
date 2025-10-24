@@ -331,7 +331,8 @@ function recreatePhysicsAndMesh() {
   try {
     switch (calculationMethod) {
       case 'mesh': {
-        system = new ParticleSystemMeshKernels(gl, {
+        system = new ParticleSystemMeshKernels({
+          gl,
           particleData,
           worldBounds,
           mesh: {
@@ -349,7 +350,8 @@ function recreatePhysicsAndMesh() {
         break;
       }
       case 'spectral': {
-        system = new ParticleSystemSpectralKernels(gl, {
+        system = new ParticleSystemSpectralKernels({
+          gl,
           particleData,
           worldBounds,
           gridSize: 64,
