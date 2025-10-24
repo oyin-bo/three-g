@@ -309,12 +309,14 @@ test('KDeposit.diagnostic: voxel coordinate mapping', async () => {
   const particleTexHeight = 3;
   
   // Test positions at grid corners and center
+  // Grid bounds: [-2, 2] in each dimension, 4³ cells (size 1.0 each)
+  // Need to ensure particles are strictly inside world bounds
   const positions = new Float32Array([
-    -2.0, -2.0, -2.0, 1.0,  // Corner 0
-     2.0,  2.0,  2.0, 1.0,  // Corner 7
+    -1.9, -1.9, -1.9, 1.0,  // Near corner 0
+     1.9,  1.9,  1.9, 1.0,  // Near corner 7
      0.0,  0.0,  0.0, 1.0,  // Center
-    -1.0,  1.0, -1.0, 1.0,  // Corner 2
-     1.0, -1.0,  1.0, 1.0,  // Corner 5
+    -0.5,  0.5, -0.5, 1.0,  // Offset 1
+     0.5, -0.5,  0.5, 1.0,  // Offset 2
     // Padding
      0.0,  0.0,  0.0, 0.0
   ]);
@@ -362,7 +364,7 @@ test('KDeposit.diagnostic: voxel coordinate mapping', async () => {
   
   // Should have exactly 5 non-zero voxels (one per particle with NGP)
   assert.strictEqual(nonZeroVoxels, particleCount, 
-    `NGP deposit should have ${particleCount} non-zero voxels, got ${nonZeroVoxels}`);
+    `NGP deposit should have ${particleCount} non-zero voxels, got ${nonZeroVoxels}, voxels=${Array.from(voxelMap.keys()).join(';')}, masses=${Array.from(voxelMap.values()).map(m => m.toFixed(3)).join(',')}`);
   
   assertClose(totalMass, 5.0, 0.01, `Total mass should be 5.0, got ${totalMass}`);
   
