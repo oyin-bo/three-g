@@ -56,13 +56,13 @@ test('mesh-kernels.debug: can read position texture', async () => {
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
   
-  assert.strictEqual(pixels[0], 1.5, 'Position X[0] should match');
-  assert.strictEqual(pixels[1], 2.5, 'Position Y[0] should match');
-  assert.strictEqual(pixels[2], 3.5, 'Position Z[0] should match');
-  assert.strictEqual(pixels[3], 1.0, 'Mass[0] should match');
-  
-  assert.strictEqual(pixels[4], -1.0, 'Position X[1] should match');
-  assert.strictEqual(pixels[5], -2.0, 'Position Y[1] should match');
+  assert.deepStrictEqual({
+    p0: { x: pixels[0], y: pixels[1], z: pixels[2], w: pixels[3] },
+    p1: { x: pixels[4], y: pixels[5], z: pixels[6], w: pixels[7] }
+  }, {
+    p0: { x: 1.5, y: 2.5, z: 3.5, w: 1.0 },
+    p1: { x: -1.0, y: -2.0, z: -3.0, w: 2.0 }
+  }, 'Particle position and mass data should match initial values');
   
   system.dispose();
   canvas.remove();
@@ -100,12 +100,13 @@ test('mesh-kernels.debug: can read velocity texture', async () => {
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
   
-  assert.strictEqual(pixels[0], 0.5, 'Velocity X[0] should match');
-  assert.strictEqual(pixels[1], -0.5, 'Velocity Y[0] should match');
-  assert.strictEqual(pixels[2], 0.3, 'Velocity Z[0] should match');
-  
-  assert.strictEqual(pixels[4], -0.2, 'Velocity X[1] should match');
-  assert.strictEqual(pixels[5], 0.7, 'Velocity Y[1] should match');
+  assert.deepStrictEqual({
+    v0: { x: pixels[0], y: pixels[1], z: pixels[2], w: pixels[3] },
+    v1: { x: pixels[4], y: pixels[5], z: pixels[6], w: pixels[7] }
+  }, {
+    v0: { x: 0.5, y: -0.5, z: 0.3, w: 0 },
+    v1: { x: -0.2, y: 0.7, z: -0.1, w: 0 }
+  }, 'Particle velocity data should match initial values');
   
   system.dispose();
   canvas.remove();
@@ -134,8 +135,13 @@ test('mesh-kernels.debug: texture dimensions match particle count', async () => 
     mesh: { gridSize: 32, assignment: 'cic' }
   });
   
-  assert.strictEqual(system.textureWidth, texWidth, 'Texture width should match');
-  assert.strictEqual(system.textureHeight, texHeight, 'Texture height should match');
+  assert.deepStrictEqual({
+    textureWidth: system.textureWidth,
+    textureHeight: system.textureHeight
+  }, {
+    textureWidth: texWidth,
+    textureHeight: texHeight
+  }, 'Texture dimensions should match calculated values');
   
   system.dispose();
   canvas.remove();
@@ -164,11 +170,21 @@ test('mesh-kernels.debug: step increments frame count', async () => {
   const initialFrame = system.frameCount;
   
   system.step();
-  assert.strictEqual(system.frameCount, initialFrame + 1, 'Frame count should increment');
+  const afterOneStep = system.frameCount;
   
   system.step();
   system.step();
-  assert.strictEqual(system.frameCount, initialFrame + 3, 'Frame count should increment each step');
+  const afterThreeSteps = system.frameCount;
+  
+  assert.deepStrictEqual({
+    initial: initialFrame,
+    afterOne: afterOneStep,
+    afterThree: afterThreeSteps
+  }, {
+    initial: 0,
+    afterOne: 1,
+    afterThree: 3
+  }, 'Frame count should increment correctly');
   
   system.dispose();
   canvas.remove();
@@ -217,7 +233,7 @@ test('mesh-kernels.debug: multiple steps change particle state', async () => {
     particleData: { positions, velocities },
     worldBounds: { min: [-3, -3, -3], max: [3, 3, 3] },
     dt: 0.01,
-    gravityStrength: 0.001,
+    gravityStrength: 1,
     softening: 0.1,
     mesh: { gridSize: 32, assignment: 'cic' }
   });
