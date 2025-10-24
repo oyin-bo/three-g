@@ -267,6 +267,7 @@ export class KFFT {
     const uGridSize = gl.getUniformLocation(this.fftProgram, 'u_gridSize');
     const uSlicesPerRow = gl.getUniformLocation(this.fftProgram, 'u_slicesPerRow');
     const uInverse = gl.getUniformLocation(this.fftProgram, 'u_inverse');
+    const uNumStages = gl.getUniformLocation(this.fftProgram, 'u_numStages');
     const uAxis = gl.getUniformLocation(this.fftProgram, 'u_axis');
     const uStage = gl.getUniformLocation(this.fftProgram, 'u_stage');
     const uInputTex = gl.getUniformLocation(this.fftProgram, 'u_inputTexture');
@@ -274,6 +275,7 @@ export class KFFT {
     gl.uniform1f(uGridSize, this.gridSize);
     gl.uniform1f(uSlicesPerRow, this.slicesPerRow);
     gl.uniform1i(uInverse, this.inverse ? 1 : 0);
+    gl.uniform1i(uNumStages, numStages);
     
     for (let axis = 0; axis < 3; axis++) {
       gl.uniform1i(uAxis, axis);

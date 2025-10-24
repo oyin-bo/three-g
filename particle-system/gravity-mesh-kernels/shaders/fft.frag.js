@@ -16,6 +16,7 @@ out vec4 outColor;
 uniform sampler2D u_inputTexture;
 uniform int u_axis;          // 0=X, 1=Y, 2=Z
 uniform int u_stage;         // FFT stage (0 to log2(N)-1)
+uniform int u_numStages;     // Total number of stages (log2(gridSize))
 uniform int u_inverse;       // 0=forward, 1=inverse
 uniform float u_gridSize;    // Grid dimension (e.g., 64)
 uniform float u_slicesPerRow;
@@ -137,7 +138,7 @@ void main() {
   // For 3D FFT, we normalize by N once per axis (total N³)
   // Convention: forward unnormalized, inverse applies 1/N³ = (1/N)³
   // This ensures IFFT(FFT(f)) = f for round-trip consistency
-  if (u_inverse == 1 && u_stage == int(log2(u_gridSize)) - 1) {
+  if (u_inverse == 1 && u_stage == u_numStages - 1) {
     result /= u_gridSize;
   }
   
