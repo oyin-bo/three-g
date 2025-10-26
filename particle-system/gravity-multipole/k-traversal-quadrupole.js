@@ -541,9 +541,9 @@ void main() {
   float eps = max(u_softening, 1e-6);
 
   // Barnes-Hut hierarchical traversal: coarsest to finest
-  // Performance: scan all voxels at the coarsest level; at finer levels, only
-  // a small neighborhood around the particle's voxel. MAC determines whether
-  // to accept a cell's contribution or defer refinement to finer levels.
+  // Performance: scan all voxels at the coarsest level; at finer levels, scan
+  // a theta-driven neighborhood to ensure all cells that could fail MAC are covered.
+  // This guarantees refinement works correctly without scanning the entire grid.
   for (int level = min(u_numLevels - 1, ${maxL - 1}); level >= 0; level--) {
     float gridSize = u_gridSizes[level];
     float slicesPerRow = u_slicesPerRow[level];
@@ -554,15 +554,18 @@ void main() {
     relPos = clamp(relPos, vec3(0.0), vec3(1.0 - (1.0 / gridSize)));
     ivec3 myVoxel = ivec3(floor(relPos * gridSize));
     
-    // Hierarchical traversal: check ALL voxels at coarsest level, only neighbors at finer levels
-  bool isCoarsestLevel = (level == u_numLevels - 1);
-  int nb = 1; // neighbor radius for finer levels
-  int startX = isCoarsestLevel ? 0 : max(0, myVoxel.x - nb);
-  int startY = isCoarsestLevel ? 0 : max(0, myVoxel.y - nb);
-  int startZ = isCoarsestLevel ? 0 : max(0, myVoxel.z - nb);
-  int endX = isCoarsestLevel ? int(gridSize) - 1 : min(int(gridSize) - 1, myVoxel.x + nb);
-  int endY = isCoarsestLevel ? int(gridSize) - 1 : min(int(gridSize) - 1, myVoxel.y + nb);
-  int endZ = isCoarsestLevel ? int(gridSize) - 1 : min(int(gridSize) - 1, myVoxel.z + nb);
+    // Compute theta-driven neighborhood radius for correct refinement coverage.
+    // MAC fails when cellSize/dist >= theta, i.e., dist <= cellSize/theta.
+    // In voxel units (dist ~ nb*cellSize), this means nb >= 1/theta.
+    // Use ceil(1/theta) + 1 for safety margin to ensure all refinement candidates covered. (see todo)
+    bool isCoarsestLevel = (level == u_numLevels - 1);
+    int nb = isCoarsestLevel ? int(gridSize) : int(ceil(1.0 / u_theta)) + 1; // TODO: this +1 costs a lot of performance! Review and re-adjust later
+    int startX = max(0, myVoxel.x - nb);
+    int startY = max(0, myVoxel.y - nb);
+    int startZ = max(0, myVoxel.z - nb);
+    int endX = min(int(gridSize) - 1, myVoxel.x + nb);
+    int endY = min(int(gridSize) - 1, myVoxel.y + nb);
+    int endZ = min(int(gridSize) - 1, myVoxel.z + nb);
     
     for (int vz = startZ; vz <= endZ; vz++) {
       for (int vy = startY; vy <= endY; vy++) {
@@ -584,8 +587,12 @@ void main() {
           
           // MAC: check if cell is far enough to use approximation
           bool farEnough = (cellSize / (dist + eps)) < u_theta;
-          if (!farEnough) {
-            // Too close for approximation, will be refined at next level
+          
+          // At the finest level (level 0), accept all non-empty cells to avoid dropping
+          // near-field contributions (there's no finer level to refine into).
+          bool isFinestLevel = (level == 0);
+          if (!farEnough && !isFinestLevel) {
+            // Too close for approximation at this level; defer to next finer level
             continue;
           }
           
