@@ -173,12 +173,6 @@ test('KFFT: forward-inverse roundtrip recovers original (uniform field)', async 
   kernel.run();
   const afterInverse = kernel.valueOf({ pixels: false });
 
-  // Result is in kernel.real
-  // @ts-ignore
-  assert.ok(afterInverse.real, `Should capture real texture after inverse\n${afterInverse}`);
-  // @ts-ignore
-  assert.ok(afterInverse.real.real, `Should have real channel stats\n${afterInverse}`);
-
   // Check roundtrip: should recover original value
   // @ts-ignore
   assertClose(afterInverse.real.real.mean, testValue, testValue * 0.05,
