@@ -138,6 +138,15 @@ let isInitialized = false;
 // Global color texture loaded from colors array
 /** @type {WebGLTexture | null} */
 let colorTexGlobal = null;
+// Snapshot of previous GPU-resident particle state (readback)
+/** @type {{positions:Float32Array, velocities:Float32Array, masses:Float32Array, logicalCount:number, textureWidth:number, textureHeight:number}|null} */
+let previousParticleSnapshot = null;
+// Preserve the very first color bytes produced so colours remain identical
+// across subsequent recreates. This is the source-of-truth for colours.
+/** @type {Uint8Array|null} */
+let originalColorBuffer = null;
+let originalColorWidth = 0;
+let originalColorHeight = 0;
 
 // 4. Animation loop - MUST be set BEFORE recreateAll()
 outcome.animate = () => {
@@ -282,7 +291,19 @@ function updateStatus(message) {
 
 function recreateAll() {
   updateStatus("Disposing previous system...");
-  
+
+  // Capture the running system's GPU-resident particle state (positions, velocities, masses)
+  // so the next kernel system can 'take over' the same particles. This reads the
+  // active position/velocity textures directly (no external helpers).
+  if (physics) {
+    try {
+      const snap = captureParticleState(physics);
+      if (snap) previousParticleSnapshot = snap;
+    } catch (err) {
+      console.warn('[Demo Kernels] Failed to capture particle state:', err);
+    }
+  }
+
   if (physics) physics.dispose();
   if (m && m.mesh) scene.remove(m.mesh);
   if (graphModule) graphModule.dispose();
@@ -293,7 +314,7 @@ function recreateAll() {
   graphModule = null;
 
   updateStatus("Creating particle system...");
-  
+
   const result = recreatePhysicsAndMesh();
   physics = result.physics;
   m = result.m;
@@ -307,7 +328,34 @@ function recreateAll() {
 }
 
 function recreatePhysicsAndMesh() {
-  const particles = createParticles(particleCount, worldBounds);
+  // Generate default particles then overlay preserved state from a previous
+  // system snapshot (if available). This ensures overlapping indices keep
+  // their positions, masses and velocities.
+  const generated = createParticles(particleCount, worldBounds);
+  let particles = generated;
+
+  if (previousParticleSnapshot) {
+    const snap = previousParticleSnapshot;
+    const overlap = Math.min(snap.logicalCount || 0, particleCount);
+    // Create a copy so we don't mutate the generated array reference
+    particles = generated.slice();
+
+    for (let i = 0; i < overlap; i++) {
+      const pidx = i * 3;
+      particles[i] = {
+        x: snap.positions[pidx + 0],
+        y: snap.positions[pidx + 1],
+        z: snap.positions[pidx + 2],
+        mass: snap.masses[i],
+        vx: snap.velocities[pidx + 0],
+        vy: snap.velocities[pidx + 1],
+        vz: snap.velocities[pidx + 2]
+      };
+    }
+
+    // Clear snapshot after applying it once
+    previousParticleSnapshot = null;
+  }
 
   let gravityStrength = Math.random();
   gravityStrength = gravityStrength * 0.0001;
@@ -346,7 +394,7 @@ function recreatePhysicsAndMesh() {
     );
     
     // Use NEGATIVE gravity for repulsion when using graph forces
-    gravityStrength = -gravityStrength * 50.0; // Negative = repulsion
+    gravityStrength = -gravityStrength * 0.005; // Negative = repulsion
     console.log(
       `[Demo Kernels] Using negative gravity (repulsion): ${gravityStrength.toExponential(2)}`
     );
@@ -385,6 +433,13 @@ function recreatePhysicsAndMesh() {
 
     system = particleSystemKernels(kernelOptions);
     console.log(`[Demo Kernels] Created kernel system: ${calculationMethod}`);
+    // Record logical particle count provided to the kernel creator so we can
+    // match it during future readbacks/unloads.
+    try {
+      system['__logicalParticleCount'] = particles.length;
+    } catch (e) {
+      // ignore
+    }
   } catch (error) {
     console.error(`[Demo Kernels] Failed to create ${calculationMethod} system:`, error);
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -482,19 +537,46 @@ function buildColorTexture(gl, particles, textureSize, worldBounds) {
     gl.deleteTexture(colorTexGlobal);
     colorTexGlobal = null;
   }
-
   const totalTexels = textureSize.width * textureSize.height;
   const colors = new Uint8Array(totalTexels * 4);
 
-  for (let i = 0; i < totalTexels; i++) {
-    const base = i * 4;
-    const rgb = i < particles.length
-      ? encodeRGBFromBounds(particles[i].x || 0, particles[i].y || 0, particles[i].z || 0, worldBounds)
-      : 0;
-    colors[base + 0] = (rgb >> 16) & 0xff;
-    colors[base + 1] = (rgb >> 8) & 0xff;
-    colors[base + 2] = rgb & 0xff;
-    colors[base + 3] = 255;
+  // Prefer the original color buffer (first-created) to avoid recomputing
+  // colours which can drift over repeated recreates. If original buffer
+  // exists, copy its overlapping bytes and compute any remaining texels.
+  if (originalColorBuffer && originalColorWidth === textureSize.width && originalColorHeight === textureSize.height) {
+    colors.set(originalColorBuffer.subarray(0, Math.min(originalColorBuffer.length, colors.length)));
+  } else if (originalColorBuffer) {
+    // Different texture size: copy overlapping byte range
+    colors.set(originalColorBuffer.subarray(0, Math.min(originalColorBuffer.length, colors.length)));
+    for (let i = Math.floor(Math.min(originalColorBuffer.length, colors.length) / 4); i < totalTexels; i++) {
+      const base = i * 4;
+      const rgb = i < particles.length
+        ? encodeRGBFromBounds(particles[i].x || 0, particles[i].y || 0, particles[i].z || 0, worldBounds)
+        : 0;
+      colors[base + 0] = (rgb >> 16) & 0xff;
+      colors[base + 1] = (rgb >> 8) & 0xff;
+      colors[base + 2] = rgb & 0xff;
+      colors[base + 3] = 255;
+    }
+  } else {
+    for (let i = 0; i < totalTexels; i++) {
+      const base = i * 4;
+      const rgb = i < particles.length
+        ? encodeRGBFromBounds(particles[i].x || 0, particles[i].y || 0, particles[i].z || 0, worldBounds)
+        : 0;
+      colors[base + 0] = (rgb >> 16) & 0xff;
+      colors[base + 1] = (rgb >> 8) & 0xff;
+      colors[base + 2] = rgb & 0xff;
+      colors[base + 3] = 255;
+    }
+  }
+
+  // Record the original color buffer on first creation so future recreates
+  // reuse the exact bytes (avoid recomputation).
+  if (!originalColorBuffer) {
+    originalColorBuffer = colors.slice();
+    originalColorWidth = textureSize.width;
+    originalColorHeight = textureSize.height;
   }
 
   const texture = gl.createTexture();
@@ -514,4 +596,91 @@ function buildColorTexture(gl, particles, textureSize, worldBounds) {
   gl.bindTexture(gl.TEXTURE_2D, null);
 
   return texture;
+}
+
+// Read back GPU particle textures (position, velocity) directly into CPU arrays.
+// Returns arrays sized to the previous logical particle count when available.
+/** @param {any} system */
+function captureParticleState(system) {
+  if (!system || !system.gl) return null;
+  const glCtx = system.gl;
+
+  const texW = system.textureWidth || (system.getTextureSize && system.getTextureSize().width) || 0;
+  const texH = system.textureHeight || (system.getTextureSize && system.getTextureSize().height) || 0;
+  if (!texW || !texH) return null;
+
+  const totalTexels = texW * texH;
+  const posBuf = new Float32Array(totalTexels * 4);
+  const velBuf = new Float32Array(totalTexels * 4);
+
+  const prevFB = glCtx.getParameter(glCtx.FRAMEBUFFER_BINDING);
+  const fb = glCtx.createFramebuffer();
+  if (!fb) throw new Error('Failed to allocate framebuffer for particle readback');
+
+  try {
+    glCtx.bindFramebuffer(glCtx.FRAMEBUFFER, fb);
+
+    // Read positions
+    glCtx.framebufferTexture2D(glCtx.FRAMEBUFFER, glCtx.COLOR_ATTACHMENT0, glCtx.TEXTURE_2D, system.positionTexture, 0);
+    glCtx.readPixels(0, 0, texW, texH, glCtx.RGBA, glCtx.FLOAT, posBuf);
+
+    // Read velocities
+    glCtx.framebufferTexture2D(glCtx.FRAMEBUFFER, glCtx.COLOR_ATTACHMENT0, glCtx.TEXTURE_2D, system.velocityTexture, 0);
+    glCtx.readPixels(0, 0, texW, texH, glCtx.RGBA, glCtx.FLOAT, velBuf);
+  } finally {
+    glCtx.bindFramebuffer(glCtx.FRAMEBUFFER, prevFB);
+    glCtx.deleteFramebuffer(fb);
+  }
+
+  if (!system.positionTexture || !system.velocityTexture) return null;
+
+  const logicalCount = system['__logicalParticleCount'] || (system.options && system.options.particleCount) || totalTexels;
+
+  const positions = new Float32Array(logicalCount * 3);
+  const velocities = new Float32Array(logicalCount * 3);
+  const masses = new Float32Array(logicalCount);
+
+  for (let i = 0; i < logicalCount; i++) {
+    const s = i * 4;
+    const d = i * 3;
+    positions[d + 0] = posBuf[s + 0];
+    positions[d + 1] = posBuf[s + 1];
+    positions[d + 2] = posBuf[s + 2];
+    masses[i] = posBuf[s + 3];
+
+    velocities[d + 0] = velBuf[s + 0];
+    velocities[d + 1] = velBuf[s + 1];
+    velocities[d + 2] = velBuf[s + 2];
+  }
+
+  return { positions, velocities, masses, logicalCount, textureWidth: texW, textureHeight: texH };
+}
+
+/**
+ * Read back a color texture (RGBA8) into a Uint8Array.
+ * @param {WebGL2RenderingContext} glctx
+ * @param {WebGLTexture} texture
+ * @param {number} width
+ * @param {number} height
+ * @returns {Uint8Array|null}
+ */
+function captureColorTexture(glctx, texture, width, height) {
+  if (!glctx || !texture || !width || !height) return null;
+  const total = width * height;
+  const buf = new Uint8Array(total * 4);
+
+  const prevFB = glctx.getParameter(glctx.FRAMEBUFFER_BINDING);
+  const fb = glctx.createFramebuffer();
+  if (!fb) throw new Error('Failed to allocate framebuffer for color readback');
+
+  try {
+    glctx.bindFramebuffer(glctx.FRAMEBUFFER, fb);
+    glctx.framebufferTexture2D(glctx.FRAMEBUFFER, glctx.COLOR_ATTACHMENT0, glctx.TEXTURE_2D, texture, 0);
+    glctx.readPixels(0, 0, width, height, glctx.RGBA, glctx.UNSIGNED_BYTE, buf);
+  } finally {
+    glctx.bindFramebuffer(glctx.FRAMEBUFFER, prevFB);
+    glctx.deleteFramebuffer(fb);
+  }
+
+  return buf;
 }
