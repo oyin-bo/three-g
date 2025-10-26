@@ -419,9 +419,6 @@ export class ParticleSystemMeshKernels {
   
 
   
-  /**
-   * Dispose all resources
-   */
   dispose() {
     const gl = this.gl;
     

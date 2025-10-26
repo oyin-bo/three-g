@@ -267,9 +267,6 @@ A2 (quadrupole xz,yz): ${value.a2}`;
     this.renderCount = (this.renderCount || 0) + 1;
   }
   
-  /**
-   * Dispose all resources
-   */
   dispose() {
     const gl = this.gl;
 

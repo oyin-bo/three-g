@@ -243,9 +243,6 @@ potentialSpectrum: ${value.potentialSpectrum}
     
      }
 
-  /**
-   * Dispose all resources
-   */
   dispose() {
     const gl = this.gl;
 

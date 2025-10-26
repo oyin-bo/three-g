@@ -181,7 +181,7 @@ export class ParticleSystemSpectralKernels {
       disableFloatBlend: this.disableFloatBlend
     });
 
-    // 2. Forward FFT kernel
+    // 2. FFT kernel
     this.fftKernel = new KFFT({
       gl: this.gl,
       real: this.massGridTexture,
@@ -453,9 +453,6 @@ export class ParticleSystemSpectralKernels {
 
 
 
-  /**
-   * Dispose all resources
-   */
   dispose() {
     // Kernels own and dispose all their texture properties
     if (this.depositKernel) this.depositKernel.dispose();

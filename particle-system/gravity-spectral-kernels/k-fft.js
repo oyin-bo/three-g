@@ -43,11 +43,8 @@ export class KFFT {
 
     // Lean texture architecture: exactly 3 textures
     this.real = options.real || createTextureR32F(this.gl, this.textureSize, this.textureSize);
-    this.ownsReal = !options.real;
     this.complexFrom = options.complexFrom || createComplexTexture(this.gl, this.textureSize, this.textureSize);
-    this.ownsComplexFrom = !options.complexFrom;
     this.complexTo = options.complexTo || createComplexTexture(this.gl, this.textureSize, this.textureSize);
-    this.ownsComplexTo = !options.complexTo;
 
     // FFT direction
     this.inverse = options.inverse || false;
@@ -122,7 +119,7 @@ export class KFFT {
 
     return program;
   }
-  
+
   /**
    * Capture complete computational state for debugging and testing
    * @param {{pixels?: boolean}} [options] - Capture options
@@ -150,19 +147,19 @@ export class KFFT {
       inverse: this.inverse,
       renderCount: this.renderCount
     };
-    
+
     value.toString = () =>
-`KFFT(${this.gridSize}³ grid) texture=${this.textureSize}×${this.textureSize} slices=${this.slicesPerRow} inverse=${this.inverse} #${this.renderCount}
+      `KFFT(${this.gridSize}³ grid) texture=${this.textureSize}×${this.textureSize} slices=${this.slicesPerRow} inverse=${this.inverse} #${this.renderCount}
 
 real: ${value.real}
 
 complexFrom: ${value.complexFrom}
 
 → complexTo: ${value.complexTo}`;
-    
+
     return value;
   }
-  
+
   /**
    * Get human-readable string representation of kernel state
    * @returns {string} Compact summary
@@ -179,52 +176,13 @@ complexFrom: ${value.complexFrom}
    */
   run() {
     if (this.inverse) {
-      this._runInverse();
+      if (!this.complexFrom || !this.real)
+        throw new Error('KFFT inverse: missing complexFrom or real');
     } else {
-      this._runForward();
-    }
-    
-    this.renderCount = (this.renderCount || 0) + 1;
-  }
-
-  /**
-   * Forward FFT: real → complex spectrum
-   * Result ends up in complexTo
-   * @private
-   */
-  _runForward() {
-    const gl = this.gl;
-
-    if (!this.real || !this.complexTo) {
-      throw new Error('KFFT forward: missing real or complexTo');
+      if (!this.real || !this.complexTo)
+        throw new Error('KFFT forward: missing real or complexTo');
     }
 
-    // Perform 3D FFT with first stage using real-to-complex shader
-    this._perform3DFFT(false);
-  }
-
-  /**
-   * Inverse FFT: complex spectrum → real
-   * Input from complexFrom, result ends up in real
-   * @private
-   */
-  _runInverse() {
-    const gl = this.gl;
-
-    if (!this.complexFrom || !this.real) {
-      throw new Error('KFFT inverse: missing complexFrom or real');
-    }
-
-    // Perform inverse 3D FFT with last stage using complex-to-real shader
-    this._perform3DFFT(true);
-  }
-
-  /**
-   * Perform separable 3D FFT using butterfly stages
-   * @private
-   * @param {boolean} inverse
-   */
-  _perform3DFFT(inverse) {
     const gl = this.gl;
     const numStages = Math.log2(this.gridSize);
 
@@ -240,9 +198,9 @@ complexFrom: ${value.complexFrom}
 
         // Select shader program
         let program;
-        if (!inverse && isFirstStage) {
+        if (!this.inverse && isFirstStage) {
           program = this.fftProgramRealToComplex;
-        } else if (inverse && isLastStage) {
+        } else if (this.inverse && isLastStage) {
           program = this.fftProgramComplexToReal;
         } else {
           program = this.fftProgramComplexToComplex;
@@ -253,14 +211,14 @@ complexFrom: ${value.complexFrom}
         // Set common uniforms
         gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), this.gridSize);
         gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), this.slicesPerRow);
-        gl.uniform1i(gl.getUniformLocation(program, 'u_inverse'), inverse ? 1 : 0);
+        gl.uniform1i(gl.getUniformLocation(program, 'u_inverse'), this.inverse ? 1 : 0);
         gl.uniform1i(gl.getUniformLocation(program, 'u_numStages'), numStages);
         gl.uniform1i(gl.getUniformLocation(program, 'u_axis'), axis);
         gl.uniform1i(gl.getUniformLocation(program, 'u_stage'), stage);
         gl.uniform1i(gl.getUniformLocation(program, 'u_debugMode'), 0);
 
         // Special handling for first/last stages
-        if (!inverse && isFirstStage) {
+        if (!this.inverse && isFirstStage) {
           // First forward stage: read from real, write to complexTo
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, this.real);
@@ -268,7 +226,7 @@ complexFrom: ${value.complexFrom}
 
           gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebufferTo);
           gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.complexTo, 0);
-        } else if (inverse && isLastStage) {
+        } else if (this.inverse && isLastStage) {
           // Last inverse stage: read from complexFrom, write to real with normalization
           const normalizeInverse = 1.0 / (this.gridSize * this.gridSize * this.gridSize);
           gl.uniform1f(gl.getUniformLocation(program, 'u_normalizeInverse'), normalizeInverse);
@@ -283,49 +241,30 @@ complexFrom: ${value.complexFrom}
           // Middle stages: ping-pong between complexFrom and complexTo
           // After first stage of axis 0 (forward) or before last stage of axis 2 (inverse),
           // we need to track which texture has the current data
-          
-          // Strategy: 
-          // - Forward: first stage writes to complexTo, then ping-pong
-          // - Inverse: start from complexFrom, ping-pong, last stage reads from complexFrom
-          
-          const stageIndex = axis * numStages + stage;
-          let srcTex, dstTex, dstFBO;
-          
-          if (!inverse) {
-            // Forward: first stage already wrote to complexTo
-            // Subsequent stages ping-pong
-            const isEvenStage = (stageIndex - 1) % 2 === 0;
-            srcTex = isEvenStage ? this.complexTo : this.complexFrom;
-            dstTex = isEvenStage ? this.complexFrom : this.complexTo;
-            dstFBO = isEvenStage ? this.framebufferFrom : this.framebufferTo;
-          } else {
-            // Inverse: start from complexFrom, ping-pong until last stage
-            const isEvenStage = stageIndex % 2 === 0;
-            srcTex = isEvenStage ? this.complexFrom : this.complexTo;
-            dstTex = isEvenStage ? this.complexTo : this.complexFrom;
-            dstFBO = isEvenStage ? this.framebufferTo : this.framebufferFrom;
-          }
 
           gl.activeTexture(gl.TEXTURE0);
-          gl.bindTexture(gl.TEXTURE_2D, srcTex);
+          gl.bindTexture(gl.TEXTURE_2D, this.complexFrom);
           gl.uniform1i(gl.getUniformLocation(program, 'u_spectrum'), 0);
 
-          gl.bindFramebuffer(gl.FRAMEBUFFER, dstFBO);
-          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dstTex, 0);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebufferTo);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.complexTo, 0);
         }
 
         gl.bindVertexArray(this.quadVAO);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.bindVertexArray(null);
+
+        const complexSwap = this.complexFrom;
+        this.complexFrom = this.complexTo;
+        this.complexTo = complexSwap;
       }
     }
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    this.renderCount = (this.renderCount || 0) + 1;
   }
 
-  /**
-   * Dispose all resources
-   */
   dispose() {
     const gl = this.gl;
 
@@ -338,15 +277,15 @@ complexFrom: ${value.complexFrom}
     if (this.framebufferReal) gl.deleteFramebuffer(this.framebufferReal);
 
     if (this.real) {
-      if (this.ownsReal) gl.deleteTexture(this.real);
+      gl.deleteTexture(this.real);
       this.real = null;
     }
     if (this.complexFrom) {
-      if (this.ownsComplexFrom) gl.deleteTexture(this.complexFrom);
+      gl.deleteTexture(this.complexFrom);
       this.complexFrom = null;
     }
     if (this.complexTo) {
-      if (this.ownsComplexTo) gl.deleteTexture(this.complexTo);
+      gl.deleteTexture(this.complexTo);
       this.complexTo = null;
     }
   }

@@ -344,9 +344,6 @@ levels: A0=${value.hasLevelsA0} A1=${value.hasLevelsA1} A2=${value.hasLevelsA2} 
     this.renderCount = (this.renderCount || 0) + 1;
   }
 
-  /**
-   * Dispose all resources
-   */
   dispose() {
     const gl = this.gl;
 

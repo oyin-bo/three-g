@@ -246,9 +246,6 @@ bounds: ${value.bounds}${boundsMin && boundsMax ? `
     this.renderCount = (this.renderCount || 0) + 1;
   }
   
-  /**
-   * Dispose all resources
-   */
   dispose() {
     const gl = this.gl;
     

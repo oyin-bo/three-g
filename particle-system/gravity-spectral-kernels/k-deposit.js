@@ -269,9 +269,6 @@ massGrid: ${value.massGrid ? `totalMass=${formatNumber(totalMass)} ` : ''}${valu
     
   }
 
-  /**
-   * Dispose all resources
-   */
   dispose() {
     const gl = this.gl;
 

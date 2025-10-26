@@ -439,9 +439,6 @@ export class ParticleSystemQuadrupoleKernels {
     // No CPU readback needed - aggregator/traversal will sample boundsKernel.outBounds directly
   }
 
-  /**
-   * Dispose all resources
-   */
   dispose() {
     const gl = this.gl;
 

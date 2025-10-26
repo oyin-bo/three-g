@@ -265,7 +265,7 @@ export function readLinear({ gl, texture, width, height, count, channels = ['x',
     : actualCount <= 1000;
   
   // Compute per-channel statistics
-  const result = {
+  const initial = {
     width,
     height,
     count: actualCount,
@@ -273,6 +273,15 @@ export function readLinear({ gl, texture, width, height, count, channels = ['x',
     format: formatInfo.formatName,
     bytesPerPixel
   };
+
+  const result = /**
+   * @type {(typeof initial) & {
+   *  pixels?: { [channel: string]: number }[]
+   * } & {
+   *  [channel: string]: ReturnType<typeof computeStats> & {
+   *  }
+   * }}
+   */(initial);
   
   // Extract channel values
   const dataChannels = formatInfo.dataChannels || formatInfo.bufferChannels;
@@ -292,6 +301,7 @@ export function readLinear({ gl, texture, width, height, count, channels = ['x',
   if (shouldCapturePixels) {
     const pixelData = [];
     for (let i = 0; i < actualCount; i++) {
+      /** @type {Record<string, number>} */
       const pixel = {};
       for (let j = 0; j < numChannels; j++) {
         pixel[channels[j]] = buffer[i * formatInfo.bufferChannels + j];
@@ -439,7 +449,7 @@ export function readGrid3D({ gl, texture, width, height, gridSize, channels = ['
   }
   
   // Compute statistics
-  const result = {
+  const initial = {
     width,
     height,
     gridSize,
@@ -449,6 +459,16 @@ export function readGrid3D({ gl, texture, width, height, gridSize, channels = ['
     format: formatInfo.formatName,
     bytesPerPixel
   };
+
+  const result =
+  /**
+   * @type {(typeof initial) & {
+   *  pixels?: { [channel: string]: number }[]
+   * } & {
+   *  [channel: string]: ReturnType<typeof computeStats> & {
+   *  }
+   * }}
+   */(initial);
   
   // Extract channel values for statistics
   for (let c = 0; c < numChannels; c++) {

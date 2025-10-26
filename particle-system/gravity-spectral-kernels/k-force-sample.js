@@ -274,9 +274,6 @@ forceGridZ: ${value.forceGridZ}
     
   }
 
-  /**
-   * Dispose all resources
-   */
   dispose() {
     const gl = this.gl;
 
