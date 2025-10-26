@@ -718,7 +718,7 @@ function createParticles(count, worldBounds) {
     // from the particle's angle and add a little random jitter so motion
     // isn't perfectly uniform.
     const velScale = -0.02; // base velocity magnitude
-    const tangentialStrength = 107 * Math.random(); // fraction of velScale used for circular bias
+    const tangentialStrength = 0.5 * Math.random(); // fraction of velScale used for circular bias
     const jitterScale = 0.25; // fraction of velScale used for random jitter
 
     // Tangential direction (clockwise): angle - PI/2

@@ -599,26 +599,89 @@ void main() {
           float mass = a0.w;
           if (mass < 1e-10) continue;
           
-          vec3 com = a0.xyz / mass;
-          vec3 r = myPos - com;
-          float dist = length(r);
-          
-          // Skip if this is my own voxel (handled at finer levels or ignored)
+          // Skip own voxel
           bool isMyVoxel = (testVoxel.x == myVoxel.x && testVoxel.y == myVoxel.y && testVoxel.z == myVoxel.z);
           if (isMyVoxel) continue;
           
-          // MAC: check if cell is far enough to use approximation
-          bool farEnough = (cellSize / (dist + eps)) < u_theta;
+          // Compute geometric distances to voxel
+          float distNear = distToNearestPoint(myPos, testVoxel, worldMin, cellSize);
+          float distFar = distToFarthestPoint(myPos, testVoxel, worldMin, cellSize);
           
-          // At the finest level (level 0), accept all non-empty cells to avoid dropping
-          // near-field contributions (there's no finer level to refine into).
+          // Three-case geometric classification
+          bool entirelyFarEnough = (distFar * u_theta < cellSize);
+          bool entirelyTooClose = (distNear * u_theta >= cellSize);
+          bool straddlesBoundary = !entirelyFarEnough && !entirelyTooClose;
+          
           bool isFinestLevel = (level == 0);
-          if (!farEnough && !isFinestLevel) {
-            // Too close for approximation at this level; defer to next finer level
-            continue;
+          
+          // Case 2: Entirely too close - skip unless finest level
+          if (entirelyTooClose && !isFinestLevel) {
+            continue; // Children will handle at finer level
           }
           
-          // Apply force from this cell
+          // Determine mass/moments to use
+          vec3 com = a0.xyz / mass;
+          vec4 a1 = vec4(0.0);
+          vec4 a2 = vec4(0.0);
+          
+          // Case 3: Straddles boundary - compute residual mass
+          if (straddlesBoundary && !isFinestLevel) {
+            vec4 sumChildrenA0 = vec4(0.0);
+            vec4 sumChildrenA1 = vec4(0.0);
+            vec4 sumChildrenA2 = vec4(0.0);
+            
+            float finerGridSize = u_gridSizes[level - 1];
+            float finerSlicesPerRow = u_slicesPerRow[level - 1];
+            
+            // Compute child voxel bounds: children are at testVoxel*2 + {0,1} per axis
+            // Clamp offsets to valid range before loop to avoid runtime branching
+            int minCx = (testVoxel.x * 2 < 0) ? (0 - testVoxel.x * 2) : 0;
+            int maxCx = (testVoxel.x * 2 + 1 >= int(finerGridSize)) ? (int(finerGridSize) - testVoxel.x * 2 - 1) : 1;
+            int minCy = (testVoxel.y * 2 < 0) ? (0 - testVoxel.y * 2) : 0;
+            int maxCy = (testVoxel.y * 2 + 1 >= int(finerGridSize)) ? (int(finerGridSize) - testVoxel.y * 2 - 1) : 1;
+            int minCz = (testVoxel.z * 2 < 0) ? (0 - testVoxel.z * 2) : 0;
+            int maxCz = (testVoxel.z * 2 + 1 >= int(finerGridSize)) ? (int(finerGridSize) - testVoxel.z * 2 - 1) : 1;
+            
+            for (int cz = minCz; cz <= maxCz; cz++) {
+              for (int cy = minCy; cy <= maxCy; cy++) {
+                for (int cx = minCx; cx <= maxCx; cx++) {
+                  ivec3 childVoxel = testVoxel * 2 + ivec3(cx, cy, cz);
+                  
+                  ivec2 childTexCoord = voxelToTexel(childVoxel, finerGridSize, finerSlicesPerRow);
+                  vec4 childA0 = sampleLevelA0(level - 1, childTexCoord);
+                  
+                  if (childA0.w > 1e-10) {
+                    sumChildrenA0 += childA0;
+                    if (level > 0) {
+                      sumChildrenA1 += sampleLevelA1(level - 1, childTexCoord);
+                      sumChildrenA2 += sampleLevelA2(level - 1, childTexCoord);
+                    }
+                  }
+                }
+              }
+            }
+            
+            // Use residual
+            vec4 residualA0 = a0 - sumChildrenA0;
+            mass = residualA0.w;
+            if (mass < 1e-10) continue; // No residual
+            
+            com = residualA0.xyz / mass;
+            if (level > 0) {
+              a1 = sampleLevelA1(level, texCoord) - sumChildrenA1;
+              a2 = sampleLevelA2(level, texCoord) - sumChildrenA2;
+            }
+          } else {
+            // Case 1: Entirely far enough, or finest level - use full mass
+            if (level > 0) {
+              a1 = sampleLevelA1(level, texCoord);
+              a2 = sampleLevelA2(level, texCoord);
+            }
+          }
+          
+          // Apply force
+          vec3 r = myPos - com;
+          float dist = length(r);
           float distSq = dist * dist + eps * eps;
           float distCubed = distSq * sqrt(distSq);
           vec3 monopoleForce = -u_G * mass * r / distCubed;
@@ -626,8 +689,6 @@ void main() {
           
           // Add quadrupole correction (except at finest level where it's negligible)
           if (level > 0) {
-            vec4 a1 = sampleLevelA1(level, texCoord);
-            vec4 a2 = sampleLevelA2(level, texCoord);
             float qxx = a1.r - com.x * com.x * mass;
             float qyy = a1.g - com.y * com.y * mass;
             float qzz = a1.b - com.z * com.z * mass;
