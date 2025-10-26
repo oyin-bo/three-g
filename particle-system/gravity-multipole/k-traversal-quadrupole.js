@@ -147,13 +147,20 @@ export class KTraversalQuadrupole {
      */
     const readTextureArrayLayer = (textureArray, layer, size) => {
       if (!textureArray) return null;
+      // Derive the correct 2D layout for this level
+      const config = this.levelConfigs[layer];
+      const gridSize = config?.gridSize || size;
+      const slicesPerRow = config?.slicesPerRow || 1;
+      const width = gridSize * slicesPerRow;
+      const sliceRows = Math.ceil(gridSize / Math.max(1, slicesPerRow));
+      const height = gridSize * sliceRows;
       
       const fb = gl.createFramebuffer();
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
       gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, textureArray, 0, layer);
       
-      const buffer = new Float32Array(size * size * 4);
-      gl.readPixels(0, 0, size, size, gl.RGBA, gl.FLOAT, buffer);
+      const buffer = new Float32Array(width * height * 4);
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, buffer);
       
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.deleteFramebuffer(fb);
@@ -181,8 +188,8 @@ export class KTraversalQuadrupole {
         maxMass,
         totalMass,
         avgMass: nonZeroCount > 0 ? totalMass / nonZeroCount : 0,
-        voxelCount: size * size * size,
-        toString: () => `Layer${layer} ${size}³: ${nonZeroCount}/${size * size * size} occupied, mass=[${maxMass.toFixed(3)}max ${(totalMass / nonZeroCount || 0).toFixed(3)}avg]`
+        voxelCount: gridSize * gridSize * gridSize,
+        toString: () => `Layer${layer} ${gridSize}³: ${nonZeroCount}/${gridSize * gridSize * gridSize} occupied, mass=[${maxMass.toFixed(3)}max ${(totalMass / nonZeroCount || 0).toFixed(3)}avg]`
       };
     };
     
@@ -534,6 +541,9 @@ void main() {
   float eps = max(u_softening, 1e-6);
 
   // Barnes-Hut hierarchical traversal: coarsest to finest
+  // Performance: scan all voxels at the coarsest level; at finer levels, only
+  // a small neighborhood around the particle's voxel. MAC determines whether
+  // to accept a cell's contribution or defer refinement to finer levels.
   for (int level = min(u_numLevels - 1, ${maxL - 1}); level >= 0; level--) {
     float gridSize = u_gridSizes[level];
     float slicesPerRow = u_slicesPerRow[level];
@@ -545,13 +555,14 @@ void main() {
     ivec3 myVoxel = ivec3(floor(relPos * gridSize));
     
     // Hierarchical traversal: check ALL voxels at coarsest level, only neighbors at finer levels
-    bool isCoarsestLevel = (level == u_numLevels - 1);
-    int startX = isCoarsestLevel ? 0 : max(0, myVoxel.x - 1);
-    int startY = isCoarsestLevel ? 0 : max(0, myVoxel.y - 1);
-    int startZ = isCoarsestLevel ? 0 : max(0, myVoxel.z - 1);
-    int endX = isCoarsestLevel ? int(gridSize) - 1 : min(int(gridSize) - 1, myVoxel.x + 1);
-    int endY = isCoarsestLevel ? int(gridSize) - 1 : min(int(gridSize) - 1, myVoxel.y + 1);
-    int endZ = isCoarsestLevel ? int(gridSize) - 1 : min(int(gridSize) - 1, myVoxel.z + 1);
+  bool isCoarsestLevel = (level == u_numLevels - 1);
+  int nb = 1; // neighbor radius for finer levels
+  int startX = isCoarsestLevel ? 0 : max(0, myVoxel.x - nb);
+  int startY = isCoarsestLevel ? 0 : max(0, myVoxel.y - nb);
+  int startZ = isCoarsestLevel ? 0 : max(0, myVoxel.z - nb);
+  int endX = isCoarsestLevel ? int(gridSize) - 1 : min(int(gridSize) - 1, myVoxel.x + nb);
+  int endY = isCoarsestLevel ? int(gridSize) - 1 : min(int(gridSize) - 1, myVoxel.y + nb);
+  int endZ = isCoarsestLevel ? int(gridSize) - 1 : min(int(gridSize) - 1, myVoxel.z + nb);
     
     for (int vz = startZ; vz <= endZ; vz++) {
       for (int vy = startY; vy <= endY; vy++) {

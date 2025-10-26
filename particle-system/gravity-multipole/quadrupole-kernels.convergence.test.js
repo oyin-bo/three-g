@@ -209,6 +209,8 @@ test('quadrupole-kernels.convergence: theta parameter controls approximation qua
   // Test with different theta values
   const thetaValues = [0.9, 0.5, 0.2];
   const testParticleFinalX = [];
+
+  const thetaValuesSnaps = [];
   
   for (const theta of thetaValues) {
     const { canvas, gl } = createTestCanvas();
@@ -227,8 +229,11 @@ test('quadrupole-kernels.convergence: theta parameter controls approximation qua
     });
     
     // Run simulation
+    let earlySnap, midSnap;
     for (let i = 0; i < 50; i++) {
       system.step();
+      if (i === 5) earlySnap = system.positionKernel.valueOf({ pixels: true });
+      if (i === 25) midSnap = system.positionKernel.valueOf({ pixels: true });
     }
     
     const finalSnap = system.positionKernel.valueOf({ pixels: true });
@@ -237,6 +242,8 @@ test('quadrupole-kernels.convergence: theta parameter controls approximation qua
     
     system.dispose();
     canvas.remove();
+
+    thetaValuesSnaps.push({ early: earlySnap, mid: midSnap, final: finalSnap });
   }
   
   // Lower theta (more accurate) should give different result than higher theta
@@ -254,7 +261,28 @@ test('quadrupole-kernels.convergence: theta parameter controls approximation qua
   const maxDiff = Math.max(diff_high_mid, diff_mid_low);
   
   assert.ok(maxDiff > 0.001 || maxDiff < 1e-10, 
-    `Theta should affect results: theta=0.9→${testParticleFinalX[0].toFixed(4)}, 0.5→${testParticleFinalX[1].toFixed(4)}, 0.2→${testParticleFinalX[2].toFixed(4)}`);
+    `Theta should affect results: theta=0.9→${testParticleFinalX[0].toFixed(4)}, 0.5→${testParticleFinalX[1].toFixed(4)}, 0.2→${testParticleFinalX[2].toFixed(4)}
+
+----------------------------------------------------------------------------------------------------
+#### THETA SNAPSHOTS:
+
+${
+    thetaValuesSnaps.map((snaps, i) => {
+      return (
+        `
+--- [${i}] Theta = ${thetaValues[i]} ---
+EARLY: ${thetaValuesSnaps[i].early}
+
+MID: ${thetaValuesSnaps[i].mid}
+
+FINAL: ${thetaValuesSnaps[i].final}
+
+
+`
+      );
+    })
+}
+`);
   
   // All should show particle moved toward cluster
   for (let i = 0; i < 3; i++) {

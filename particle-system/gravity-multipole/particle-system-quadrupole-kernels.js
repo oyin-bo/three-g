@@ -60,7 +60,7 @@ export class ParticleSystemQuadrupoleKernels {
 
     this.particleData = options.particleData;
     this.frameCount = 0;
-    
+
     // Bounds update scheduling
     this.boundsUpdateInterval = 90;  // Update bounds every 90 frames (1.5 seconds at 60fps)
     this.lastBoundsUpdateFrame = -this.boundsUpdateInterval;  // Force initial update
@@ -87,6 +87,15 @@ export class ParticleSystemQuadrupoleKernels {
     this.disableFloatBlend = !floatBlend;
     if (!floatBlend)
       console.warn('EXT_float_blend not supported: reduced accumulation accuracy');
+
+  // Declare texture slots (nullable for lifecycle)
+  /** @type {WebGLTexture|null} */ this.positionTexture = null;
+  /** @type {WebGLTexture|null} */ this.positionTextureWrite = null;
+  /** @type {WebGLTexture|null} */ this.velocityTexture = null;
+  /** @type {WebGLTexture|null} */ this.velocityTextureWrite = null;
+  /** @type {WebGLTexture|null} */ this.levelTextureArrayA0 = null;
+  /** @type {WebGLTexture|null} */ this.levelTextureArrayA1 = null;
+  /** @type {WebGLTexture|null} */ this.levelTextureArrayA2 = null;
 
     // Create position textures: public active texture and internal write target
     this.positionTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
@@ -147,7 +156,7 @@ export class ParticleSystemQuadrupoleKernels {
     // to ensure all layers fit, but we must copy only the appropriate region per layer.
     const gl = this.gl;
     const maxSize = this.L0Size; // Maximum size for array allocation
-    
+
     // Create A0 array (monopole moments: Σ(m·x), Σ(m·y), Σ(m·z), Σm)
     this.levelTextureArrayA0 = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA0);
@@ -156,7 +165,7 @@ export class ParticleSystemQuadrupoleKernels {
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    
+
     // Create A1 array (second moments: Σ(m·x²), Σ(m·y²), Σ(m·z²), Σ(m·xy))
     this.levelTextureArrayA1 = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA1);
@@ -165,7 +174,7 @@ export class ParticleSystemQuadrupoleKernels {
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    
+
     // Create A2 array (second moments: Σ(m·xz), Σ(m·yz), 0, 0)
     this.levelTextureArrayA2 = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA2);
@@ -174,7 +183,7 @@ export class ParticleSystemQuadrupoleKernels {
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    
+
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
 
     // Create quadrupole aggregator kernel for L0 with occupancy support.
@@ -257,7 +266,7 @@ export class ParticleSystemQuadrupoleKernels {
       height: this.textureHeight,
       dt: this.options.dt
     });
-    
+
     // Create bounds reduction kernel for GPU-resident dynamic bounds updates
     this.boundsKernel = new KBoundsReduce({
       gl: this.gl,
@@ -278,7 +287,7 @@ export class ParticleSystemQuadrupoleKernels {
       this._updateBounds();
       this.lastBoundsUpdateFrame = this.frameCount;
     }
-    
+
     // 1. Build octree
     this._buildOctree();
 
@@ -302,7 +311,7 @@ export class ParticleSystemQuadrupoleKernels {
       this.aggregatorKernel.inBounds = this.boundsKernel.outBounds;
     }
     this.aggregatorKernel.run();
-    
+
     // Copy aggregator MRT outputs to texture array layer 0
     this._copyToArrayLayer(0, this.aggregatorKernel);
 
@@ -320,14 +329,14 @@ export class ParticleSystemQuadrupoleKernels {
       kernel.inA1 = prevOut.a1;
       kernel.inA2 = prevOut.a2;
       kernel.run();
-      
+
       // Copy pyramid output to array layer (i+1 since layer 0 is L0)
       this._copyToArrayLayer(i + 1, kernel);
-      
+
       prevOut = { a0: kernel.outA0, a1: kernel.outA1, a2: kernel.outA2 };
     }
   }
-  
+
   /**
    * Copy MRT outputs to texture array layer using copyTexSubImage3D
    * @param {number} layer - Target layer index in texture arrays
@@ -336,7 +345,7 @@ export class ParticleSystemQuadrupoleKernels {
   _copyToArrayLayer(layer, kernel) {
     const gl = this.gl;
     const config = this.levelConfigs[layer];
-    
+
     // Compute the actual texture dimensions used by the kernel
     // based on gridSize and slicesPerRow (NOT the flattened size)
     const gridSize = config.gridSize;
@@ -344,29 +353,46 @@ export class ParticleSystemQuadrupoleKernels {
     const width = gridSize * slicesPerRow;
     const sliceRows = Math.ceil(gridSize / slicesPerRow);
     const height = gridSize * sliceRows;
-    
-    // Bind the kernel's output framebuffer for reading
-    gl.bindFramebuffer(gl.FRAMEBUFFER, kernel.outFramebuffer);
-    
+
+    // Bind the kernel's output framebuffer for reading (explicit READ target)
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, kernel.outFramebuffer);
+    const status = gl.checkFramebufferStatus(gl.READ_FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+      throw new Error(`_copyToArrayLayer: source framebuffer incomplete (status=${status})`);
+    }
+
     // Copy COLOR_ATTACHMENT0 -> levelTextureArrayA0[layer]
     gl.readBuffer(gl.COLOR_ATTACHMENT0);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA0);
     gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, width, height);
-    
+    {
+      const err = gl.getError();
+      if (err !== gl.NO_ERROR) throw new Error(`_copyToArrayLayer: copy A0 failed (glError=${err})`);
+    }
+
     // Copy COLOR_ATTACHMENT1 -> levelTextureArrayA1[layer]
     gl.readBuffer(gl.COLOR_ATTACHMENT1);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA1);
     gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, width, height);
-    
+    {
+      const err = gl.getError();
+      if (err !== gl.NO_ERROR) throw new Error(`_copyToArrayLayer: copy A1 failed (glError=${err})`);
+    }
+
     // Copy COLOR_ATTACHMENT2 -> levelTextureArrayA2[layer]
     gl.readBuffer(gl.COLOR_ATTACHMENT2);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA2);
     gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, width, height);
-    
+    {
+      const err = gl.getError();
+      if (err !== gl.NO_ERROR) throw new Error(`_copyToArrayLayer: copy A2 failed (glError=${err})`);
+    }
+
     // Reset read buffer and unbind
     gl.readBuffer(gl.COLOR_ATTACHMENT0);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
   }
 
   _calculateForces() {
@@ -379,17 +405,17 @@ export class ParticleSystemQuadrupoleKernels {
     this.traversalKernel.inLevelsA0 = this.levelTextureArrayA0;
     this.traversalKernel.inLevelsA1 = this.levelTextureArrayA1;
     this.traversalKernel.inLevelsA2 = this.levelTextureArrayA2;
-    
+
     // Wire bounds texture if available (after first bounds update)
     if (this.boundsKernel?.outBounds) {
       this.traversalKernel.inBounds = this.boundsKernel.outBounds;
     }
-    
+
     // Wire occupancy from aggregator L0 (only L0 occupancy needed for traversal)
     if (this.options.useOccupancyMasks && this.aggregatorKernel?.outOccupancy) {
       this.traversalKernel.inOccupancy = this.aggregatorKernel.outOccupancy;
     }
-    
+
     this.traversalKernel.run();
 
     // Wire traversal result into velocity integrator
@@ -439,11 +465,11 @@ export class ParticleSystemQuadrupoleKernels {
    */
   _updateBounds() {
     if (!this.boundsKernel || !this.positionTexture) return;
-    
+
     // Run GPU reduction to compute bounds (stays GPU-resident in boundsKernel.outBounds)
     this.boundsKernel.inPosition = this.positionTexture;
     this.boundsKernel.run();
-    
+
     // Bounds texture is now updated and ready for kernels to sample
     // No CPU readback needed - aggregator/traversal will sample boundsKernel.outBounds directly
   }
