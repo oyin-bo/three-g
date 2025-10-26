@@ -66,7 +66,7 @@ const statusDiv = /** @type {HTMLDivElement} */ (
 // 3. Initialize state
 const gl = /** @type {WebGL2RenderingContext} */ (renderer.getContext());
 
-let particleCount = 5000;
+let particleCount = 50000;
 const worldBounds = /** @type {{ min: [number, number, number], max: [number, number, number] }} */ ({
   min: [-2, -0.1, -2],
   max: [2, 0.1, 2]
@@ -529,7 +529,7 @@ function recreatePhysicsAndMesh() {
   let gravityStrength = Math.random();
   gravityStrength = gravityStrength * 0.0001;
   gravityStrength = gravityStrength * gravityStrength;
-  gravityStrength += 0.000005;
+  gravityStrength += 0.0000005;
 
   // Generate graph edges if graph forces enabled
   let edges = null;
@@ -713,11 +713,31 @@ function createParticles(count, worldBounds) {
     mass = 1 - Math.pow(mass, 1 / 20);
     mass = 0.01 + mass * 10;
 
+    // Small randomized initial velocities with a slight clockwise bias
+    // around the world center (y-axis). We compute a tangential direction
+    // from the particle's angle and add a little random jitter so motion
+    // isn't perfectly uniform.
+    const velScale = -0.02; // base velocity magnitude
+    const tangentialStrength = 107 * Math.random(); // fraction of velScale used for circular bias
+    const jitterScale = 0.25; // fraction of velScale used for random jitter
+
+    // Tangential direction (clockwise): angle - PI/2
+    const tangentialAngle = angle - Math.PI / 2;
+    const tx = Math.cos(tangentialAngle) * velScale * radiusFactor * tangentialStrength;
+    const tz = Math.sin(tangentialAngle) * velScale * radiusFactor * tangentialStrength;
+
+    const vx = tx + (Math.random() - 0.5) * velScale * jitterScale;
+    const vy = (Math.random() - 0.5) * velScale * 0.5; // keep vertical small
+    const vz = tz + (Math.random() - 0.5) * velScale * jitterScale;
+
     spots[i] = {
       x: center[0] + Math.cos(angle) * radiusFactor * radiusX,
       y: center[1] + height,
       z: center[2] + Math.sin(angle) * radiusFactor * radiusZ,
       mass,
+      vx,
+      vy,
+      vz,
     };
   }
 
