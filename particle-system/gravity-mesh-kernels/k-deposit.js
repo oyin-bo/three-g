@@ -226,7 +226,10 @@ position: ${value.position}
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_positionTexture'), 0);
 
     // Set uniforms
-    gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.particleTexWidth, this.particleTexHeight);
+  // Particle texture size for vertex fetch
+  gl.uniform2f(gl.getUniformLocation(this.program, 'u_particleTextureSize'), this.particleTexWidth, this.particleTexHeight);
+  // Packed grid texture size (width, height)
+  gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.textureSize, this.textureSize);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMin'), this.worldBounds.min[0], this.worldBounds.min[1], this.worldBounds.min[2]);

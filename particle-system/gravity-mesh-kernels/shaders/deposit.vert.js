@@ -5,6 +5,8 @@ precision highp float;
 precision highp int;
 
 uniform sampler2D u_positionTexture;
+uniform vec2 u_particleTextureSize;
+// packed grid texture size (width, height)
 uniform vec2 u_textureSize;
 uniform float u_gridSize;
 uniform float u_slicesPerRow;
@@ -34,10 +36,10 @@ float wrapIndex(float coord, float size) {
 
 void main() {
   int particleIndex = gl_VertexID;
-  int texWidth = int(u_textureSize.x);
+  int texWidth = int(u_particleTextureSize.x);
   int texX = particleIndex % texWidth;
   int texY = particleIndex / texWidth;
-  vec2 texCoord = (vec2(texX, texY) + 0.5) / u_textureSize;
+  vec2 texCoord = (vec2(texX, texY) + 0.5) / u_particleTextureSize;
 
   vec4 posData = texture(u_positionTexture, texCoord);
   vec3 worldPos = wrapToDomain(posData.xyz, u_worldMin, u_worldMax);
@@ -66,8 +68,8 @@ void main() {
     float(sliceRow * int(u_gridSize) + int(targetVoxel.y))
   );
 
-  float textureSize = u_gridSize * u_slicesPerRow;
-  vec2 ndc = ((texel + 0.5) / textureSize) * 2.0 - 1.0;
+  // Normalize texel coordinates by the actual packed grid texture width/height
+  vec2 ndc = vec2(((texel.x + 0.5) / u_textureSize.x), ((texel.y + 0.5) / u_textureSize.y)) * 2.0 - 1.0;
 
   v_mass = mass;
   v_worldPos = worldPos;
