@@ -254,9 +254,11 @@ complexFrom: ${value.complexFrom}
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.bindVertexArray(null);
 
-        const complexSwap = this.complexFrom;
-        this.complexFrom = this.complexTo;
-        this.complexTo = complexSwap;
+        if (!isLastStage) {
+          const complexSwap = this.complexFrom;
+          this.complexFrom = this.complexTo;
+          this.complexTo = complexSwap;
+        }
       }
     }
 

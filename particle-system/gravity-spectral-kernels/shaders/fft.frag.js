@@ -84,20 +84,7 @@ vec2 twiddle(float k, float N, float sign) {
 }
 
 void main() {
-${collapsed === 'from' ? `
-  // Real-to-complex conversion: read R32F real value, output (real, 0)
-  ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
-  vec2 realInputUV = v_uv;
-  float realValue = texture(u_realInput, realInputUV).r;
-  outColor = vec4(realValue, 0.0, 0.0, 0.0);
-` : collapsed === 'to' ? `
-  // Complex-to-real conversion: read RG32F complex, output real part with normalization
-  ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
-  vec2 complex = texture(u_spectrum, v_uv).rg;
-  float realPart = complex.r * u_normalizeInverse;
-  outColor = vec4(realPart, 0.0, 0.0, 0.0);
-` : `
-  // Standard FFT butterfly operation
+  // Common setup: determine voxel position and butterfly pairing
   ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
   int N = int(u_gridSize);
   
@@ -108,7 +95,7 @@ ${collapsed === 'from' ? `
   int stageSize = 1 << (u_stage + 1);  // 2^(stage+1)
   int halfStage = stageSize >> 1;      // 2^stage
   int blockIndex = idx / stageSize;
-  int indexInBlock = idx % stageSize;  // Use modulo instead of subtraction
+  int indexInBlock = idx % stageSize;
   
   // Determine if this is the even or odd element
   int pairIndex = indexInBlock % halfStage;
@@ -124,49 +111,60 @@ ${collapsed === 'from' ? `
   else if (u_axis == 1) partnerVoxel.y = partnerIdx;
   else partnerVoxel.z = partnerIdx;
   
-  // Read current value at this fragment's position and partner value
+  // Calculate UVs
   vec2 currentUV = v_uv;
   vec2 partnerUV = voxelToTexCoord(partnerVoxel, u_gridSize, u_slicesPerRow);
   
-  vec4 current = texture(u_spectrum, currentUV);
-  vec4 partner = texture(u_spectrum, partnerUV);
+  // INPUT: Read values (format depends on collapsed flag)
+  vec2 currentComplex;
+  vec2 partnerComplex;
   
-  vec2 currentComplex = current.rg;
-  vec2 partnerComplex = partner.rg;
+${collapsed === 'from' ? `
+  // Real-to-complex: read R32F, treat as complex with imag=0
+  float currentReal = texture(u_realInput, currentUV).r;
+  float partnerReal = texture(u_realInput, partnerUV).r;
+  currentComplex = vec2(currentReal, 0.0);
+  partnerComplex = vec2(partnerReal, 0.0);
+` : `
+  // Complex-to-complex or complex-to-real: read RG32F
+  currentComplex = texture(u_spectrum, currentUV).rg;
+  partnerComplex = texture(u_spectrum, partnerUV).rg;
+`}
 
+  // Debug modes
   if (u_debugMode == 1) {
     outColor = vec4(currentComplex, 0.0, 1.0);
     return;
   }
-
   if (u_debugMode == 2) {
     outColor = vec4(partnerComplex, 0.0, 1.0);
     return;
   }
   
+  // BUTTERFLY: Compute (same for all variants)
   // Compute twiddle factor
-  // Cooley-Tukey DIT: W_N^(k * 2^stage) where k = pairIndex
   float twiddleSign = (u_inverse == 1) ? 1.0 : -1.0;
   float twiddleK = float(pairIndex * halfStage);
   vec2 w = twiddle(twiddleK, u_gridSize, twiddleSign);
   
   // Butterfly operation
-  // Standard Cooley-Tukey: X[k] = E[k] + W^k*O[k], X[k+N/2] = E[k] - W^k*O[k]
-  // When processing even position: current=E, partner=O, compute E + W*O
-  // When processing odd position: current=O, partner=E, compute E - W*O (use partner for E!)
+  // Cooley-Tukey: X[k] = E[k] + W^k*O[k], X[k+N/2] = E[k] - W^k*O[k]
   vec2 result;
   if (!isOdd) {
     // Even output position: E + W * O
     result = complexAdd(currentComplex, complexMul(w, partnerComplex));
   } else {
     // Odd output position: E - W * O
-    // Partner is E (even data), current is O (odd data)
     result = complexSub(partnerComplex, complexMul(w, currentComplex));
   }
   
-  // Normalization is applied separately in the complex-to-real extraction pass
-  // to avoid redundant scaling during butterfly stages
-  
+  // OUTPUT: Write result (format depends on collapsed flag)
+${collapsed === 'to' ? `
+  // Complex-to-real: apply normalization and extract real part
+  float realPart = result.r * u_normalizeInverse;
+  outColor = vec4(realPart, 0.0, 0.0, 0.0);
+` : `
+  // Real-to-complex or complex-to-complex: output complex
   outColor = vec4(result, 0.0, 0.0);
 `}
 }
