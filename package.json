@@ -1,14 +1,14 @@
 {
-  "name": "three-g",
-  "version": "2.0.7",
-  "description": "THREE.js galaxy primitives with GPU Barnes-Hut physics",
+  "name": "mavity",
+  "version": "2.0.9",
+  "description": "GPU compute particle systems and graphs, including Barnes-Hut physics (formerly three-g)",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "npx daeb.ug"
   },
-  "repository": "https://github.com/oyin-bo/three-g",
-  "keywords": ["three", "galaxy", "particles", "barnes-hut", "n-body", "physics"],
+  "repository": "https://github.com/mavity/mavity",
+  "keywords": ["barnes-hut", "gravity", "galaxy", "particles", "barnes-hut", "n-body", "physics", "three-g"],
   "author": "Oleg Mihailik",
   "license": "MIT",
   "peerDependencies": {

@@ -13,7 +13,7 @@ import {
   ExternalTexture
 } from 'three';
 
-import { GPUProfiler } from './particle-system/utils/gpu-profiler.js';
+import { GPUProfiler } from './gravity/monolithic/utils/gpu-profiler.js';
 
 /**
  * Create particle rendering mesh
