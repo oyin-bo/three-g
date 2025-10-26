@@ -49,6 +49,9 @@ export class KPoisson {
     this.assignment = options.assignment || 'CIC';
     this.poissonUseDiscrete = options.poissonUseDiscrete !== undefined ? options.poissonUseDiscrete : false;
     this.treePMSigma = options.treePMSigma || 0.0;
+  // Spectral split/filter options
+  this.kCut = options.kCut || 0.0;
+  this.splitMode = options.splitMode || 0; // 0 = none, 1 = hard cutoff, 2 = gaussian
 
     // Compile and link shader program
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
@@ -209,8 +212,8 @@ densitySpectrum: ${value.densitySpectrum}
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gaussianSigma'), this.treePMSigma);
 
     // Set missing uniforms with defaults
-    gl.uniform1i(gl.getUniformLocation(this.program, 'u_splitMode'), 0);
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_kCut'), 0.0);
+  gl.uniform1i(gl.getUniformLocation(this.program, 'u_splitMode'), this.splitMode);
+  gl.uniform1f(gl.getUniformLocation(this.program, 'u_kCut'), this.kCut);
 
     // Draw fullscreen quad
     gl.bindVertexArray(this.quadVAO);

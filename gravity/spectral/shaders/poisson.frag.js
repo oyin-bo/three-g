@@ -95,6 +95,21 @@ void main() {
   }
 
   // 3. Solve for potential spectrum: φ(k) = -4πG * ρ(k) / k^2
+  // Optionally apply spectral split/filtering
+  float k_mag = sqrt(k2);
+  if (u_splitMode == 1) {
+    // Hard cutoff
+    if (u_kCut > 0.0 && k_mag > u_kCut) {
+      rho_k = vec2(0.0);
+    }
+  } else if (u_splitMode == 2) {
+    // Gaussian low-pass: multiply by exp(-0.5 * (k*sigma)^2)
+    if (u_gaussianSigma > 0.0) {
+      float factor = exp(-0.5 * (k_mag * u_gaussianSigma) * (k_mag * u_gaussianSigma));
+      rho_k *= factor;
+    }
+  }
+
   vec2 phi_k = vec2(0.0);
   if (k2 >= 1e-10) { // Avoid division by zero at DC (k=0)
     float green = -u_gravitationalConstant / k2;

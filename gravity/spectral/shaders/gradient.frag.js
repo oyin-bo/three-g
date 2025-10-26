@@ -66,12 +66,17 @@ void main() {
   // Compute gradient: F(k) = -i·k·φ(k)
   // For attractive gravity: F = -∇φ
   // In Fourier space: ∇φ(k) = i·k·φ(k), so F(k) = -i·k·φ(k)
-  // Multiplication by -i is a rotation: (a + bi) * (-i) = b - ai
-  // So we are calculating -i*k_component, the complex number is (0, -k_component)
-  // F_k = (phi_re, phi_im) * (0, -k_component)
-  // F_k.re = phi_re * 0 - phi_im * (-k_component) = phi_im * k_component
-  // F_k.im = phi_re * (-k_component) + phi_im * 0 = -phi_re * k_component
-  vec2 F_k = vec2(phi_k.y * k_component, -phi_k.x * k_component);
+  // Multiply complex φ(k) by -i·k:
+  // φ(k) * (-i*k) where -i*k is purely imaginary: (0, -k)
+  // (a + bi) * (0 - ki) = -aki + bk + aki² = -aki - bk = -bk - aki
+  // So: F_k.re = -phi_im * k, F_k.im = -phi_re * k
+  vec2 F_k = vec2(-phi_k.y * k_component, -phi_k.x * k_component);
+  
+  // NOTE: Do NOT apply additional per-axis scaling here.
+  // k_phys already includes the world-size normalization (k_phys = 2π·k_grid / Laxis).
+  // Additional scaling by axis extents (avgExtent/axisExtent) artificially
+  // amplifies forces along axes with small extents (e.g. a thin disk's Z axis)
+  // and produces tall spurious strands. Leave F_k as computed above.
   
   // Output force spectrum for this axis (complex)
   outColor = vec4(F_k, 0.0, 0.0);

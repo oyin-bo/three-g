@@ -22,6 +22,7 @@ import { KGradient } from './k-gradient.js';
 import { KForceSample } from './k-force-sample.js';
 import { KIntegrateVelocity } from './k-integrate-velocity.js';
 import { KIntegratePosition } from './k-integrate-position.js';
+import { KBoundsReduce } from './k-bounds-reduce.js';
 
 export class GravitySpectral {
   /**
@@ -204,6 +205,10 @@ export class GravitySpectral {
     });
 
     // 3. Poisson solver kernel    
+    // Choose a small Gaussian smoothing sigma (fraction of average extent) to damp high-k noise
+    const avgExtent = (worldSize[0] + worldSize[1] + worldSize[2]) / 3.0;
+    const gaussianSigma = avgExtent * 0.02; // 2% of average box size
+
     this.poissonKernel = new KPoisson({
       gl: this.gl,
       inDensitySpectrum: null,
@@ -214,7 +219,9 @@ export class GravitySpectral {
   textureHeight: this.textureHeight3D,
       gravitationalConstant: fourPiG,
       worldSize: /** @type {[number, number, number]} */ (worldSize),
-      assignment: this.options.assignment
+      assignment: this.options.assignment,
+      treePMSigma: gaussianSigma,
+      splitMode: 2 // enable Gaussian low-pass by default
     });
 
     // 4. Gradient kernel
@@ -276,6 +283,18 @@ export class GravitySpectral {
       height: this.textureHeight,
       dt: this.options.dt
     });
+
+    // GPU bounds reduction kernel (cloned and reused locally)
+    this.boundsReduce = new KBoundsReduce({
+      gl: this.gl,
+      inPosition: this.positionTexture,
+      particleTexWidth: this.textureWidth,
+      particleTexHeight: this.textureHeight,
+      particleCount: this.options.particleCount
+    });
+
+    // How often to run bounds reduction (frames)
+    this.boundsInterval = 30;
   }
 
   /**
@@ -325,6 +344,61 @@ export class GravitySpectral {
 
     // Run PM/FFT pipeline
     this.depositKernel.run();           // Step 1: Deposit particles to grid
+
+    // Periodic GPU bounds check: run KBoundsReduce every boundsInterval frames
+    try {
+      if (this.boundsReduce && (this.frameCount % this.boundsInterval === 0)) {
+        this.boundsReduce.inPosition = this.positionTexture;
+        this.boundsReduce.particleTexWidth = this.textureWidth;
+        this.boundsReduce.particleTexHeight = this.textureHeight;
+        this.boundsReduce.particleCount = this.options.particleCount;
+        this.boundsReduce.run();
+
+        // Read back 2x1 bounds texture (min, max)
+        const gl = this.gl;
+        const fb = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.boundsReduce.outBounds, 0);
+        const pixels = new Float32Array(8);
+        gl.readPixels(0, 0, 2, 1, gl.RGBA, gl.FLOAT, pixels);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.deleteFramebuffer(fb);
+
+        const newMin = [pixels[0], pixels[1], pixels[2]];
+        const newMax = [pixels[4], pixels[5], pixels[6]];
+        const cur = this.options.worldBounds;
+
+        // If any particle escaped outside current bounds, update worldBounds and derived uniforms
+        let expanded = false;
+        for (let i = 0; i < 3; i++) {
+          if (newMin[i] < cur.min[i] || newMax[i] > cur.max[i]) { expanded = true; break; }
+        }
+
+        if (expanded) {
+          // Add small margin to avoid thrashing
+          const marginFactor = 0.05;
+          const outMin = [0,0,0], outMax = [0,0,0];
+          for (let i = 0; i < 3; i++) {
+            const span = Math.max(1e-6, newMax[i] - newMin[i]);
+            outMin[i] = newMin[i] - marginFactor * span;
+            outMax[i] = newMax[i] + marginFactor * span;
+          }
+          this.options.worldBounds = { min: outMin, max: outMax };
+
+          const newWorldSize = [outMax[0] - outMin[0], outMax[1] - outMin[1], outMax[2] - outMin[2]];
+          const voxelVolume = (newWorldSize[0] * newWorldSize[1] * newWorldSize[2]) / (this.gridSize * this.gridSize * this.gridSize);
+          const massToDensity = 1.0 / voxelVolume;
+
+          if (this.fftKernel) this.fftKernel.massToDensity = massToDensity;
+          if (this.poissonKernel) this.poissonKernel.worldSize = newWorldSize;
+          if (this.gradientKernel) this.gradientKernel.worldSize = newWorldSize;
+          if (this.forceSampleKernel) this.forceSampleKernel.worldBounds = { min: outMin, max: outMax };
+        }
+      }
+    } catch (e) {
+      // Non-fatal: bounds reduction failing should not stop simulation
+      console.warn('KBoundsReduce failed:', e && e.message ? e.message : e);
+    }
 
 
 /**

@@ -147,7 +147,10 @@ ${collapsed === 'from' ? `
   // BUTTERFLY: Compute (same for all variants)
   // Compute twiddle factor
   float twiddleSign = (u_inverse == 1) ? 1.0 : -1.0;
-  float twiddleK = float(pairIndex * halfStage);
+  // Correct twiddle exponent: for stage with block size stageSize the
+  // twiddle exponent should be pairIndex * (N / stageSize). Using
+  // pairIndex * halfStage was incorrect except for small N. Compute as float.
+  float twiddleK = float(pairIndex) * float(N) / float(stageSize);
   vec2 w = twiddle(twiddleK, u_gridSize, twiddleSign);
   
   // Butterfly operation
