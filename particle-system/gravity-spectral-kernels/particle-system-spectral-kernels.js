@@ -315,106 +315,45 @@ export class ParticleSystemSpectralKernels {
     // Step 2: Forward FFT (real → complexTo)
     this.fftKernel.inverse = false;
     this.fftKernel.run();
+    // Result is now in fftKernel.complexTo (which is potentialSpectrumTexture)
 
-    // Wire FFT output (complexTo) into Poisson
-    // After forward FFT, result is in complexTo, so we need to copy to densitySpectrum
-    // or just wire densitySpectrum as complexFrom for next operation
-    const gl = this.gl;
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferTo);
-    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.complexTo, 0);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
-    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.densitySpectrumTexture, 0);
-    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
-      0, 0, this.textureWidth3D, this.textureWidth3D,
-      gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    // Step 3: Solve Poisson (reads from densitySpectrum, writes to potentialSpectrum)
+    // Wait - this is wrong! Forward FFT output is in complexTo (potentialSpectrum),
+    // but Poisson expects input in densitySpectrum. Need to check constructor wiring...
+    // Actually, let's wire it correctly: Poisson should read from complexTo
+    this.poissonKernel.inDensitySpectrum = this.fftKernel.complexTo;
+    this.poissonKernel.run();
 
-    this.poissonKernel.inDensitySpectrum = this.densitySpectrumTexture;
-    this.poissonKernel.run();           // Step 3: Solve Poisson
-
-    // Wire Poisson output into Gradient
+    // Step 4: Compute gradient (reads potentialSpectrum, writes to forceSpectrum X/Y/Z)
     this.gradientKernel.inPotentialSpectrum = this.poissonKernel.outPotentialSpectrum;
-    this.gradientKernel.run();          // Step 4: Compute gradient
+    this.gradientKernel.run();
 
     // Step 5: Inverse FFT for each force component
-    // Switch to inverse mode
     this.fftKernel.inverse = true;
 
-    // 5a: Inverse FFT X
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferFrom);
-    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.gradientKernel.outForceSpectrumX, 0);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
-    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.complexFrom, 0);
-    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
-      0, 0, this.textureWidth3D, this.textureWidth3D,
-      gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    
+    // 5a: Inverse FFT X (forceSpectrumX → real)
+    this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumX;
+    this.fftKernel.real = this.forceGridXTexture;
     this.fftKernel.run();
-    // Result is in fftKernel.real, copy to forceGridXTexture
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferReal);
-    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.real, 0);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
-    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.forceGridXTexture, 0);
-    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
-      0, 0, this.textureWidth3D, this.textureWidth3D,
-      gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
 
-    // 5b: Inverse FFT Y
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferFrom);
-    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.gradientKernel.outForceSpectrumY, 0);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
-    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.complexFrom, 0);
-    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
-      0, 0, this.textureWidth3D, this.textureWidth3D,
-      gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    
+    // 5b: Inverse FFT Y (forceSpectrumY → real)
+    this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumY;
+    this.fftKernel.real = this.forceGridYTexture;
     this.fftKernel.run();
-    // Result is in fftKernel.real, copy to forceGridYTexture
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferReal);
-    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.real, 0);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
-    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.forceGridYTexture, 0);
-    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
-      0, 0, this.textureWidth3D, this.textureWidth3D,
-      gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
 
-    // 5c: Inverse FFT Z
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferFrom);
-    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.gradientKernel.outForceSpectrumZ, 0);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
-    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.complexFrom, 0);
-    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
-      0, 0, this.textureWidth3D, this.textureWidth3D,
-      gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    
+    // 5c: Inverse FFT Z (forceSpectrumZ → real)
+    this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumZ;
+    this.fftKernel.real = this.forceGridZTexture;
     this.fftKernel.run();
-    // Result is in fftKernel.real, copy to forceGridZTexture
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferReal);
-    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.real, 0);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
-    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.forceGridZTexture, 0);
-    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
-      0, 0, this.textureWidth3D, this.textureWidth3D,
-      gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
 
-    // Wire FFT outputs into force sampler
+    // Restore original real texture for next frame
+    this.fftKernel.real = this.massGridTexture;
+
+    // Step 6: Sample forces at particle positions
     this.forceSampleKernel.inForceGridX = this.forceGridXTexture;
     this.forceSampleKernel.inForceGridY = this.forceGridYTexture;
     this.forceSampleKernel.inForceGridZ = this.forceGridZTexture;
-    this.forceSampleKernel.run();       // Step 6: Sample forces
+    this.forceSampleKernel.run();
   }
 
   _integratePhysics() {

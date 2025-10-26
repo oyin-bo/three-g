@@ -137,48 +137,42 @@ test('KFFT: forward-inverse roundtrip recovers original (uniform field)', async 
   // Test field
   const testValue = 2.5;
   const realInput = fillGridTexture(gl, gridSize, slicesPerRow, () => testValue);
+  const densitySpectrum = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const potentialSpectrum = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
 
-  // Single KFFT instance for both forward and inverse
+  // Single KFFT instance, reused for forward and inverse
   const kernel = new KFFT({
     gl,
     real: realInput,
+    complexFrom: densitySpectrum,
+    complexTo: potentialSpectrum,
     gridSize,
     slicesPerRow,
     textureSize,
     inverse: false
   });
 
-  // Forward FFT
+  // Forward FFT: real → complexTo
   kernel.inverse = false;
   const beforeForward = kernel.valueOf();
   kernel.run();
   const afterForward = kernel.valueOf();
 
-  // Copy complexTo → complexFrom for inverse
-  const blitFBO1 = gl.createFramebuffer();
-  const blitFBO2 = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, blitFBO1);
-  gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, kernel.complexTo, 0);
-  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, blitFBO2);
-  gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, kernel.complexFrom, 0);
-  gl.blitFramebuffer(0, 0, textureSize, textureSize, 0, 0, textureSize, textureSize, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-  gl.deleteFramebuffer(blitFBO1);
-  gl.deleteFramebuffer(blitFBO2);
-
-  // Inverse FFT
+  // Inverse FFT: wire complexTo as source, write back to real
   kernel.inverse = true;
+  kernel.complexFrom = kernel.complexTo;  // Use forward output as inverse input
   const beforeInverse = kernel.valueOf();
   kernel.run();
   const afterInverse = kernel.valueOf({ pixels: false });
 
-  // Check roundtrip: should recover original value
+  // Check roundtrip
   // @ts-ignore
   assertClose(afterInverse.real.real.mean, testValue, testValue * 0.05,
     `Recovered values should match original\n\nBefore Forward:\n${beforeForward}\n\nAfter Forward:\n${afterForward}\n\nBefore Inverse:\n${beforeInverse}\n\nAfter Inverse:\n${afterInverse}`);
 
   disposeKernel(kernel);
+  gl.deleteTexture(densitySpectrum);
+  gl.deleteTexture(potentialSpectrum);
   resetGL();
 });
 
@@ -196,37 +190,33 @@ test('KFFT: forward-inverse roundtrip recovers spike', async () => {
   const inReal = fillGridTexture(gl, gridSize, slicesPerRow, (x, y, z) => {
     return x === 2 && y === 2 && z === 2 ? 1.0 : 0.0;
   });
+  const densitySpectrum = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const potentialSpectrum = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
 
-  const intermediate = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
-  const outReal = fillGridTexture(gl, gridSize, slicesPerRow, () => 0);
-
-  // Forward FFT: inReal → intermediate (spectrum)
-  const forward = new KFFT({
+  // Single KFFT instance, reused for forward and inverse
+  const kernel = new KFFT({
     gl,
     real: inReal,
-    complexTo: intermediate,
+    complexFrom: densitySpectrum,
+    complexTo: potentialSpectrum,
     gridSize,
     slicesPerRow,
     textureSize,
     inverse: false
   });
-  const beforeForward = forward.valueOf();
-  forward.run();
-  const afterForward = forward.valueOf();
 
-  // Inverse FFT: intermediate → outReal (recovered spatial domain)
-  const inverse = new KFFT({
-    gl,
-    complexFrom: intermediate,
-    real: outReal,
-    gridSize,
-    slicesPerRow,
-    textureSize,
-    inverse: true
-  });
-  const beforeInverse = inverse.valueOf();
-  inverse.run();
-  const afterInverse = inverse.valueOf({ pixels: true });
+  // Forward FFT: real → complexTo
+  kernel.inverse = false;
+  const beforeForward = kernel.valueOf();
+  kernel.run();
+  const afterForward = kernel.valueOf();
+
+  // Inverse FFT: wire complexTo as source, write back to real
+  kernel.inverse = true;
+  kernel.complexFrom = kernel.complexTo;  // Use forward output as inverse input
+  const beforeInverse = kernel.valueOf();
+  kernel.run();
+  const afterInverse = kernel.valueOf({ pixels: true });
 
   // @ts-ignore
   assert.ok(afterInverse.real, `Should capture real texture\n${afterInverse}`);
@@ -247,9 +237,9 @@ test('KFFT: forward-inverse roundtrip recovers spike', async () => {
   assert.ok(stats.max > 0.9, `Max value should be > 0.9\n${afterInverse}`);
   assert.ok(stats.nonzero > 0, `Should have nonzero values\n${afterInverse}`);
 
-  // Dispose inverse first (it owns the complexFrom texture), then forward
-  disposeKernel(inverse);
-  disposeKernel(forward);
+  disposeKernel(kernel);
+  gl.deleteTexture(densitySpectrum);
+  gl.deleteTexture(potentialSpectrum);
   resetGL();
 });
 
