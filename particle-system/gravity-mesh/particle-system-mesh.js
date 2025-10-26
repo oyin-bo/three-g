@@ -22,7 +22,7 @@ import {
 
 import { GPUProfiler } from '../utils/gpu-profiler.js';
 import { integratePhysics } from '../utils/integrator.js';
-import { createPMGrid, createPMGridFramebuffer } from '../gravity-spectral/pm-grid.js';
+import { createPMGrid, createPMGridFramebuffer } from './pm-grid.js';
 import { computeMeshForces } from './pipeline/compute-mesh-forces.js';
 
 const DEFAULT_WORLD_BOUNDS = {

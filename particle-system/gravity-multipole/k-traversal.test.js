@@ -79,14 +79,15 @@ test('KTraversal: single particle no force', async () => {
   
   kernel.run();
   
-  const result = readTexture(gl, outForce, particleTexWidth, particleTexHeight);
-  
-  assertAllFinite(result, 'Force must be finite');
+  const snapshot = kernel.valueOf({ pixels: false });
   
   // Force should be zero (no other mass)
-  assertClose(result[0], 0.0, 1e-5, 'Force x');
-  assertClose(result[1], 0.0, 1e-5, 'Force y');
-  assertClose(result[2], 0.0, 1e-5, 'Force z');
+  assertClose(snapshot.force.fx.mean, 0.0, 1e-5, 
+    `Force x should be zero\n\n${kernel.toString()}`);
+  assertClose(snapshot.force.fy.mean, 0.0, 1e-5, 
+    `Force y should be zero\n\n${kernel.toString()}`);
+  assertClose(snapshot.force.fz.mean, 0.0, 1e-5, 
+    `Force z should be zero\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();
@@ -153,79 +154,27 @@ test('KTraversal: two particle interaction', async () => {
   
   kernel.run();
   
-  const result = readTexture(gl, outForce, particleTexWidth, particleTexHeight);
-  const posCheck = readTexture(gl, posTex, particleTexWidth, particleTexHeight);
-  
-  assertAllFinite(result, 'Force must be finite');
-  
-  // Add diagnostics if test would fail
-  if (result[0] <= 0) {
-    let octreeNonZero = 0, resultNonZero = 0;
-    for (let i = 0; i < octreeCheck.length; i++) {
-      if (octreeCheck[i] !== 0) octreeNonZero++;
-      if (result[i] !== 0) resultNonZero++;
-    }
-    
-    // Find which voxels have particles
-    let octreeVoxels = [];
-    for (let z = 0; z < gridSize; z++) {
-      for (let y = 0; y < gridSize; y++) {
-        for (let x = 0; x < gridSize; x++) {
-          const sliceRow = Math.floor(z / slicesPerRow);
-          const sliceCol = z % slicesPerRow;
-          const texX = sliceCol * gridSize + x;
-          const texY = sliceRow * gridSize + y;
-          const texIdx = (texY * octreeSize + texX) * 4;
-          const mass = octreeCheck[texIdx + 3];
-          if (mass > 0) {
-            octreeVoxels.push({
-              voxel: [x,y,z],
-              mass,
-              pos: [octreeCheck[texIdx]/mass, octreeCheck[texIdx+1]/mass, octreeCheck[texIdx+2]/mass]
-            });
-          }
-        }
-      }
-    }
-    
-    // Check kernel configuration
-    const kernelConfig = {
-      numLevels: kernel.numLevels,
-      levelConfigs: kernel.levelConfigs,
-      theta: kernel.theta,
-      gravityStrength: kernel.gravityStrength,
-      softening: kernel.softening,
-      worldBounds: kernel.worldBounds,
-      inLevelA0Length: kernel.inLevelA0 ? kernel.inLevelA0.length : 0,
-      inLevelA0HasTextures: kernel.inLevelA0 ? kernel.inLevelA0.map(t => t ? 'texture' : 'null') : []
-    };
-    
-    const diagnostics = {
-      Fx0: result[0],
-      Fy0: result[1],
-      Fz0: result[2],
-      particle0Pos: [posCheck[0], posCheck[1], posCheck[2], posCheck[3]],
-      particle1Pos: [posCheck[4], posCheck[5], posCheck[6], posCheck[7]],
-      octreeNonZero,
-      octreeSample: [octreeCheck[0], octreeCheck[1], octreeCheck[2], octreeCheck[3]],
-      octreeVoxels,
-      resultNonZero,
-      kernelConfig
-    };
-    assert.ok(false, 'KTraversal failed - diagnostics:\n' + JSON.stringify(diagnostics, null, 2));
-  }
+  const snapshot = kernel.valueOf({ pixels: false });
   
   // Particle 0 at (-1,0,0) should feel force toward particle 1 at (1,0,0)
   // Force should be in +x direction
-  assert.ok(result[0] > 0, 'Force on particle 0 should be in +x direction (Fx0=' + result[0] + ')');
-  assertClose(result[1], 0.0, 1e-3, 'Force y should be near zero');
-  assertClose(result[2], 0.0, 1e-3, 'Force z should be near zero');
+  assert.ok(snapshot.force?.fx.mean > 0, 
+    `Force on particle 0 should be in +x direction (mean=${snapshot.force?.fx.mean})\n\n${kernel.toString()}`);
+  assertClose(snapshot.force.fy.mean, 0.0, 1e-3, 
+    `Force y should be near zero\n\n${kernel.toString()}`);
+  assertClose(snapshot.force.fz.mean, 0.0, 1e-3, 
+    `Force z should be near zero\n\n${kernel.toString()}`);
+  
+  // Read raw texture for Newton's third law check (need individual particle forces)
+  const result = readTexture(gl, outForce, particleTexWidth, particleTexHeight);
   
   // Particle 1 should feel opposite force
-  assert.ok(result[4] < 0, 'Force on particle 1 should be in -x direction (Fx1=' + result[4] + ')');
+  assert.ok(result[4] < 0, 
+    `Force on particle 1 should be in -x direction (Fx1=${result[4]})\n\n${kernel.toString()}`);
   
   // Forces should be roughly equal magnitude (Newton's third law)
-  assertClose(Math.abs(result[0]), Math.abs(result[4]), 1e-2, 'Forces should have equal magnitude');
+  assertClose(Math.abs(result[0]), Math.abs(result[4]), 1e-2, 
+    `Forces should have equal magnitude\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   disposeKernel(aggregator);
@@ -281,7 +230,7 @@ test('KTraversal: theta criterion effect', async () => {
   });
   
   kernel1.run();
-  const result1 = readTexture(gl, outForce1, particleTexWidth, particleTexHeight);
+  const snap1 = kernel1.valueOf({ pixels: false });
   
   // Large theta (more approximation)
   const kernel2 = new KTraversal({
@@ -300,18 +249,16 @@ test('KTraversal: theta criterion effect', async () => {
   });
   
   kernel2.run();
-  const result2 = readTexture(gl, outForce2, particleTexWidth, particleTexHeight);
-  
-  // Both should produce finite forces
-  assertAllFinite(result1, 'Small theta force finite');
-  assertAllFinite(result2, 'Large theta force finite');
+  const snap2 = kernel2.valueOf({ pixels: false });
   
   // Both should point in same direction (toward mass)
-  const mag1 = Math.sqrt(result1[0]**2 + result1[1]**2 + result1[2]**2);
-  const mag2 = Math.sqrt(result2[0]**2 + result2[1]**2 + result2[2]**2);
+  const mag1 = snap1.totalForce;
+  const mag2 = snap2.totalForce;
   
-  assert.ok(mag1 > 0, 'Small theta should produce force (|F_smallTheta|=' + mag1 + ')');
-  assert.ok(mag2 > 0, 'Large theta should produce force (|F_largeTheta|=' + mag2 + ')');
+  assert.ok(mag1 > 0, 
+    `Small theta should produce force (|F|=${mag1})\n\n${kernel1.toString()}`);
+  assert.ok(mag2 > 0, 
+    `Large theta should produce force (|F|=${mag2})\n\n${kernel2.toString()}`);
   
   disposeKernel(kernel1);
   disposeKernel(kernel2);
@@ -364,7 +311,7 @@ test('KTraversal: gravity strength scaling', async () => {
   });
   
   kernel1.run();
-  const result1 = readTexture(gl, outForce1, particleTexWidth, particleTexHeight);
+  const snap1 = kernel1.valueOf({ pixels: false });
   
   // Strong gravity (10x)
   const kernel2 = new KTraversal({
@@ -383,13 +330,14 @@ test('KTraversal: gravity strength scaling', async () => {
   });
   
   kernel2.run();
-  const result2 = readTexture(gl, outForce2, particleTexWidth, particleTexHeight);
+  const snap2 = kernel2.valueOf({ pixels: false });
   
-  const mag1 = Math.sqrt(result1[0]**2 + result1[1]**2 + result1[2]**2);
-  const mag2 = Math.sqrt(result2[0]**2 + result2[1]**2 + result2[2]**2);
+  const mag1 = snap1.totalForce;
+  const mag2 = snap2.totalForce;
   
   // Strong gravity should produce 10x force
-  assertClose(mag2 / mag1, 10.0, 0.5, 'Force should scale with gravity strength');
+  assertClose(mag2 / mag1, 10.0, 0.5, 
+    `Force should scale with gravity strength (mag1=${mag1}, mag2=${mag2})\n\nWeak gravity:\n${kernel1.toString()}\n\nStrong gravity:\n${kernel2.toString()}`);
   
   disposeKernel(kernel1);
   disposeKernel(kernel2);
@@ -454,7 +402,7 @@ test('KTraversal: softening prevents singularities', async () => {
   });
   
   kernel1.run();
-  const result1 = readTexture(gl, outForce1, particleTexWidth, particleTexHeight);
+  const snap1 = kernel1.valueOf({ pixels: false });
   
   // Large softening
   const kernel2 = new KTraversal({
@@ -473,16 +421,14 @@ test('KTraversal: softening prevents singularities', async () => {
   });
   
   kernel2.run();
-  const result2 = readTexture(gl, outForce2, particleTexWidth, particleTexHeight);
+  const snap2 = kernel2.valueOf({ pixels: false });
   
-  assertAllFinite(result1, 'Small softening must be finite');
-  assertAllFinite(result2, 'Large softening must be finite');
-  
-  const mag1 = Math.sqrt(result1[0]**2 + result1[1]**2 + result1[2]**2);
-  const mag2 = Math.sqrt(result2[0]**2 + result2[1]**2 + result2[2]**2);
+  const mag1 = snap1.totalForce;
+  const mag2 = snap2.totalForce;
   
   // Larger softening should reduce force magnitude
-  assert.ok(mag2 < mag1, 'Larger softening should reduce force (|F_softLarge|=' + mag2 + ' < |F_softSmall|=' + mag1 + ')');
+  assert.ok(mag2 < mag1, 
+    `Larger softening should reduce force (|F_large|=${mag2} < |F_small|=${mag1})\n\nSmall softening:\n${kernel1.toString()}\n\nLarge softening:\n${kernel2.toString()}`);
   
   disposeKernel(kernel1);
   disposeKernel(kernel2);
@@ -535,14 +481,15 @@ test('KTraversal: zero mass octree', async () => {
   
   kernel.run();
   
-  const result = readTexture(gl, outForce, particleTexWidth, particleTexHeight);
+  const snapshot = kernel.valueOf({ pixels: false });
   
   // All forces should be zero (no mass in octree)
-  for (let i = 0; i < result.length; i += 4) {
-    assertClose(result[i + 0], 0.0, 1e-5, `Particle ${i/4} force x`);
-    assertClose(result[i + 1], 0.0, 1e-5, `Particle ${i/4} force y`);
-    assertClose(result[i + 2], 0.0, 1e-5, `Particle ${i/4} force z`);
-  }
+  assertClose(snapshot.force.fx.mean, 0.0, 1e-5, 
+    `Force x should be zero\n\n${kernel.toString()}`);
+  assertClose(snapshot.force.fy.mean, 0.0, 1e-5, 
+    `Force y should be zero\n\n${kernel.toString()}`);
+  assertClose(snapshot.force.fz.mean, 0.0, 1e-5, 
+    `Force z should be zero\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();
@@ -606,13 +553,12 @@ test('KTraversal: multi-level octree', async () => {
   
   kernel.run();
   
-  const result = readTexture(gl, outForce, particleTexWidth, particleTexHeight);
-  
-  assertAllFinite(result, 'Multi-level force must be finite');
+  const snapshot = kernel.valueOf({ pixels: false });
   
   // Should produce some force from distributed mass
-  const mag = Math.sqrt(result[0]**2 + result[1]**2 + result[2]**2);
-  assert.ok(mag > 0, 'Multi-level should produce force (|F|=' + mag + ')');
+  const mag = snapshot.totalForce;
+  assert.ok(mag > 0, 
+    `Multi-level should produce force (|F|=${mag})\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();

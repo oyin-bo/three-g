@@ -74,7 +74,7 @@ void main() {
   
   // Convert voxel to 2D texture coordinates
   int sliceRow = voxel.z / int(u_slicesPerRow);
-  int sliceCol = voxel.z - sliceRow * int(u_slicesPerRow);
+  int sliceCol = voxel.z % int(u_slicesPerRow);
 
   
   vec2 texel = vec2(

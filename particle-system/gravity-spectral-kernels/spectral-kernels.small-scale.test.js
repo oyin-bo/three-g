@@ -167,16 +167,21 @@ test('spectral-kernels.small-scale: two particles attract each other', async () 
   
   // Verify particles moved toward each other
   // Particle 0 should move in +x direction (toward particle 1)
+  const diagTwoBody = `\n  Two-body diagnostics:\n` +
+    `    Initial positions: P0=${initial0.position.map(v => v.toFixed(4)).join(', ')}, P1=${initial1.position.map(v => v.toFixed(4)).join(', ')}\n` +
+    `    Final positions:   P0=${final0.position.map(v => v.toFixed(4)).join(', ')}, P1=${final1.position.map(v => v.toFixed(4)).join(', ')}\n` +
+    `    Final velocities:  P0=${final0.velocity.map(v => v.toFixed(4)).join(', ')}, P1=${final1.velocity.map(v => v.toFixed(4)).join(', ')}`;
+
   assert.ok(final0.position[0] > initial0.position[0], 
-    `Particle 0 should move right: ${initial0.position[0]} -> ${final0.position[0]}`);
+    `Particle 0 should move right: ${initial0.position[0]} -> ${final0.position[0]}` + diagTwoBody);
   
   // Particle 1 should move in -x direction (toward particle 0)
   assert.ok(final1.position[0] < initial1.position[0], 
-    `Particle 1 should move left: ${initial1.position[0]} -> ${final1.position[0]}`);
+    `Particle 1 should move left: ${initial1.position[0]} -> ${final1.position[0]}` + diagTwoBody);
   
   // Check velocity direction
-  assert.ok(final0.velocity[0] > 0, 'Particle 0 velocity should be positive (rightward)');
-  assert.ok(final1.velocity[0] < 0, 'Particle 1 velocity should be negative (leftward)');
+  assert.ok(final0.velocity[0] > 0, 'Particle 0 velocity should be positive (rightward)' + diagTwoBody);
+  assert.ok(final1.velocity[0] < 0, 'Particle 1 velocity should be negative (leftward)' + diagTwoBody);
   
   disposeSystem(system, canvas);
 });
@@ -236,8 +241,12 @@ test('spectral-kernels.small-scale: ten particles in cluster contract inward', a
   const finalRadius = getAverageRadius();
   
   // Verify system contracted (particles moved inward)
+  const diagCluster = `\n  Cluster contraction diagnostics:\n` +
+    `    Initial average radius: ${initialRadius.toFixed(3)}\n` +
+    `    Final average radius:   ${finalRadius.toFixed(3)}`;
+
   assert.ok(finalRadius < initialRadius, 
-    `Cluster should contract: initial radius=${initialRadius.toFixed(3)}, final radius=${finalRadius.toFixed(3)}`);
+    `Cluster should contract: initial radius=${initialRadius.toFixed(3)}, final radius=${finalRadius.toFixed(3)}` + diagCluster);
   
   // Check no NaN or Inf values
   for (let i = 0; i < 10; i++) {
@@ -261,7 +270,7 @@ test('spectral-kernels.small-scale: ten particles in cluster contract inward', a
   comZ /= 10;
   
   const comDrift = Math.sqrt(comX**2 + comY**2 + comZ**2);
-  assert.ok(comDrift < 0.1, `Center of mass should not drift significantly: drift=${comDrift.toFixed(4)}`);
+  assert.ok(comDrift < 0.1, `Center of mass should not drift significantly: drift=${comDrift.toFixed(4)}` + diagCluster);
   
   disposeSystem(system, canvas);
 });

@@ -34,9 +34,9 @@ void main() {
   v_particleMass = mass;
   
   // Output position for point rendering
-  // Map particle index to output position
-  float outputX = float(texX) / u_textureSize.x * 2.0 - 1.0;
-  float outputY = float(texY) / u_textureSize.y * 2.0 - 1.0;
+  // Map particle index to output position, centered on pixel
+  float outputX = (float(texX) + 0.5) / u_textureSize.x * 2.0 - 1.0;
+  float outputY = (float(texY) + 0.5) / u_textureSize.y * 2.0 - 1.0;
   
   gl_Position = vec4(outputX, outputY, 0.0, 1.0);
   gl_PointSize = 1.0;

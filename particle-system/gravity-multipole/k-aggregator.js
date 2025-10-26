@@ -10,6 +10,7 @@
 
 import aggregationVert from '../shaders/aggregation.vert.js';
 import aggregationFrag from '../shaders/aggregation.frag.js';
+import { readLinear, readGrid3D, formatNumber } from '../diag.js';
 
 
 export class KAggregator {
@@ -127,6 +128,65 @@ export class KAggregator {
   // removed helper methods; shader compile and VAO created inline in constructor
   
   /**
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
+   */
+  valueOf({ pixels } = {}) {
+    const value = {
+      position: this.inPosition && readLinear({
+        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
+        height: this.particleTexHeight, count: this.particleCount,
+        channels: ['x', 'y', 'z', 'mass'], pixels
+      }),
+      a0: this.outA0 && readGrid3D({
+        gl: this.gl, texture: this.outA0, width: this.octreeSize,
+        height: this.octreeSize, gridSize: this.gridSize,
+        channels: ['cx', 'cy', 'cz', 'mass'], pixels
+      }),
+      a1: this.outA1 && readGrid3D({
+        gl: this.gl, texture: this.outA1, width: this.octreeSize,
+        height: this.octreeSize, gridSize: this.gridSize,
+        channels: ['xx', 'yy', 'zz', 'xy'], pixels
+      }),
+      a2: this.outA2 && readGrid3D({
+        gl: this.gl, texture: this.outA2, width: this.octreeSize,
+        height: this.octreeSize, gridSize: this.gridSize,
+        channels: ['xz', 'yz', 'unused1', 'unused2'], pixels
+      }),
+      particleCount: this.particleCount,
+      particleTexWidth: this.particleTexWidth,
+      particleTexHeight: this.particleTexHeight,
+      octreeSize: this.octreeSize,
+      gridSize: this.gridSize,
+      slicesPerRow: this.slicesPerRow,
+      worldBounds: { min: [...this.worldBounds.min], max: [...this.worldBounds.max] },
+      disableFloatBlend: this.disableFloatBlend,
+      renderCount: this.renderCount
+    };
+    
+    value.toString = () =>
+`KAggregator(${this.particleCount} particles→${this.gridSize}³ grid) octree=${this.octreeSize}×${this.octreeSize} slices=${this.slicesPerRow} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
+
+position: ${value.position}
+
+A0 (monopole): ${value.a0}
+
+A1 (quadrupole xx,yy,zz,xy): ${value.a1}
+
+A2 (quadrupole xz,yz): ${value.a2}`;
+    
+    return value;
+  }
+  
+  /**
+   * Get human-readable string representation of kernel state
+   * @returns {string} Compact summary
+   */
+  toString() {
+    return this.valueOf().toString();
+  }
+  
+  /**
    * Run the kernel (synchronous)
    */
   run() {
@@ -203,6 +263,8 @@ export class KAggregator {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, null);
+    
+    this.renderCount = (this.renderCount || 0) + 1;
   }
   
   /**

@@ -9,6 +9,7 @@
 
 import fsQuadVert from '../shaders/fullscreen.vert.js';
 import nearFieldFrag from '../shaders/near-field.frag.js';
+import { readLinear, readGrid3D, formatNumber } from '../diag.js';
 
 export class KNearField {
   /**
@@ -104,7 +105,7 @@ export class KNearField {
     if (!texture) throw new Error('Failed to create texture');
     
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, this.textureSize, this.textureSize, 0, gl.RGBA, gl.FLOAT, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, this.textureSize, this.textureSize, 0, gl.RED, gl.FLOAT, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -132,7 +133,54 @@ export class KNearField {
     
     return vao;
   }
+  
+  /**
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
+   */
+  valueOf({ pixels } = {}) {
+    const value = {
+      position: this.inPosition && readLinear({
+        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
+        height: this.particleTexHeight, count: this.particleCount,
+        channels: ['x', 'y', 'z', 'mass'], pixels
+      }),
+      force: this.outForce && readLinear({
+        gl: this.gl, texture: this.outForce, width: this.particleTexWidth,
+        height: this.particleTexHeight, count: this.particleCount,
+        channels: ['fx', 'fy', 'fz', 'unused'], pixels
+      }),
+      particleCount: this.particleCount,
+      particleTexWidth: this.particleTexWidth,
+      particleTexHeight: this.particleTexHeight,
+      gridSize: this.gridSize,
+      worldBounds: { min: [...this.worldBounds.min], max: [...this.worldBounds.max] },
+      gravitationalConstant: this.gravitationalConstant,
+      softening: this.softening,
+      accumulate: this.accumulate,
+      renderCount: this.renderCount
+    };
+    
+    const totalForce = value.force?.fx ? Math.sqrt(value.force.fx.mean ** 2 + value.force.fy.mean ** 2 + value.force.fz.mean ** 2) : 0;
+    
+    value.toString = () =>
+`KNearField(${this.particleCount} particles) grid=${this.gridSize}³ G=${formatNumber(this.gravitationalConstant)} soft=${formatNumber(this.softening)} accumulate=${this.accumulate} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
 
+position: ${value.position}
+
+→ force: ${value.force ? `totalForceMag=${formatNumber(totalForce)} ` : ''}${value.force}`;
+    
+    return value;
+  }
+  
+  /**
+   * Get human-readable string representation of kernel state
+   * @returns {string} Compact summary
+   */
+  toString() {
+    return this.valueOf().toString();
+  }
+  
   run() {
     const gl = this.gl;
     
@@ -209,6 +257,8 @@ export class KNearField {
     gl.bindVertexArray(prevVAO);
     if (prevBlend) gl.enable(gl.BLEND);
     if (prevDepthTest) gl.enable(gl.DEPTH_TEST);
+    
+    this.renderCount = (this.renderCount || 0) + 1;
   }
 
   dispose() {
@@ -241,7 +291,7 @@ export class KNearField {
 }
 
 /**
- * Helper: Create a grid texture (RGBA32F for mass/force)
+ * Helper: Create a grid texture (R32F for mass/force)
  * @param {WebGL2RenderingContext} gl
  * @param {number} size
  */
@@ -249,7 +299,7 @@ function createGridTexture(gl, size) {
   const texture = gl.createTexture();
   if (!texture) throw new Error('Failed to create texture');
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, size, size, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, size, size, 0, gl.RED, gl.FLOAT, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

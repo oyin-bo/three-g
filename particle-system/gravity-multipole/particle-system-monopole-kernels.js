@@ -317,9 +317,6 @@ export class ParticleSystemMonopoleKernels {
     }
   }
 
-  /**
-   * Dispose all resources
-   */
   dispose() {
     // Dispose kernels
     if (this.aggregatorKernel) this.aggregatorKernel.dispose();

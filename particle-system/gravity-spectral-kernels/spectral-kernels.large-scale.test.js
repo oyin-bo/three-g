@@ -131,14 +131,18 @@ test('spectral-kernels.large-scale: 100 particles evolve without errors', async 
   for (let i = 0; i < particleCount; i++) {
     const p = particles[i];
     
+    const diag = `\n      Particle ${i} snapshot:\n` +
+      `        position=[${p.position.slice(0, 3).map(v => v.toFixed(4)).join(', ')}]\n` +
+      `        velocity=[${p.velocity.slice(0, 3).map(v => v.toFixed(4)).join(', ')}]`;
+
     for (let j = 0; j < 3; j++) {
-      assert.ok(isFinite(p.position[j]), `Particle ${i} position[${j}] should be finite`);
-      assert.ok(isFinite(p.velocity[j]), `Particle ${i} velocity[${j}] should be finite`);
+      assert.ok(isFinite(p.position[j]), `Particle ${i} position[${j}] should be finite` + diag);
+      assert.ok(isFinite(p.velocity[j]), `Particle ${i} velocity[${j}] should be finite` + diag);
     }
     
     // Check positions are reasonable
     const r = Math.sqrt(p.position[0]**2 + p.position[1]**2 + p.position[2]**2);
-    assert.ok(r < 10, `Particle ${i} should stay in reasonable bounds: r=${r.toFixed(2)}`);
+    assert.ok(r < 10, `Particle ${i} should stay in reasonable bounds: r=${r.toFixed(2)}` + diag);
   }
   
   disposeSystem(system, canvas);
@@ -197,8 +201,13 @@ test('spectral-kernels.large-scale: 256 particles perform efficiently', async ()
   const msPerStep = elapsed / numSteps;
   
   // Spectral method should be efficient (O(N log N))
+  const diagPerf = `\n  Performance diagnostics:\n` +
+    `    Elapsed ms: ${elapsed.toFixed(2)}\n` +
+    `    Steps: ${numSteps}\n` +
+    `    ms per step: ${msPerStep.toFixed(2)}`;
+
   assert.ok(msPerStep < 50, 
-    `Spectral method should be efficient: ${msPerStep.toFixed(2)}ms per step`);
+    `Spectral method should be efficient: ${msPerStep.toFixed(2)}ms per step` + diagPerf);
   
   // Verify stability
   const particles = readAllParticleData(system, particleCount);
@@ -211,7 +220,7 @@ test('spectral-kernels.large-scale: 256 particles perform efficiently', async ()
     assert.ok(isFinite(speed), 'All velocities should be finite');
   }
   
-  assert.ok(maxSpeed < 5.0, `Velocities should remain reasonable: max=${maxSpeed.toFixed(3)}`);
+  assert.ok(maxSpeed < 5.0, `Velocities should remain reasonable: max=${maxSpeed.toFixed(3)}` + diagPerf);
   
   disposeSystem(system, canvas);
 });
@@ -285,9 +294,15 @@ test('spectral-kernels.large-scale: 1000 particles remain stable', async () => {
     gl.deleteFramebuffer(fbo);
     
     // Check finite values
+    const posStr = Array.from(posData.subarray(0, 3)).map(v => v.toFixed(4)).join(', ');
+    const velStr = Array.from(velData.subarray(0, 3)).map(v => v.toFixed(4)).join(', ');
+    const diagSample = `\n    Particle ${idx} sample:\n` +
+      `      position=[${posStr}]\n` +
+      `      velocity=[${velStr}]`;
+
     for (let j = 0; j < 3; j++) {
-      assert.ok(isFinite(posData[j]), `Particle ${idx} position[${j}] should be finite`);
-      assert.ok(isFinite(velData[j]), `Particle ${idx} velocity[${j}] should be finite`);
+      assert.ok(isFinite(posData[j]), `Particle ${idx} position[${j}] should be finite` + diagSample);
+      assert.ok(isFinite(velData[j]), `Particle ${idx} velocity[${j}] should be finite` + diagSample);
     }
   }
   
@@ -347,8 +362,12 @@ test('spectral-kernels.large-scale: particles cluster over time', async () => {
   const finalSpread = calculateSpread();
   
   // System should cluster (spread should decrease)
+  const diagCluster = `\n  Clustering diagnostics:\n` +
+    `    Initial spread: ${initialSpread.toFixed(3)}\n` +
+    `    Final spread:   ${finalSpread.toFixed(3)}`;
+
   assert.ok(finalSpread < initialSpread * 0.85, 
-    `System should cluster: spread ${initialSpread.toFixed(3)} -> ${finalSpread.toFixed(3)}`);
+    `System should cluster: spread ${initialSpread.toFixed(3)} -> ${finalSpread.toFixed(3)}` + diagCluster);
   
   disposeSystem(system, canvas);
 });
@@ -415,8 +434,12 @@ test('spectral-kernels.large-scale: higher grid resolution handles more particle
   
   // All resolutions should produce stable results
   for (let i = 0; i < gridSizes.length; i++) {
+    const diagGrid = `\n  Grid ${gridSizes[i]} diagnostics:\n` +
+      `    Max velocity: ${maxSpeeds[i].toFixed(4)}\n` +
+      `    Grid size: ${gridSizes[i]}`;
+
     assert.ok(isFinite(maxSpeeds[i]) && maxSpeeds[i] < 3.0, 
-      `Grid ${gridSizes[i]} should be stable: maxSpeed=${maxSpeeds[i].toFixed(3)}`);
+      `Grid ${gridSizes[i]} should be stable: maxSpeed=${maxSpeeds[i].toFixed(3)}` + diagGrid);
   }
   
   canvas.remove();

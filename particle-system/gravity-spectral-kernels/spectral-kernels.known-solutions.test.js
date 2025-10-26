@@ -112,15 +112,21 @@ test('spectral-kernels.known-solutions: particle falls toward massive body', asy
   const final = readParticleData(system, 1);
   
   // Particle should fall downward (negative y velocity)
+  const diagFall = `\n  Free-fall diagnostics:\n` +
+    `    Initial position: [${initial.position.map(v => v.toFixed(4)).join(', ')}]\n` +
+    `    Final position:   [${final.position.map(v => v.toFixed(4)).join(', ')}]\n` +
+    `    Initial velocity: [${initial.velocity.map(v => v.toFixed(4)).join(', ')}]\n` +
+    `    Final velocity:   [${final.velocity.map(v => v.toFixed(4)).join(', ')}]`;
+
   assert.ok(final.velocity[1] < -0.01, 
-    `Particle should fall downward: vy=${final.velocity[1].toFixed(4)}`);
+    `Particle should fall downward: vy=${final.velocity[1].toFixed(4)}` + diagFall);
   
   // Particle should be closer to origin
   const initialDist = Math.sqrt(initial.position[0]**2 + initial.position[1]**2 + initial.position[2]**2);
   const finalDist = Math.sqrt(final.position[0]**2 + final.position[1]**2 + final.position[2]**2);
   
   assert.ok(finalDist < initialDist, 
-    `Particle should move closer: ${initialDist.toFixed(3)} -> ${finalDist.toFixed(3)}`);
+    `Particle should move closer: ${initialDist.toFixed(3)} -> ${finalDist.toFixed(3)}` + diagFall);
   
   disposeSystem(system, canvas);
 });
@@ -183,12 +189,17 @@ test('spectral-kernels.known-solutions: circular orbit maintains approximate rad
   const variation = (maxDist - minDist) / avgDist;
   
   // Orbit should stay reasonably circular (allowing for spectral method artifacts)
+  const diagOrbit = `\n  Circular orbit diagnostics:\n` +
+    `    Distances sampled: ${distances.map(d => d.toFixed(3)).join(', ')}\n` +
+    `    Average distance: ${avgDist.toFixed(3)}\n` +
+    `    Min/Max distance: ${minDist.toFixed(3)} / ${maxDist.toFixed(3)}`;
+
   assert.ok(variation < 0.4, 
-    `Orbit should be reasonably circular: variation=${(variation * 100).toFixed(1)}%`);
+    `Orbit should be reasonably circular: variation=${(variation * 100).toFixed(1)}%` + diagOrbit);
   
   // Average radius should be close to initial
   assert.ok(Math.abs(avgDist - r) / r < 0.2, 
-    `Average radius should stay close to initial: ${r.toFixed(3)} -> ${avgDist.toFixed(3)}`);
+    `Average radius should stay close to initial: ${r.toFixed(3)} -> ${avgDist.toFixed(3)}` + diagOrbit);
   
   disposeSystem(system, canvas);
 });
@@ -251,8 +262,11 @@ test('spectral-kernels.known-solutions: binary system orbits center of mass', as
   // Center of mass should remain near origin
   for (const com of comPositions) {
     const drift = Math.sqrt(com[0]**2 + com[1]**2 + com[2]**2);
+    const diagBinary = `\n  Binary COM diagnostics:\n` +
+      comPositions.map((com, step) => `    Step ${step * 10}: [${com.map(v => v.toFixed(4)).join(', ')}]`).join('\n');
+
     assert.ok(drift < 0.3, 
-      `Center of mass should stay near origin: drift=${drift.toFixed(4)}`);
+      `Center of mass should stay near origin: drift=${drift.toFixed(4)}` + diagBinary);
   }
   
   disposeSystem(system, canvas);
@@ -326,8 +340,12 @@ test('spectral-kernels.known-solutions: particle near L4 point shows bounded mot
   }
   
   // Particle should stay in bounded region near L4 (allowing for spectral artifacts)
+  const diagL4 = `\n  L4 stability diagnostics:\n` +
+    `    Initial L4 point: [${initialL4.map(v => v.toFixed(3)).join(', ')}]\n` +
+    `    Max drift: ${maxDrift.toFixed(3)}`;
+
   assert.ok(maxDrift < 1.0, 
-    `Particle should remain bounded near L4: max drift=${maxDrift.toFixed(3)}`);
+    `Particle should remain bounded near L4: max drift=${maxDrift.toFixed(3)}` + diagL4);
   
   disposeSystem(system, canvas);
 });
@@ -381,13 +399,19 @@ test('spectral-kernels.known-solutions: particle with high velocity escapes mass
   const finalDist = Math.sqrt(final.position[0]**2 + final.position[1]**2 + final.position[2]**2);
   
   // Particle should have escaped (moved significantly farther)
+  const diagEscape = `\n  Escape diagnostics:\n` +
+    `    Initial distance: ${initialDist.toFixed(3)}\n` +
+    `    Final distance:   ${finalDist.toFixed(3)}\n` +
+    `    Initial velocity: [0.0000, ${v_test.toFixed(4)}, 0.0000]\n` +
+    `    Final velocity:   [${final.velocity.map(v => v.toFixed(4)).join(', ')}]`;
+
   assert.ok(finalDist > initialDist * 1.5, 
-    `Particle should escape: ${initialDist.toFixed(3)} -> ${finalDist.toFixed(3)}`);
+    `Particle should escape: ${initialDist.toFixed(3)} -> ${finalDist.toFixed(3)}` + diagEscape);
   
   // Velocity should still be substantial (not captured)
   const finalSpeed = Math.sqrt(final.velocity[0]**2 + final.velocity[1]**2 + final.velocity[2]**2);
   assert.ok(finalSpeed > v_test * 0.3, 
-    `Particle should maintain substantial velocity: ${finalSpeed.toFixed(4)}`);
+    `Particle should maintain substantial velocity: ${finalSpeed.toFixed(4)}` + diagEscape);
   
   disposeSystem(system, canvas);
 });

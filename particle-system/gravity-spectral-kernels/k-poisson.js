@@ -9,6 +9,7 @@
 
 import poissonFrag from './shaders/poisson.frag.js';
 import fsQuadVert from '../shaders/fullscreen.vert.js';
+import { readLinear, formatNumber } from '../diag.js';
 
 export class KPoisson {
   /**
@@ -102,6 +103,51 @@ export class KPoisson {
   }
   
   /**
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
+   */
+  valueOf({ pixels } = {}) {
+    const value = {
+      densitySpectrum: this.inDensitySpectrum && readLinear({
+        gl: this.gl, texture: this.inDensitySpectrum, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      potentialSpectrum: this.outPotentialSpectrum && readLinear({
+        gl: this.gl, texture: this.outPotentialSpectrum, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      gridSize: this.gridSize,
+      slicesPerRow: this.slicesPerRow,
+      textureSize: this.textureSize,
+      gravitationalConstant: this.gravitationalConstant,
+      worldSize: [...this.worldSize],
+      assignment: this.assignment,
+      poissonUseDiscrete: this.poissonUseDiscrete,
+      treePMSigma: this.treePMSigma,
+      renderCount: this.renderCount
+    };
+    
+    value.toString = () =>
+`KPoisson(${this.gridSize}³ grid) texture=${this.textureSize}×${this.textureSize} G=${formatNumber(this.gravitationalConstant)} assignment=${this.assignment} #${this.renderCount}
+
+densitySpectrum: ${value.densitySpectrum}
+
+→ potentialSpectrum: ${value.potentialSpectrum}`;
+    
+    return value;
+  }
+  
+  /**
+   * Get human-readable string representation of kernel state
+   * @returns {string} Compact summary
+   */
+  toString() {
+    return this.valueOf().toString();
+  }
+  
+  /**
    * Run the kernel (synchronous)
    */
   run() {
@@ -167,6 +213,8 @@ export class KPoisson {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, null);
     gl.useProgram(null);
+    
+    this.renderCount = (this.renderCount || 0) + 1;
   }
   
   /**
@@ -179,7 +227,11 @@ export class KPoisson {
     if (this.quadVAO) gl.deleteVertexArray(this.quadVAO);
     if (this.outFramebuffer) gl.deleteFramebuffer(this.outFramebuffer);
 
-    // Note: Do not delete inDensitySpectrum, outPotentialSpectrum as they are owned by external code
+    if (this.inDensitySpectrum) gl.deleteTexture(this.inDensitySpectrum);
+    if (this.outPotentialSpectrum) gl.deleteTexture(this.outPotentialSpectrum);
+
+    this.inDensitySpectrum = null;
+    this.outPotentialSpectrum = null;
     this._fboShadow = null;
   }
 }

@@ -9,6 +9,7 @@
 
 import forceSampleVert from './shaders/force-sample.vert.js';
 import forceSampleFrag from './shaders/force-sample.frag.js';
+import { readLinear, readGrid3D, formatNumber } from '../diag.js';
 
 export class KForceSample {
   /**
@@ -30,32 +31,32 @@ export class KForceSample {
    */
   constructor(options) {
     this.gl = options.gl;
-    
+
     // Resource slots
     this.inPosition = (options.inPosition || options.inPosition === null) ? options.inPosition : createTextureRGBA32F(this.gl, options.particleTexWidth || 1, options.particleTexHeight || 1);
     this.inForceGridX = (options.inForceGridX || options.inForceGridX === null) ? options.inForceGridX : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
     this.inForceGridY = (options.inForceGridY || options.inForceGridY === null) ? options.inForceGridY : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
     this.inForceGridZ = (options.inForceGridZ || options.inForceGridZ === null) ? options.inForceGridZ : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
     this.outForce = (options.outForce || options.outForce === null) ? options.outForce : createTextureRGBA32F(this.gl, options.particleTexWidth || 1, options.particleTexHeight || 1);
-    
+
     // Particle configuration
     this.particleCount = options.particleCount || 0;
     this.particleTexWidth = options.particleTexWidth || 0;
     this.particleTexHeight = options.particleTexHeight || 0;
-    
+
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(this.gridSize));
-    
+
     // World bounds
     this.worldBounds = options.worldBounds || {
       min: [-4, -4, -4],
       max: [4, 4, 4]
     };
-    
+
     // Accumulate flag
     this.accumulate = options.accumulate !== undefined ? options.accumulate : false;
-    
+
     // Compile and link shader program
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
     if (!vert) throw new Error('Failed to create vertex shader');
@@ -114,7 +115,7 @@ export class KForceSample {
     const gl = this.gl;
     const texture = gl.createTexture();
     if (!texture) throw new Error('Failed to create texture');
-    
+
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, this.particleTexWidth, this.particleTexHeight, 0, gl.RGBA, gl.FLOAT, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -122,13 +123,75 @@ export class KForceSample {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.bindTexture(gl.TEXTURE_2D, null);
-    
+
     return texture;
+  }
+
+  /**
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
+   */
+  valueOf({ pixels } = {}) {
+    const value = {
+      position: this.inPosition && readLinear({
+        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
+        height: this.particleTexHeight, count: this.particleCount,
+        channels: ['x', 'y', 'z', 'mass'], pixels
+      }),
+      forceGridX: this.inForceGridX && readGrid3D({
+        gl: this.gl, texture: this.inForceGridX, width: this.textureSize,
+        height: this.textureSize, gridSize: this.gridSize,
+        channels: ['fx'], pixels, format: this.gl.R32F
+      }),
+      forceGridY: this.inForceGridY && readGrid3D({
+        gl: this.gl, texture: this.inForceGridY, width: this.textureSize,
+        height: this.textureSize, gridSize: this.gridSize,
+        channels: ['fy'], pixels, format: this.gl.R32F
+      }),
+      forceGridZ: this.inForceGridZ && readGrid3D({
+        gl: this.gl, texture: this.inForceGridZ, width: this.textureSize,
+        height: this.textureSize, gridSize: this.gridSize,
+        channels: ['fz'], pixels, format: this.gl.R32F
+      }),
+      force: this.outForce && readLinear({
+        gl: this.gl, texture: this.outForce, width: this.particleTexWidth,
+        height: this.particleTexHeight, count: this.particleCount,
+        channels: ['fx', 'fy', 'fz', 'unused'], pixels
+      }),
+      particleCount: this.particleCount,
+      particleTexWidth: this.particleTexWidth,
+      particleTexHeight: this.particleTexHeight,
+      gridSize: this.gridSize,
+      slicesPerRow: this.slicesPerRow,
+      textureSize: this.textureSize,
+      worldBounds: { min: [...this.worldBounds.min], max: [...this.worldBounds.max] },
+      accumulate: this.accumulate,
+      renderCount: this.renderCount
+    };
+
+    const totalForce = value.force?.fx ? Math.sqrt(value.force.fx.mean ** 2 + value.force.fy.mean ** 2 + value.force.fz.mean ** 2) : 0;
+
+    value.toString = () =>
+      `KForceSample(${this.particleCount} particles from ${this.gridSize}³ grid) accumulate=${this.accumulate} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
+
+position: ${value.position}
+
+forceGridX: ${value.forceGridX}
+forceGridY: ${value.forceGridY}
+forceGridZ: ${value.forceGridZ}
+
+→ force: ${value.force ? `totalForceMag=${formatNumber(totalForce)} ` : ''}${value.force}`;
+
+    return value;
+  }
+
+  toString() {
+    return this.valueOf().toString();
   }
 
   run() {
     const gl = this.gl;
-    
+
     if (!this.inPosition) {
       throw new Error('KForceSample: inPosition texture not set');
     }
@@ -138,7 +201,7 @@ export class KForceSample {
     if (!this.outForce) {
       throw new Error('KForceSample: outForce texture not set');
     }
-    
+
     // Save GL state
     const prevFB = gl.getParameter(gl.FRAMEBUFFER_BINDING);
     const prevVP = gl.getParameter(gl.VIEWPORT);
@@ -146,20 +209,20 @@ export class KForceSample {
     const prevVAO = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
     const prevBlend = gl.getParameter(gl.BLEND);
     const prevDepthTest = gl.getParameter(gl.DEPTH_TEST);
-    
+
     // Bind FBO and attach output texture
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outForce, 0);
     // Ensure we are drawing to COLOR_ATTACHMENT0
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-    
+
     const fbStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
     if (fbStatus !== gl.FRAMEBUFFER_COMPLETE) {
       throw new Error(`KForceSample: Framebuffer incomplete: ${fbStatus}`);
     }
-    
+
     gl.viewport(0, 0, this.particleTexWidth, this.particleTexHeight);
-    
+
     if (this.accumulate) {
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE);
@@ -170,37 +233,37 @@ export class KForceSample {
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
     gl.disable(gl.DEPTH_TEST);
-    
+
     gl.useProgram(this.program);
-    
+
     // Bind input textures
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.inPosition);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_positionTexture'), 0);
-    
+
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.inForceGridX);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_forceGridX'), 1);
-    
+
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.inForceGridY);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_forceGridY'), 2);
-    
+
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, this.inForceGridZ);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_forceGridZ'), 3);
-    
+
     // Set uniforms
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.particleTexWidth, this.particleTexHeight);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMin'), this.worldBounds.min[0], this.worldBounds.min[1], this.worldBounds.min[2]);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMax'), this.worldBounds.max[0], this.worldBounds.max[1], this.worldBounds.max[2]);
-    
+
     gl.bindVertexArray(this.particleVAO);
     gl.drawArrays(gl.POINTS, 0, this.particleCount);
     gl.bindVertexArray(null);
-    
+
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, null);
     gl.activeTexture(gl.TEXTURE2);
@@ -209,7 +272,7 @@ export class KForceSample {
     gl.bindTexture(gl.TEXTURE_2D, null);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, null);
-    
+
     // Restore GL state
     gl.bindFramebuffer(gl.FRAMEBUFFER, prevFB);
     gl.viewport(prevVP[0], prevVP[1], prevVP[2], prevVP[3]);
@@ -217,26 +280,30 @@ export class KForceSample {
     gl.bindVertexArray(prevVAO);
     if (!prevBlend) gl.disable(gl.BLEND);
     if (prevDepthTest) gl.enable(gl.DEPTH_TEST);
+
+    this.renderCount = (this.renderCount || 0) + 1;
+
+    
   }
 
   dispose() {
     const gl = this.gl;
-    
+
     if (this.program) {
       gl.deleteProgram(this.program);
       this.program = null;
     }
-    
+
     if (this.particleVAO) {
       gl.deleteVertexArray(this.particleVAO);
       this.particleVAO = null;
     }
-    
+
     if (this.framebuffer) {
       gl.deleteFramebuffer(this.framebuffer);
       this.framebuffer = null;
     }
-    
+
     if (this.outForce) {
       gl.deleteTexture(this.outForce);
       this.outForce = null;
@@ -264,7 +331,7 @@ function createTextureRGBA32F(gl, width, height) {
 }
 
 /**
- * Helper: Create a grid texture (RGBA32F for force grids)
+ * Helper: Create a grid texture (R32F for force grids)
  * @param {WebGL2RenderingContext} gl
  * @param {number} size
  */
@@ -272,7 +339,7 @@ function createGridTexture(gl, size) {
   const texture = gl.createTexture();
   if (!texture) throw new Error('Failed to create texture');
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, size, size, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, size, size, 0, gl.RED, gl.FLOAT, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

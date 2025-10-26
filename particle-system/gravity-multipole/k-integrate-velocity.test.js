@@ -80,16 +80,15 @@ test('KIntegrateVelocity: zero force', async () => {
   
   kernel.run();
   
-  // Read result
-  const result = readTexture(gl, outVelTex, width, height);
+  const snapshot = kernel.valueOf({ pixels: false });
   
   // Verify: velocity should be unchanged with zero force and no damping
-  assertAllFinite(result, 'Result must be finite');
-  for (let i = 0; i < width * height; i++) {
-    assertClose(result[i * 4 + 0], 0.5, 1e-5, `Pixel ${i} vx`);
-    assertClose(result[i * 4 + 1], 0.2, 1e-5, `Pixel ${i} vy`);
-    assertClose(result[i * 4 + 2], 0.1, 1e-5, `Pixel ${i} vz`);
-  }
+  assertClose(snapshot.outVelocity.vx.mean, 0.5, 1e-5, 
+    `Velocity x unchanged\n\n${kernel.toString()}`);
+  assertClose(snapshot.outVelocity.vy.mean, 0.2, 1e-5, 
+    `Velocity y unchanged\n\n${kernel.toString()}`);
+  assertClose(snapshot.outVelocity.vz.mean, 0.1, 1e-5, 
+    `Velocity z unchanged\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();

@@ -9,14 +9,7 @@
 
 import pmDepositVertSrc from './shaders/pm-deposit.vert.js';
 import pmDepositFragSrc from './shaders/pm-deposit.frag.js';
-
-// Debug: log imports
-console.log('KDeposit shader imports:', {
-  vertType: typeof pmDepositVertSrc,
-  fragType: typeof pmDepositFragSrc,
-  vertLength: pmDepositVertSrc?.length,
-  fragLength: pmDepositFragSrc?.length
-});
+import { readLinear, readGrid3D, formatNumber } from '../diag.js';
 
 export class KDeposit {
   /**
@@ -126,6 +119,56 @@ export class KDeposit {
   }
 
   /**
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
+   */
+  valueOf({ pixels } = {}) {
+    const value = {
+      position: this.inPosition && readLinear({
+        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
+        height: this.particleTexHeight, count: this.particleCount,
+        channels: ['x', 'y', 'z', 'mass'], pixels, format: this.gl.RGBA32F
+      }),
+      massGrid: this.outMassGrid && readGrid3D({
+        gl: this.gl, texture: this.outMassGrid, width: this.textureSize,
+        height: this.textureSize, gridSize: this.gridSize,
+        channels: ['mass'], pixels, format: this.gl.R32F
+      }),
+      particleCount: this.particleCount,
+      particleTexWidth: this.particleTexWidth,
+      particleTexHeight: this.particleTexHeight,
+      gridSize: this.gridSize,
+      slicesPerRow: this.slicesPerRow,
+      textureSize: this.textureSize,
+      worldBounds: { min: [...this.worldBounds.min], max: [...this.worldBounds.max] },
+      assignment: this.assignment,
+      disableFloatBlend: this.disableFloatBlend,
+      renderCount: this.renderCount
+    };
+
+    // Compute total mass deposited
+    const totalMass = value.massGrid?.mass?.mean ?
+      value.massGrid.mass.mean * this.gridSize * this.gridSize * this.gridSize : value.massGrid?.mass?.mean;
+
+    value.toString = () =>
+      `KDeposit(${this.particleCount} particles→${this.gridSize}³ grid) assignment=${this.assignment} texture=${this.textureSize}×${this.textureSize} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
+
+position: ${value.position}
+
+massGrid: ${value.massGrid ? `totalMass=${formatNumber(totalMass)} ` : ''}${value.massGrid}\n\n`;
+
+    return value;
+  }
+
+  /**
+   * Get human-readable string representation of kernel state
+   * @returns {string} Compact summary
+   */
+  toString() {
+    return this.valueOf().toString();
+  }
+
+  /**
    * Run the kernel (synchronous)
    */
   run() {
@@ -164,7 +207,7 @@ export class KDeposit {
     gl.depthMask(false);
     gl.disable(gl.CULL_FACE);
     gl.disable(gl.SCISSOR_TEST);
-    gl.colorMask(true, true, true, true);
+    gl.colorMask(true, false, false, false); // only write R channel (R32F)
 
     // Enable additive blending for mass accumulation
     if (!this.disableFloatBlend) {
@@ -220,6 +263,10 @@ export class KDeposit {
     gl.bindTexture(gl.TEXTURE_2D, null);
     gl.useProgram(null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    this.renderCount = (this.renderCount || 0) + 1;
+
+    
   }
 
   /**
@@ -232,7 +279,11 @@ export class KDeposit {
     if (this.particleVAO) gl.deleteVertexArray(this.particleVAO);
     if (this.outFramebuffer) gl.deleteFramebuffer(this.outFramebuffer);
 
-    // Note: Do not delete inPosition, outMassGrid as they are owned by external code
+    if (this.inPosition) gl.deleteTexture(this.inPosition);
+    if (this.outMassGrid) gl.deleteTexture(this.outMassGrid);
+
+    this.inPosition = null;
+    this.outMassGrid = null;
     this._fboShadow = null;
   }
 }

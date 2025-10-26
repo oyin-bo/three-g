@@ -87,8 +87,8 @@ test('KForceSample: creates output texture when not provided', async () => {
   
   kernel.run();
   
-  const outData = readTexture(gl, kernel.outForce, particleTexWidth, particleTexHeight);
-  assertAllFinite(outData, 'Output force data is finite');
+  const snapshot = kernel.valueOf({ pixels: false });
+  assert.ok(snapshot.force, `Output force should be finite\n\n${kernel.toString()}`);
   
   kernel.inPosition = null;
   kernel.inForceGridX = null;
@@ -168,15 +168,21 @@ test('KForceSample: uniform force field produces expected forces', async () => {
 
     recordSnapshot('post-run', kernel);
 
-    outData = readTexture(gl, kernel.outForce, particleTexWidth, particleTexHeight);
+    const snapshot = kernel.valueOf({ pixels: true });
 
-    assertClose(outData[0], 1.5, 0.1, 'Particle 0 force X');
-    assertClose(outData[1], 2.5, 0.1, 'Particle 0 force Y');
-    assertClose(outData[2], 3.5, 0.1, 'Particle 0 force Z');
+    assertClose(snapshot.force.pixels[0].fx, 1.5, 0.1, 
+      `Particle 0 force X\n\n${kernel.toString()}`);
+    assertClose(snapshot.force.pixels[0].fy, 2.5, 0.1, 
+      `Particle 0 force Y\n\n${kernel.toString()}`);
+    assertClose(snapshot.force.pixels[0].fz, 3.5, 0.1, 
+      `Particle 0 force Z\n\n${kernel.toString()}`);
 
-    assertClose(outData[4], 1.5, 0.1, 'Particle 1 force X');
-    assertClose(outData[5], 2.5, 0.1, 'Particle 1 force Y');
-    assertClose(outData[6], 3.5, 0.1, 'Particle 1 force Z');
+    assertClose(snapshot.force.pixels[1].fx, 1.5, 0.1, 
+      `Particle 1 force X\n\n${kernel.toString()}`);
+    assertClose(snapshot.force.pixels[1].fy, 2.5, 0.1, 
+      `Particle 1 force Y\n\n${kernel.toString()}`);
+    assertClose(snapshot.force.pixels[1].fz, 3.5, 0.1, 
+      `Particle 1 force Z\n\n${kernel.toString()}`);
   } catch (err) {
     error = err;
   } finally {
@@ -265,8 +271,8 @@ test('KForceSample: accumulate mode adds forces', async () => {
   });
   
   kernel1.run();
-  const outData1 = readTexture(gl, kernel1.outForce, particleTexWidth, particleTexHeight);
-  const force1X = outData1[0];
+  const snapshot1 = kernel1.valueOf({ pixels: true });
+  const force1X = snapshot1.force.pixels[0].fx;
   
   // Second pass: accumulate mode on same texture
   const kernel2 = new KForceSample({
@@ -286,11 +292,12 @@ test('KForceSample: accumulate mode adds forces', async () => {
   });
   
   kernel2.run();
-  const outData2 = readTexture(gl, kernel1.outForce, particleTexWidth, particleTexHeight);
-  const force2X = outData2[0];
+  const snapshot2 = kernel2.valueOf({ pixels: true });
+  const force2X = snapshot2.force.pixels[0].fx;
   
   // Force should be approximately doubled
-  assertClose(force2X, force1X * 2, 0.2, 'Accumulated force is doubled');
+  assertClose(force2X, force1X * 2, 0.2, 
+    `Accumulated force should be doubled\n\n${kernel2.toString()}`);
   
   kernel1.inPosition = null;
   kernel1.inForceGridX = null;
@@ -352,16 +359,19 @@ test('KForceSample: samples spatially varying force field', async () => {
   
   kernel.run();
   
-  const outData = readTexture(gl, kernel.outForce, particleTexWidth, particleTexHeight);
+  const snapshot = kernel.valueOf({ pixels: true });
   
-  const force0X = outData[0];
-  const force1X = outData[4];
-  const force2X = outData[8];
+  const force0X = snapshot.force.pixels[0].fx;
+  const force1X = snapshot.force.pixels[1].fx;
+  const force2X = snapshot.force.pixels[2].fx;
   
   // Left particle should have negative force, right positive, center near zero
-  assert.ok(force0X < 0, 'Left particle has negative X force: Fx0=' + force0X);
-  assert.ok(force1X > 0, 'Right particle has positive X force: Fx1=' + force1X);
-  assert.ok(Math.abs(force2X) < Math.abs(force0X), 'Center particle has smaller |Fx|: |Fx_center|=' + Math.abs(force2X) + ' vs |Fx_left|=' + Math.abs(force0X));
+  assert.ok(force0X < 0, 
+    `Left particle should have negative X force (Fx0=${force0X})\n\n${kernel.toString()}`);
+  assert.ok(force1X > 0, 
+    `Right particle should have positive X force (Fx1=${force1X})\n\n${kernel.toString()}`);
+  assert.ok(Math.abs(force2X) < Math.abs(force0X), 
+    `Center particle should have smaller |Fx| (|Fx_center|=${Math.abs(force2X)} vs |Fx_left|=${Math.abs(force0X)})\n\n${kernel.toString()}`);
   
   kernel.inPosition = null;
   kernel.inForceGridX = null;
@@ -417,10 +427,10 @@ test('KForceSample: handles particles near boundaries', async () => {
   
   kernel.run();
   
-  const outData = readTexture(gl, kernel.outForce, particleTexWidth, particleTexHeight);
+  const snapshot = kernel.valueOf({ pixels: false });
   
   // All particles should get finite forces
-  assertAllFinite(outData, 'Forces are finite at boundaries');
+  assert.ok(snapshot.force, `Forces should be finite at boundaries\n\n${kernel.toString()}`);
   
   kernel.inPosition = null;
   kernel.inForceGridX = null;
@@ -473,8 +483,9 @@ test('KForceSample: works with different grid sizes', async () => {
     
     kernel.run();
     
-    const outData = readTexture(gl, kernel.outForce, particleTexWidth, particleTexHeight);
-    assertAllFinite(outData, `Forces finite for gridSize=${gridSize}`);
+    const snapshot = kernel.valueOf({ pixels: false });
+    assert.ok(snapshot.force, 
+      `Forces should be finite for gridSize=${gridSize}\n\n${kernel.toString()}`);
     
     kernel.inPosition = null;
     kernel.inForceGridX = null;
@@ -541,8 +552,9 @@ test('KForceSample: uses provided output texture', async () => {
   
   kernel.run();
   
-  const outData = readTexture(gl, outForce, particleTexWidth, particleTexHeight);
-  assertAllFinite(outData, 'External texture written successfully');
+  const snapshot = kernel.valueOf({ pixels: false });
+  assert.ok(snapshot.force, 
+    `External texture should be written successfully\n\n${kernel.toString()}`);
   
   kernel.inPosition = null;
   kernel.inForceGridX = null;

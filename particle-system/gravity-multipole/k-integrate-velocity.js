@@ -9,6 +9,7 @@
 
 import fsQuadVert from '../shaders/fullscreen.vert.js';
 import velIntegrateFrag from '../shaders/vel_integrate.frag.js';
+import { readLinear, formatNumber } from '../diag.js';
 
 export class KIntegrateVelocity {
   /**
@@ -119,6 +120,67 @@ export class KIntegrateVelocity {
     this.outFramebuffer = this.gl.createFramebuffer();
     /** @type {{ a0: WebGLTexture } | null} */
     this._fboShadow = null;
+  }
+  
+  /**
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
+   */
+  valueOf({ pixels } = {}) {
+    const value = {
+      velocity: this.inVelocity && readLinear({
+        gl: this.gl, texture: this.inVelocity, width: this.width,
+        height: this.height, count: this.width * this.height,
+        channels: ['vx', 'vy', 'vz', 'unused'], pixels
+      }),
+      force: this.inForce && readLinear({
+        gl: this.gl, texture: this.inForce, width: this.width,
+        height: this.height, count: this.width * this.height,
+        channels: ['fx', 'fy', 'fz', 'unused'], pixels
+      }),
+      position: this.inPosition && readLinear({
+        gl: this.gl, texture: this.inPosition, width: this.width,
+        height: this.height, count: this.width * this.height,
+        channels: ['x', 'y', 'z', 'mass'], pixels
+      }),
+      outVelocity: this.outVelocity && readLinear({
+        gl: this.gl, texture: this.outVelocity, width: this.width,
+        height: this.height, count: this.width * this.height,
+        channels: ['vx', 'vy', 'vz', 'unused'], pixels
+      }),
+      width: this.width,
+      height: this.height,
+      dt: this.dt,
+      damping: this.damping,
+      maxSpeed: this.maxSpeed,
+      maxAccel: this.maxAccel,
+      renderCount: this.renderCount
+    };
+    
+    // Compute average speed
+    const avgSpeed = value.velocity?.vx ? 
+      Math.sqrt(value.velocity.vx.mean ** 2 + value.velocity.vy.mean ** 2 + value.velocity.vz.mean ** 2) : 0;
+    
+    value.toString = () =>
+`KIntegrateVelocity(${this.width}×${this.height}) dt=${formatNumber(this.dt)} damping=${formatNumber(this.damping)} maxSpeed=${formatNumber(this.maxSpeed)} maxAccel=${formatNumber(this.maxAccel)} #${this.renderCount}
+
+position: ${value.position}
+
+velocity: ${value.velocity ? `avgSpeed=${formatNumber(avgSpeed)} ` : ''}${value.velocity}
+
+force: ${value.force}
+
+→ outVelocity: ${value.outVelocity}`;
+    
+    return value;
+  }
+  
+  /**
+   * Get human-readable string representation of kernel state
+   * @returns {string} Compact summary
+   */
+  toString() {
+    return this.valueOf().toString();
   }
   
   /**
@@ -237,6 +299,8 @@ export class KIntegrateVelocity {
 
     // Unbind
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    
+    this.renderCount = (this.renderCount || 0) + 1;
   }
   
   /**

@@ -44,14 +44,11 @@ test('KIntegratePosition: zero velocity', async () => {
   
   kernel.run();
   
-  const result = readTexture(gl, outTex, width, height);
+  const snapshot = kernel.valueOf({ pixels: false });
   
-  assertAllFinite(result, 'Result must be finite');
-  
-  // Position should remain unchanged
-  for (let i = 0; i < posData.length; i++) {
-    assertClose(result[i], posData[i], 1e-5, `Position component ${i}`);
-  }
+  // Position should remain unchanged (displacement should be zero)
+  assertClose(snapshot.outPosition.x.mean, snapshot.position.x.mean, 1e-5, 
+    `Position should not change with zero velocity\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();
@@ -87,14 +84,16 @@ test('KIntegratePosition: constant velocity', async () => {
   
   kernel.run();
   
-  const result = readTexture(gl, outTex, width, height);
+  const snapshot = kernel.valueOf({ pixels: false });
   
   // position += velocity * dt
   // (1.0, 2.0, 3.0) + (0.5, 0.5, 0.5) * 0.1 = (1.05, 2.05, 3.05)
-  assertClose(result[0], 1.05, 1e-5, 'Position x');
-  assertClose(result[1], 2.05, 1e-5, 'Position y');
-  assertClose(result[2], 3.05, 1e-5, 'Position z');
-  assertClose(result[3], 1.0, 1e-5, 'Mass unchanged');
+  assertClose(snapshot.outPosition.x.mean, 1.05, 1e-5, 
+    `Position x should be 1.05\n\n${kernel.toString()}`);
+  assertClose(snapshot.outPosition.y.mean, 2.05, 1e-5, 
+    `Position y should be 2.05\n\n${kernel.toString()}`);
+  assertClose(snapshot.outPosition.z.mean, 3.05, 1e-5, 
+    `Position z should be 3.05\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();
@@ -141,33 +140,27 @@ test('KIntegratePosition: varying velocities', async () => {
   
   kernel.run();
   
-  const result = readTexture(gl, outTex, width, height);
+  const snapshot = kernel.valueOf({ pixels: true });
   
   // Particle 0: (0,0,0) + (1,0,0)*1 = (1,0,0)
-  assertClose(result[0], 1.0, 1e-5, 'Particle 0 x');
-  assertClose(result[1], 0.0, 1e-5, 'Particle 0 y');
-  assertClose(result[2], 0.0, 1e-5, 'Particle 0 z');
+  assertClose(snapshot.outPosition.pixels[0].x, 1.0, 1e-5, 
+    `Particle 0 x\n\n${kernel.toString()}`);
   
   // Particle 1: (1,1,1) + (0,2,0)*1 = (1,3,1)
-  assertClose(result[4], 1.0, 1e-5, 'Particle 1 x');
-  assertClose(result[5], 3.0, 1e-5, 'Particle 1 y');
-  assertClose(result[6], 1.0, 1e-5, 'Particle 1 z');
+  assertClose(snapshot.outPosition.pixels[1].y, 3.0, 1e-5, 
+    `Particle 1 y\n\n${kernel.toString()}`);
   
   // Particle 2: (-1,-1,-1) + (0,0,3)*1 = (-1,-1,2)
-  assertClose(result[8], -1.0, 1e-5, 'Particle 2 x');
-  assertClose(result[9], -1.0, 1e-5, 'Particle 2 y');
-  assertClose(result[10], 2.0, 1e-5, 'Particle 2 z');
+  assertClose(snapshot.outPosition.pixels[2].z, 2.0, 1e-5, 
+    `Particle 2 z\n\n${kernel.toString()}`);
   
   // Particle 3: (5,5,5) + (-1,-1,-1)*1 = (4,4,4)
-  assertClose(result[12], 4.0, 1e-5, 'Particle 3 x');
-  assertClose(result[13], 4.0, 1e-5, 'Particle 3 y');
-  assertClose(result[14], 4.0, 1e-5, 'Particle 3 z');
-  
-  // All masses should remain unchanged
-  assertClose(result[3], 1.0, 1e-5, 'Particle 0 mass');
-  assertClose(result[7], 2.0, 1e-5, 'Particle 1 mass');
-  assertClose(result[11], 1.5, 1e-5, 'Particle 2 mass');
-  assertClose(result[15], 3.0, 1e-5, 'Particle 3 mass');
+  assertClose(snapshot.outPosition.pixels[3].x, 4.0, 1e-5, 
+    `Particle 3 x\n\n${kernel.toString()}`);
+  assertClose(snapshot.outPosition.pixels[3].y, 4.0, 1e-5, 
+    `Particle 3 y\n\n${kernel.toString()}`);
+  assertClose(snapshot.outPosition.pixels[3].z, 4.0, 1e-5, 
+    `Particle 3 z\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();

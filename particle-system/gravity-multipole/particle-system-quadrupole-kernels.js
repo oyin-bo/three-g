@@ -10,9 +10,10 @@
 
 import { KIntegrateVelocity } from './k-integrate-velocity.js';
 import { KIntegratePosition } from './k-integrate-position.js';
-import { KAggregator } from './k-aggregator.js';
+import { KAggregatorQuadrupole } from './k-aggregator-quadrupole.js';
 import { KPyramidBuild } from './k-pyramid-build.js';
 import { KTraversalQuadrupole } from './k-traversal-quadrupole.js';
+import { KBoundsReduce } from './k-bounds-reduce.js';
 
 export class ParticleSystemQuadrupoleKernels {
   /**
@@ -59,6 +60,10 @@ export class ParticleSystemQuadrupoleKernels {
 
     this.particleData = options.particleData;
     this.frameCount = 0;
+    
+    // Bounds update scheduling
+    this.boundsUpdateInterval = 90;  // Update bounds every 90 frames (1.5 seconds at 60fps)
+    this.lastBoundsUpdateFrame = -this.boundsUpdateInterval;  // Force initial update
 
     // Calculate texture dimensions
     this.textureWidth = Math.ceil(Math.sqrt(particleCount));
@@ -120,8 +125,7 @@ export class ParticleSystemQuadrupoleKernels {
 
     this.gl.bindTexture(this.gl.TEXTURE_2D, null);
 
-    // Prepare levelConfigs (sizes for each pyramid level). We do NOT create
-    // the A0/A1/A2 textures here; kernels will create their own resources.
+    // Prepare levelConfigs (sizes for each pyramid level)
     this.levelConfigs = [];
     let currentSize = this.L0Size;
     let currentGridSize = this.octreeGridSize;
@@ -138,9 +142,43 @@ export class ParticleSystemQuadrupoleKernels {
       currentSize = currentGridSize * currentSlicesPerRow;
     }
 
-    // Create aggregator kernel for L0. Do not pass concrete output textures;
-    // let the kernel allocate them and expose them as properties (outA0/outA1/outA2).
-    this.aggregatorKernel = new KAggregator({
+    // Create texture arrays for all pyramid levels (A0, A1, A2)
+    // This reduces texture unit usage from 12 (4 levels × 3 moments) to 3
+    const gl = this.gl;
+    const maxSize = this.L0Size; // Use L0 size for all layers for simplicity
+    
+    // Create A0 array (monopole moments: Σ(m·x), Σ(m·y), Σ(m·z), Σm)
+    this.levelTextureArrayA0 = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA0);
+    gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA32F, maxSize, maxSize, this.numLevels, 0, gl.RGBA, gl.FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    
+    // Create A1 array (second moments: Σ(m·x²), Σ(m·y²), Σ(m·z²), Σ(m·xy))
+    this.levelTextureArrayA1 = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA1);
+    gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA32F, maxSize, maxSize, this.numLevels, 0, gl.RGBA, gl.FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    
+    // Create A2 array (second moments: Σ(m·xz), Σ(m·yz), 0, 0)
+    this.levelTextureArrayA2 = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA2);
+    gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA32F, maxSize, maxSize, this.numLevels, 0, gl.RGBA, gl.FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+
+    // Create quadrupole aggregator kernel for L0 with occupancy support.
+    // Let the kernel allocate output textures (outA0/outA1/outA2/outOccupancy).
+    this.aggregatorKernel = new KAggregatorQuadrupole({
       gl: this.gl,
       inPosition: null,  // set per-frame before run
       particleCount: this.options.particleCount,
@@ -172,13 +210,15 @@ export class ParticleSystemQuadrupoleKernels {
     }
 
     // Create quadrupole traversal kernel. Omit outForce so kernel allocates it.
-    // Pass null for inPosition (set per-frame). We'll wire inLevelA0/A1/A2 from pyramid outputs after build.
+    // Pass null for inPosition (set per-frame). Texture arrays will be wired per-frame.
+    // Occupancy texture will be wired from aggregator output.
     this.traversalKernel = new KTraversalQuadrupole({
       gl: this.gl,
       inPosition: null,  // set per-frame
-      inLevelA0: undefined,
-      inLevelA1: undefined,
-      inLevelA2: undefined,
+      inLevelsA0: null,  // set per-frame from texture arrays
+      inLevelsA1: null,  // set per-frame from texture arrays
+      inLevelsA2: null,  // set per-frame from texture arrays
+      inOccupancy: null,  // set per-frame from aggregator
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
       numLevels: this.numLevels,
@@ -216,12 +256,28 @@ export class ParticleSystemQuadrupoleKernels {
       height: this.textureHeight,
       dt: this.options.dt
     });
+    
+    // Create bounds reduction kernel for GPU-resident dynamic bounds updates
+    this.boundsKernel = new KBoundsReduce({
+      gl: this.gl,
+      inPosition: null,  // set per-run
+      particleTexWidth: this.textureWidth,
+      particleTexHeight: this.textureHeight,
+      particleCount: this.options.particleCount
+    });
   }
 
   /**
    * Step the simulation forward one frame
    */
   step() {
+    // 0. Update world bounds (scheduled every N frames)
+    const framesSinceLastUpdate = this.frameCount - this.lastBoundsUpdateFrame;
+    if (framesSinceLastUpdate >= this.boundsUpdateInterval) {
+      this._updateBounds();
+      this.lastBoundsUpdateFrame = this.frameCount;
+    }
+    
     // 1. Build octree
     this._buildOctree();
 
@@ -240,7 +296,14 @@ export class ParticleSystemQuadrupoleKernels {
     if (!this.positionTexture) throw new Error('Position texture missing');
 
     this.aggregatorKernel.inPosition = this.positionTexture;
+    // Wire bounds texture if available (after first bounds update)
+    if (this.boundsKernel?.outBounds) {
+      this.aggregatorKernel.inBounds = this.boundsKernel.outBounds;
+    }
     this.aggregatorKernel.run();
+    
+    // Copy aggregator MRT outputs to texture array layer 0
+    this._copyToArrayLayer(0, this.aggregatorKernel);
 
     // Wire and run pyramid kernels sequentially
     let prevOut = {
@@ -256,8 +319,45 @@ export class ParticleSystemQuadrupoleKernels {
       kernel.inA1 = prevOut.a1;
       kernel.inA2 = prevOut.a2;
       kernel.run();
+      
+      // Copy pyramid output to array layer (i+1 since layer 0 is L0)
+      this._copyToArrayLayer(i + 1, kernel);
+      
       prevOut = { a0: kernel.outA0, a1: kernel.outA1, a2: kernel.outA2 };
     }
+  }
+  
+  /**
+   * Copy MRT outputs to texture array layer using copyTexSubImage3D
+   * @param {number} layer - Target layer index in texture arrays
+   * @param {any} kernel - Kernel with outFramebuffer and outA0/A1/A2 textures
+   */
+  _copyToArrayLayer(layer, kernel) {
+    const gl = this.gl;
+    const size = this.levelConfigs[layer].size;
+    
+    // Bind the kernel's output framebuffer for reading
+    gl.bindFramebuffer(gl.FRAMEBUFFER, kernel.outFramebuffer);
+    
+    // Copy COLOR_ATTACHMENT0 -> levelTextureArrayA0[layer]
+    gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA0);
+    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, size, size);
+    
+    // Copy COLOR_ATTACHMENT1 -> levelTextureArrayA1[layer]
+    gl.readBuffer(gl.COLOR_ATTACHMENT1);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA1);
+    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, size, size);
+    
+    // Copy COLOR_ATTACHMENT2 -> levelTextureArrayA2[layer]
+    gl.readBuffer(gl.COLOR_ATTACHMENT2);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA2);
+    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, size, size);
+    
+    // Reset read buffer and unbind
+    gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
   _calculateForces() {
@@ -265,29 +365,22 @@ export class ParticleSystemQuadrupoleKernels {
     if (!this.traversalKernel) throw new Error('Traversal kernel missing');
     if (!this.positionTexture) throw new Error('Position texture missing');
 
-    // Build arrays of A0, A1, A2 textures per level (aggregator + pyramid outputs)
-    const levelA0s = [];
-    const levelA1s = [];
-    const levelA2s = [];
-
-    if (this.aggregatorKernel && this.aggregatorKernel.outA0) {
-      levelA0s.push(this.aggregatorKernel.outA0);
-      levelA1s.push(this.aggregatorKernel.outA1);
-      levelA2s.push(this.aggregatorKernel.outA2);
-    }
-
-    for (const k of this.pyramidKernels) {
-      if (k && k.outA0) {
-        levelA0s.push(k.outA0);
-        levelA1s.push(k.outA1);
-        levelA2s.push(k.outA2);
-      }
-    }
-
+    // Wire texture arrays to traversal (all levels in 3 arrays)
     this.traversalKernel.inPosition = this.positionTexture;
-    this.traversalKernel.inLevelA0 = levelA0s;
-    this.traversalKernel.inLevelA1 = levelA1s;
-    this.traversalKernel.inLevelA2 = levelA2s;
+    this.traversalKernel.inLevelsA0 = this.levelTextureArrayA0;
+    this.traversalKernel.inLevelsA1 = this.levelTextureArrayA1;
+    this.traversalKernel.inLevelsA2 = this.levelTextureArrayA2;
+    
+    // Wire bounds texture if available (after first bounds update)
+    if (this.boundsKernel?.outBounds) {
+      this.traversalKernel.inBounds = this.boundsKernel.outBounds;
+    }
+    
+    // Wire occupancy from aggregator L0 (only L0 occupancy needed for traversal)
+    if (this.options.useOccupancyMasks && this.aggregatorKernel?.outOccupancy) {
+      this.traversalKernel.inOccupancy = this.aggregatorKernel.outOccupancy;
+    }
+    
     this.traversalKernel.run();
 
     // Wire traversal result into velocity integrator
@@ -329,7 +422,22 @@ export class ParticleSystemQuadrupoleKernels {
     }
   }
 
-
+  /**
+   * Update world bounds from GPU reduction (Phase 1 complete)
+   * Runs every boundsUpdateInterval frames to prevent particle escape.
+   * Bounds stay GPU-resident in boundsKernel.outBounds texture.
+   * No CPU readback - kernels sample the texture directly.
+   */
+  _updateBounds() {
+    if (!this.boundsKernel || !this.positionTexture) return;
+    
+    // Run GPU reduction to compute bounds (stays GPU-resident in boundsKernel.outBounds)
+    this.boundsKernel.inPosition = this.positionTexture;
+    this.boundsKernel.run();
+    
+    // Bounds texture is now updated and ready for kernels to sample
+    // No CPU readback needed - aggregator/traversal will sample boundsKernel.outBounds directly
+  }
 
   /**
    * Dispose all resources
@@ -343,6 +451,7 @@ export class ParticleSystemQuadrupoleKernels {
     if (this.traversalKernel) this.traversalKernel.dispose();
     if (this.velocityKernel) this.velocityKernel.dispose();
     if (this.positionKernel) this.positionKernel.dispose();
+    if (this.boundsKernel) this.boundsKernel.dispose();
 
     // Clean up textures
     if (this.positionTexture) {
@@ -360,6 +469,20 @@ export class ParticleSystemQuadrupoleKernels {
     if (this.velocityTextureWrite) {
       gl.deleteTexture(this.velocityTextureWrite);
       this.velocityTextureWrite = null;
+    }
+
+    // Clean up texture arrays
+    if (this.levelTextureArrayA0) {
+      gl.deleteTexture(this.levelTextureArrayA0);
+      this.levelTextureArrayA0 = null;
+    }
+    if (this.levelTextureArrayA1) {
+      gl.deleteTexture(this.levelTextureArrayA1);
+      this.levelTextureArrayA1 = null;
+    }
+    if (this.levelTextureArrayA2) {
+      gl.deleteTexture(this.levelTextureArrayA2);
+      this.levelTextureArrayA2 = null;
     }
   }
 }

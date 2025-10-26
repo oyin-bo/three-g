@@ -10,6 +10,7 @@
 
 import gradientFrag from './shaders/gradient.frag.js';
 import fsQuadVert from '../shaders/fullscreen.vert.js';
+import { readLinear, readGrid3D, formatNumber } from '../diag.js';
 
 export class KGradient {
   /**
@@ -100,6 +101,61 @@ export class KGradient {
     /** @type {{ x: WebGLTexture, y: WebGLTexture, z: WebGLTexture } | null} */
     this._fboShadow = null;
   }
+  
+  /**
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
+   */
+  valueOf({ pixels } = {}) {
+    const value = {
+      potentialSpectrum: this.inPotentialSpectrum && readLinear({
+        gl: this.gl, texture: this.inPotentialSpectrum, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      forceSpectrumX: this.outForceSpectrumX && readLinear({
+        gl: this.gl, texture: this.outForceSpectrumX, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      forceSpectrumY: this.outForceSpectrumY && readLinear({
+        gl: this.gl, texture: this.outForceSpectrumY, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      forceSpectrumZ: this.outForceSpectrumZ && readLinear({
+        gl: this.gl, texture: this.outForceSpectrumZ, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      gridSize: this.gridSize,
+      slicesPerRow: this.slicesPerRow,
+      textureSize: this.textureSize,
+      worldSize: [...this.worldSize],
+      renderCount: this.renderCount
+    };
+    
+    value.toString = () =>
+`KGradient(${this.gridSize}³ grid) texture=${this.textureSize}×${this.textureSize} worldSize=[${this.worldSize}] #${this.renderCount}
+
+potentialSpectrum: ${value.potentialSpectrum}
+
+→ forceSpectrumX: ${value.forceSpectrumX}
+
+→ forceSpectrumY: ${value.forceSpectrumY}
+
+→ forceSpectrumZ: ${value.forceSpectrumZ}`;
+    
+    return value;
+  }
+  
+  /**
+   * Get human-readable string representation of kernel state
+   * @returns {string} Compact summary
+   */
+  toString() {
+    return this.valueOf().toString();
+  }
 
   /**
    * Run the kernel (synchronous)
@@ -181,7 +237,11 @@ export class KGradient {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, null);
     gl.useProgram(null);
-  }
+ 
+    
+    this.renderCount = (this.renderCount || 0) + 1;
+    
+     }
 
   /**
    * Dispose all resources
@@ -195,7 +255,15 @@ export class KGradient {
     if (this.outFramebufferY) gl.deleteFramebuffer(this.outFramebufferY);
     if (this.outFramebufferZ) gl.deleteFramebuffer(this.outFramebufferZ);
 
-    // Note: Do not delete input/output textures as they are owned by external code
+    if (this.inPotentialSpectrum) gl.deleteTexture(this.inPotentialSpectrum);
+    if (this.outForceSpectrumX) gl.deleteTexture(this.outForceSpectrumX);
+    if (this.outForceSpectrumY) gl.deleteTexture(this.outForceSpectrumY);
+    if (this.outForceSpectrumZ) gl.deleteTexture(this.outForceSpectrumZ);
+
+    this.inPotentialSpectrum = null;
+    this.outForceSpectrumX = null;
+    this.outForceSpectrumY = null;
+    this.outForceSpectrumZ = null;
     this._fboShadow = null;
   }
 }

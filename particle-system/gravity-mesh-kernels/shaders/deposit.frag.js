@@ -22,7 +22,7 @@ void main() {
   }
 
   float contribution = v_mass * weight;
-  vec3 weightedPos = v_worldPos * contribution;
-  outColor = vec4(weightedPos, contribution);
+  // Removed unused weighted position - only mass matters for R32F
+  outColor = vec4(contribution, 0.0, 0.0, 0.0);
 }
 `;

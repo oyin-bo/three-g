@@ -20,8 +20,8 @@ import { KFFT } from './k-fft.js';
 import { KPoisson } from './k-poisson.js';
 import { KGradient } from './k-gradient.js';
 import { KForceSample } from './k-force-sample.js';
-import { KIntegrateVelocity } from '../gravity-multipole/k-integrate-velocity.js';
-import { KIntegratePosition } from '../gravity-multipole/k-integrate-position.js';
+import { KIntegrateVelocity } from './k-integrate-velocity.js';
+import { KIntegratePosition } from './k-integrate-position.js';
 
 export class ParticleSystemSpectralKernels {
   /**
@@ -182,10 +182,11 @@ export class ParticleSystemSpectralKernels {
     });
 
     // 2. Forward FFT kernel
-    this.fftForwardKernel = new KFFT({
+    this.fftKernel = new KFFT({
       gl: this.gl,
-      inReal: this.massGridTexture,
-      outComplex: this.densitySpectrumTexture,
+      real: this.massGridTexture,
+      complexFrom: this.densitySpectrumTexture,
+      complexTo: this.potentialSpectrumTexture,  // Reuse as working buffer
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureWidth3D,
@@ -218,40 +219,17 @@ export class ParticleSystemSpectralKernels {
       worldSize: /** @type {[number, number, number]} */ (worldSize)
     });
 
-    // 5. Inverse FFT kernels (one per axis)
-    this.fftInverseX = new KFFT({
-      gl: this.gl,
-      inComplex: this.forceSpectrumXTexture,
-      outReal: this.forceGridXTexture,
-      gridSize: this.gridSize,
-      slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureWidth3D,
-      inverse: true
-    });
-
-    this.fftInverseY = new KFFT({
-      gl: this.gl,
-      inComplex: this.forceSpectrumYTexture,
-      outReal: this.forceGridYTexture,
-      gridSize: this.gridSize,
-      slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureWidth3D,
-      inverse: true
-    });
-
-    this.fftInverseZ = new KFFT({
-      gl: this.gl,
-      inComplex: this.forceSpectrumZTexture,
-      outReal: this.forceGridZTexture,
-      gridSize: this.gridSize,
-      slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureWidth3D,
-      inverse: true
-    });
+    // Note: We reuse the single fftKernel for inverse transforms by toggling the inverse flag
+    // The three inverse FFTs are executed sequentially with different input textures
 
     // 6. Force sampling kernel
     this.forceSampleKernel = new KForceSample({
       gl: this.gl,
+      inPosition: null,  // Will be set in _computePMForces
+      inForceGridX: null,  // Will be set in _computePMForces
+      inForceGridY: null,  // Will be set in _computePMForces
+      inForceGridZ: null,  // Will be set in _computePMForces
+      outForce: this.forceTextureOut,
       particleCount: this.options.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
@@ -263,6 +241,10 @@ export class ParticleSystemSpectralKernels {
     // 7. Integration kernels (reuse from monopole)
     this.velocityKernel = new KIntegrateVelocity({
       gl: this.gl,
+      inVelocity: null,  // Will be set in _integratePhysics
+      inForce: null,  // Will be set in _integratePhysics
+      inPosition: null,  // Will be set in _integratePhysics
+      outVelocity: null,  // Will be set in _integratePhysics
       width: this.textureWidth,
       height: this.textureHeight,
       dt: this.options.dt,
@@ -273,6 +255,9 @@ export class ParticleSystemSpectralKernels {
 
     this.positionKernel = new KIntegratePosition({
       gl: this.gl,
+      inPosition: null,  // Will be set in _integratePhysics
+      inVelocity: null,  // Will be set in _integratePhysics
+      outPosition: null,  // Will be set in _integratePhysics
       width: this.textureWidth,
       height: this.textureHeight,
       dt: this.options.dt
@@ -327,32 +312,108 @@ export class ParticleSystemSpectralKernels {
     // Run PM/FFT pipeline
     this.depositKernel.run();           // Step 1: Deposit particles to grid
 
-    // Wire deposit output into FFT forward
-    this.fftForwardKernel.inReal = this.depositKernel.outMassGrid;
-    this.fftForwardKernel.run();        // Step 2: Forward FFT
+    // Step 2: Forward FFT (real → complexTo)
+    this.fftKernel.inverse = false;
+    this.fftKernel.run();
 
-    // Wire FFT output into Poisson
-    this.poissonKernel.inDensitySpectrum = this.fftForwardKernel.outComplex;
+    // Wire FFT output (complexTo) into Poisson
+    // After forward FFT, result is in complexTo, so we need to copy to densitySpectrum
+    // or just wire densitySpectrum as complexFrom for next operation
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferTo);
+    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.complexTo, 0);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
+    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.densitySpectrumTexture, 0);
+    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
+      0, 0, this.textureWidth3D, this.textureWidth3D,
+      gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+
+    this.poissonKernel.inDensitySpectrum = this.densitySpectrumTexture;
     this.poissonKernel.run();           // Step 3: Solve Poisson
 
     // Wire Poisson output into Gradient
     this.gradientKernel.inPotentialSpectrum = this.poissonKernel.outPotentialSpectrum;
     this.gradientKernel.run();          // Step 4: Compute gradient
 
-    // Wire gradient outputs into inverse FFTs
-    this.fftInverseX.inComplex = this.gradientKernel.outForceSpectrumX;
-    this.fftInverseX.run();             // Step 5a: Inverse FFT X
+    // Step 5: Inverse FFT for each force component
+    // Switch to inverse mode
+    this.fftKernel.inverse = true;
 
-    this.fftInverseY.inComplex = this.gradientKernel.outForceSpectrumY;
-    this.fftInverseY.run();             // Step 5b: Inverse FFT Y
+    // 5a: Inverse FFT X
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferFrom);
+    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.gradientKernel.outForceSpectrumX, 0);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
+    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.complexFrom, 0);
+    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
+      0, 0, this.textureWidth3D, this.textureWidth3D,
+      gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    
+    this.fftKernel.run();
+    // Result is in fftKernel.real, copy to forceGridXTexture
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferReal);
+    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.real, 0);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
+    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.forceGridXTexture, 0);
+    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
+      0, 0, this.textureWidth3D, this.textureWidth3D,
+      gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
 
-    this.fftInverseZ.inComplex = this.gradientKernel.outForceSpectrumZ;
-    this.fftInverseZ.run();             // Step 5c: Inverse FFT Z
+    // 5b: Inverse FFT Y
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferFrom);
+    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.gradientKernel.outForceSpectrumY, 0);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
+    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.complexFrom, 0);
+    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
+      0, 0, this.textureWidth3D, this.textureWidth3D,
+      gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    
+    this.fftKernel.run();
+    // Result is in fftKernel.real, copy to forceGridYTexture
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferReal);
+    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.real, 0);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
+    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.forceGridYTexture, 0);
+    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
+      0, 0, this.textureWidth3D, this.textureWidth3D,
+      gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+
+    // 5c: Inverse FFT Z
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferFrom);
+    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.gradientKernel.outForceSpectrumZ, 0);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
+    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.complexFrom, 0);
+    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
+      0, 0, this.textureWidth3D, this.textureWidth3D,
+      gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    
+    this.fftKernel.run();
+    // Result is in fftKernel.real, copy to forceGridZTexture
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fftKernel.framebufferReal);
+    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fftKernel.real, 0);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fftKernel.framebufferFrom);
+    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.forceGridZTexture, 0);
+    gl.blitFramebuffer(0, 0, this.textureWidth3D, this.textureWidth3D,
+      0, 0, this.textureWidth3D, this.textureWidth3D,
+      gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
 
     // Wire FFT outputs into force sampler
-    this.forceSampleKernel.inForceGridX = this.fftInverseX.outReal;
-    this.forceSampleKernel.inForceGridY = this.fftInverseY.outReal;
-    this.forceSampleKernel.inForceGridZ = this.fftInverseZ.outReal;
+    this.forceSampleKernel.inForceGridX = this.forceGridXTexture;
+    this.forceSampleKernel.inForceGridY = this.forceGridYTexture;
+    this.forceSampleKernel.inForceGridZ = this.forceGridZTexture;
     this.forceSampleKernel.run();       // Step 6: Sample forces
   }
 
@@ -396,14 +457,11 @@ export class ParticleSystemSpectralKernels {
    * Dispose all resources
    */
   dispose() {
-    // Dispose kernels (they own their own textures)
+    // Kernels own and dispose all their texture properties
     if (this.depositKernel) this.depositKernel.dispose();
-    if (this.fftForwardKernel) this.fftForwardKernel.dispose();
+    if (this.fftKernel) this.fftKernel.dispose();
     if (this.poissonKernel) this.poissonKernel.dispose();
     if (this.gradientKernel) this.gradientKernel.dispose();
-    if (this.fftInverseX) this.fftInverseX.dispose();
-    if (this.fftInverseY) this.fftInverseY.dispose();
-    if (this.fftInverseZ) this.fftInverseZ.dispose();
     if (this.forceSampleKernel) this.forceSampleKernel.dispose();
     if (this.velocityKernel) this.velocityKernel.dispose();
     if (this.positionKernel) this.positionKernel.dispose();

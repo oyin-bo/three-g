@@ -9,6 +9,7 @@
 
 import forceSampleFrag from './shaders/force-sample.frag.js';
 import forceSampleVert from './shaders/force-sample.vert.js';
+import { readLinear, readGrid3D, formatNumber } from '../diag.js';
 
 export class KForceSample {
   /**
@@ -30,32 +31,32 @@ export class KForceSample {
    */
   constructor(options) {
     this.gl = options.gl;
-    
+
     // Resource slots
     this.inPosition = (options.inPosition || options.inPosition === null) ? options.inPosition : createTextureRGBA32F(this.gl, options.particleTexWidth || 1, options.particleTexHeight || 1);
     this.inForceGridX = (options.inForceGridX || options.inForceGridX === null) ? options.inForceGridX : createComplexTexture(this.gl, options.gridSize || 64);
     this.inForceGridY = (options.inForceGridY || options.inForceGridY === null) ? options.inForceGridY : createComplexTexture(this.gl, options.gridSize || 64);
     this.inForceGridZ = (options.inForceGridZ || options.inForceGridZ === null) ? options.inForceGridZ : createComplexTexture(this.gl, options.gridSize || 64);
     this.outForce = (options.outForce || options.outForce === null) ? options.outForce : createTextureRGBA32F(this.gl, options.particleTexWidth || 1, options.particleTexHeight || 1);
-    
+
     // Particle configuration
     this.particleCount = options.particleCount || 0;
     this.particleTexWidth = options.particleTexWidth || 0;
     this.particleTexHeight = options.particleTexHeight || 0;
-    
+
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || 8;
-    
+
     // World bounds
     this.worldBounds = options.worldBounds || {
       min: [-2, -2, -2],
       max: [2, 2, 2]
     };
-    
+
     // Accumulate flag
     this.accumulate = options.accumulate || false;
-    
+
     // Compile and link shader program
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
     if (!vert) throw new Error('Failed to create vertex shader');
@@ -104,25 +105,92 @@ export class KForceSample {
     this.gl.vertexAttribPointer(0, 1, this.gl.FLOAT, false, 0, 0);
     this.gl.bindVertexArray(null);
     this.particleVAO = particleVAO;
-    
+
     // Create framebuffer
     this.outFramebuffer = this.gl.createFramebuffer();
     /** @type {WebGLTexture | null} */
     this._fboShadow = null;
   }
-  
+
+  /**
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
+   */
+  valueOf({ pixels } = {}) {
+    const textureSize = this.gridSize * this.slicesPerRow;
+    const value = {
+      position: this.inPosition && readLinear({
+        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
+        height: this.particleTexHeight, count: this.particleCount,
+        channels: ['x', 'y', 'z', 'mass'], pixels
+      }),
+      forceGridX: this.inForceGridX && readGrid3D({
+        gl: this.gl, texture: this.inForceGridX, width: textureSize,
+        height: textureSize, gridSize: this.gridSize,
+        channels: ['fx'], pixels, format: this.gl.R32F
+      }),
+      forceGridY: this.inForceGridY && readGrid3D({
+        gl: this.gl, texture: this.inForceGridY, width: textureSize,
+        height: textureSize, gridSize: this.gridSize,
+        channels: ['fy'], pixels, format: this.gl.R32F
+      }),
+      forceGridZ: this.inForceGridZ && readGrid3D({
+        gl: this.gl, texture: this.inForceGridZ, width: textureSize,
+        height: textureSize, gridSize: this.gridSize,
+        channels: ['fz'], pixels, format: this.gl.R32F
+      }),
+      force: this.outForce && readLinear({
+        gl: this.gl, texture: this.outForce, width: this.particleTexWidth,
+        height: this.particleTexHeight, count: this.particleCount,
+        channels: ['fx', 'fy', 'fz', 'unused'], pixels
+      }),
+      particleCount: this.particleCount,
+      particleTexWidth: this.particleTexWidth,
+      particleTexHeight: this.particleTexHeight,
+      gridSize: this.gridSize,
+      slicesPerRow: this.slicesPerRow,
+      worldBounds: { min: [...this.worldBounds.min], max: [...this.worldBounds.max] },
+      accumulate: this.accumulate,
+      renderCount: this.renderCount
+    };
+
+    const totalForce = value.force?.fx ? Math.sqrt(value.force.fx.mean ** 2 + value.force.fy.mean ** 2 + value.force.fz.mean ** 2) : 0;
+
+    value.toString = () =>
+      `KForceSample(${this.particleCount} particles from ${this.gridSize}³ grid) accumulate=${this.accumulate} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
+
+position: ${value.position}
+
+forceGridX: ${value.forceGridX}
+forceGridY: ${value.forceGridY}
+forceGridZ: ${value.forceGridZ}
+
+→ force: ${value.force ? `totalForceMag=${formatNumber(totalForce)} ` : ''}${value.force}`;
+
+    return value;
+  }
+
+  /**
+   * Get human-readable string representation of kernel state
+   * @returns {string} Compact summary
+   */
+  toString() {
+    return this.valueOf().toString();
+  }
+
+
   /**
    * Run the kernel (synchronous)
    */
   run() {
     const gl = this.gl;
-    
+
     if (!this.inPosition || !this.inForceGridX || !this.inForceGridY || !this.inForceGridZ || !this.outForce) {
       throw new Error('KForceSample: missing required textures');
     }
-    
+
     gl.useProgram(this.program);
-    
+
     // Configure framebuffer if needed
     if (this._fboShadow !== this.outForce) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
@@ -140,7 +208,7 @@ export class KForceSample {
     // Bind output framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
     gl.viewport(0, 0, this.particleTexWidth, this.particleTexHeight);
-    
+
     // Setup GL state
     if (this.accumulate) {
       gl.enable(gl.BLEND);
@@ -153,25 +221,25 @@ export class KForceSample {
     }
     gl.disable(gl.DEPTH_TEST);
     gl.colorMask(true, true, true, true);
-    
+
     // Bind position texture
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.inPosition);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_positionTexture'), 0);
-    
+
     // Bind force grid textures
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.inForceGridX);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_forceGridX'), 1);
-    
+
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.inForceGridY);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_forceGridY'), 2);
-    
+
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, this.inForceGridZ);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_forceGridZ'), 3);
-    
+
     // Set uniforms
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'),
       this.particleTexWidth, this.particleTexHeight);
@@ -181,7 +249,7 @@ export class KForceSample {
       this.worldBounds.min[0], this.worldBounds.min[1], this.worldBounds.min[2]);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMax'),
       this.worldBounds.max[0], this.worldBounds.max[1], this.worldBounds.max[2]);
-    
+
     // Draw particles
     gl.bindVertexArray(this.particleVAO);
     gl.drawArrays(gl.POINTS, 0, this.particleCount);
@@ -199,8 +267,13 @@ export class KForceSample {
     gl.bindTexture(gl.TEXTURE_2D, null);
     gl.useProgram(null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+
+    this.renderCount = (this.renderCount || 0) + 1;
+
+    
   }
-  
+
   /**
    * Dispose all resources
    */
@@ -211,7 +284,17 @@ export class KForceSample {
     if (this.particleVAO) gl.deleteVertexArray(this.particleVAO);
     if (this.outFramebuffer) gl.deleteFramebuffer(this.outFramebuffer);
 
-    // Note: Do not delete input/output textures as they are owned by external code
+    if (this.inPosition) gl.deleteTexture(this.inPosition);
+    if (this.inForceGridX) gl.deleteTexture(this.inForceGridX);
+    if (this.inForceGridY) gl.deleteTexture(this.inForceGridY);
+    if (this.inForceGridZ) gl.deleteTexture(this.inForceGridZ);
+    if (this.outForce) gl.deleteTexture(this.outForce);
+
+    this.inPosition = null;
+    this.inForceGridX = null;
+    this.inForceGridY = null;
+    this.inForceGridZ = null;
+    this.outForce = null;
     this._fboShadow = null;
   }
 }

@@ -82,13 +82,11 @@ test('KGradient: creates output textures when not provided', async () => {
   
   kernel.run();
   
-  const outDataX = readTexture(gl, kernel.outForceSpectrumX, textureSize, textureSize);
-  const outDataY = readTexture(gl, kernel.outForceSpectrumY, textureSize, textureSize);
-  const outDataZ = readTexture(gl, kernel.outForceSpectrumZ, textureSize, textureSize);
+  const snapshot = kernel.valueOf({ pixels: false });
   
-  assertAllFinite(outDataX, 'Force spectrum X data is finite');
-  assertAllFinite(outDataY, 'Force spectrum Y data is finite');
-  assertAllFinite(outDataZ, 'Force spectrum Z data is finite');
+  assert.ok(snapshot.forceSpectrumX, `Force spectrum X should be finite\n\n${kernel.toString()}`);
+  assert.ok(snapshot.forceSpectrumY, `Force spectrum Y should be finite\n\n${kernel.toString()}`);
+  assert.ok(snapshot.forceSpectrumZ, `Force spectrum Z should be finite\n\n${kernel.toString()}`);
   
   kernel.inPotentialSpectrum = null;
   disposeKernel(kernel);
@@ -125,25 +123,13 @@ test('KGradient: produces non-zero force spectra from potential', async () => {
   
   kernel.run();
   
-  const outDataX = readTexture(gl, kernel.outForceSpectrumX, textureSize, textureSize);
-  const outDataY = readTexture(gl, kernel.outForceSpectrumY, textureSize, textureSize);
-  const outDataZ = readTexture(gl, kernel.outForceSpectrumZ, textureSize, textureSize);
+  const snapshot = kernel.valueOf({ pixels: false });
   
   // Check that we have some non-zero values in each component
-  let hasNonZeroX = false, hasNonZeroY = false, hasNonZeroZ = false;
-  let countX = 0, countY = 0, countZ = 0;
-  let maxMagX = 0, maxMagY = 0, maxMagZ = 0;
-  for (let i = 0; i < outDataX.length; i += 4) {
-    const mx = Math.hypot(outDataX[i], outDataX[i + 1]);
-    const my = Math.hypot(outDataY[i], outDataY[i + 1]);
-    const mz = Math.hypot(outDataZ[i], outDataZ[i + 1]);
-    if (mx > 0.001) { hasNonZeroX = true; countX++; if (mx > maxMagX) maxMagX = mx; }
-    if (my > 0.001) { hasNonZeroY = true; countY++; if (my > maxMagY) maxMagY = my; }
-    if (mz > 0.001) { hasNonZeroZ = true; countZ++; if (mz > maxMagZ) maxMagZ = mz; }
-  }
-  
-  assert.ok(hasNonZeroX, 'Force spectrum X has non-zero values (count=' + countX + ', maxMag=' + maxMagX + ')');
-  assert.ok(hasNonZeroY, 'Force spectrum Y has non-zero values (count=' + countY + ', maxMag=' + maxMagY + ')');
+  assert.ok(snapshot.forceSpectrumX.real.max > 0 || snapshot.forceSpectrumX.imag.max > 0, 
+    `Force spectrum X should have non-zero values\n\n${kernel.toString()}`);
+  assert.ok(snapshot.forceSpectrumY.real.max > 0 || snapshot.forceSpectrumY.imag.max > 0, 
+    `Force spectrum Y should have non-zero values\n\n${kernel.toString()}`);
   // Z may be zero if no k_z components
   
   kernel.inPotentialSpectrum = null;
@@ -179,14 +165,15 @@ test('KGradient: DC component is zero', async () => {
   
   kernel.run();
   
-  const outDataX = readTexture(gl, kernel.outForceSpectrumX, textureSize, textureSize);
-  const outDataY = readTexture(gl, kernel.outForceSpectrumY, textureSize, textureSize);
-  const outDataZ = readTexture(gl, kernel.outForceSpectrumZ, textureSize, textureSize);
+  const snapshot = kernel.valueOf({ pixels: true });
   
   // DC component (0,0) should be zero in all force spectra
-  assertClose(outDataX[0], 0.0, 0.001, 'Force X DC component is zero');
-  assertClose(outDataY[0], 0.0, 0.001, 'Force Y DC component is zero');
-  assertClose(outDataZ[0], 0.0, 0.001, 'Force Z DC component is zero');
+  assertClose(snapshot.forceSpectrumX.pixels[0].real, 0.0, 0.001, 
+    `Force X DC component should be zero\n\n${kernel.toString()}`);
+  assertClose(snapshot.forceSpectrumY.pixels[0].real, 0.0, 0.001, 
+    `Force Y DC component should be zero\n\n${kernel.toString()}`);
+  assertClose(snapshot.forceSpectrumZ.pixels[0].real, 0.0, 0.001, 
+    `Force Z DC component should be zero\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   gl.deleteTexture(potentialSpectrum);
@@ -227,8 +214,9 @@ test('KGradient: handles different world sizes', async () => {
     
     kernel.run();
     
-    const outDataX = readTexture(gl, kernel.outForceSpectrumX, textureSize, textureSize);
-    assertAllFinite(outDataX, `Force spectrum X is finite for worldSize=[${worldSize}]`);
+    const snapshot = kernel.valueOf({ pixels: false });
+    assert.ok(snapshot.forceSpectrumX, 
+      `Force spectrum X should be finite for worldSize=[${worldSize}]\n\n${kernel.toString()}`);
     
     kernel.inPotentialSpectrum = null;
     disposeKernel(kernel);
@@ -264,8 +252,9 @@ test('KGradient: works with different grid sizes', async () => {
     
     kernel.run();
     
-    const outDataX = readTexture(gl, kernel.outForceSpectrumX, textureSize, textureSize);
-    assertAllFinite(outDataX, `Gradient output is finite for gridSize=${gridSize}`);
+    const snapshot = kernel.valueOf({ pixels: false });
+    assert.ok(snapshot.forceSpectrumX, 
+      `Gradient output should be finite for gridSize=${gridSize}\n\n${kernel.toString()}`);
     
     kernel.inPotentialSpectrum = null;
     disposeKernel(kernel);
@@ -320,8 +309,9 @@ test('KGradient: uses provided output textures', async () => {
   
   kernel.run();
   
-  const outDataX = readTexture(gl, outX, textureSize, textureSize);
-  assertAllFinite(outDataX, 'External texture written successfully');
+  const snapshot = kernel.valueOf({ pixels: false });
+  assert.ok(snapshot.forceSpectrumX, 
+    `External texture should be written successfully\n\n${kernel.toString()}`);
   
   kernel.inPotentialSpectrum = null;
   disposeKernel(kernel);
@@ -387,11 +377,12 @@ test('KGradient: symmetric potential produces expected force patterns', async ()
   
   kernel.run();
   
-  const outDataX = readTexture(gl, kernel.outForceSpectrumX, textureSize, textureSize);
-  const outDataY = readTexture(gl, kernel.outForceSpectrumY, textureSize, textureSize);
+  const snapshot = kernel.valueOf({ pixels: false });
   
-  assertAllFinite(outDataX, 'Symmetric potential produces finite X forces');
-  assertAllFinite(outDataY, 'Symmetric potential produces finite Y forces');
+  assert.ok(snapshot.forceSpectrumX, 
+    `Symmetric potential should produce finite X forces\n\n${kernel.toString()}`);
+  assert.ok(snapshot.forceSpectrumY, 
+    `Symmetric potential should produce finite Y forces\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   gl.deleteTexture(potentialSpectrum);
@@ -435,8 +426,9 @@ test('KGradient: accepts external quadVAO', async () => {
   
   kernel.run();
   
-  const outDataX = readTexture(gl, kernel.outForceSpectrumX, textureSize, textureSize);
-  assertAllFinite(outDataX, 'Works with external quadVAO');
+  const snapshot = kernel.valueOf({ pixels: false });
+  assert.ok(snapshot.forceSpectrumX, 
+    `Should work with external quadVAO\n\n${kernel.toString()}`);
   
   kernel.inPotentialSpectrum = null;
   disposeKernel(kernel);

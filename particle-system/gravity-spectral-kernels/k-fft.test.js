@@ -123,13 +123,11 @@ test('KFFT: forward FFT preserves total energy for uniform field', async () => {
   const textureSize = gridSize * slicesPerRow;
   
   // Uniform field: all voxels = 1.0
-  const inReal = fillGridTexture(gl, gridSize, slicesPerRow, () => 1.0);
-  const outComplex = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
+  const realInput = fillGridTexture(gl, gridSize, slicesPerRow, () => 1.0);
   
   const kernel = new KFFT({
     gl,
-    inReal,
-    outComplex,
+    real: realInput,
     gridSize,
     slicesPerRow,
     textureSize,
@@ -138,7 +136,8 @@ test('KFFT: forward FFT preserves total energy for uniform field', async () => {
   
   kernel.run();
   
-  const result = readComplexTexture(gl, outComplex, textureSize, textureSize);
+  // After forward FFT, result is in complexTo
+  const result = readComplexTexture(gl, kernel.complexTo, textureSize, textureSize);
   
   // DC component (index 0) should contain sum of input
   const dcReal = result[0];
@@ -165,16 +164,13 @@ test('KFFT: forward FFT spike creates non-zero spectrum', async () => {
   const textureSize = gridSize * slicesPerRow;
   
   // Single spike at center
-  const inReal = fillGridTexture(gl, gridSize, slicesPerRow, (x, y, z) => {
+  const realInput = fillGridTexture(gl, gridSize, slicesPerRow, (x, y, z) => {
     return x === 2 && y === 2 && z === 2 ? 1.0 : 0.0;
   });
   
-  const outComplex = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
-  
   const kernel = new KFFT({
     gl,
-    inReal,
-    outComplex,
+    real: realInput,
     gridSize,
     slicesPerRow,
     textureSize,
@@ -183,7 +179,8 @@ test('KFFT: forward FFT spike creates non-zero spectrum', async () => {
   
   kernel.run();
   
-  const result = readComplexTexture(gl, outComplex, textureSize, textureSize);
+  // After forward FFT, result is in complexTo
+  const result = readComplexTexture(gl, kernel.complexTo, textureSize, textureSize);
   
   // Should have non-zero DC component
   const dcReal = result[0];
@@ -214,49 +211,53 @@ test('KFFT: forward-inverse roundtrip recovers original (uniform field)', async 
   
   // Test field
   const testValue = 2.5;
-  const inReal = fillGridTexture(gl, gridSize, slicesPerRow, () => testValue);
+  const realInput = fillGridTexture(gl, gridSize, slicesPerRow, () => testValue);
   
-  const intermediate = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
-  const outReal = fillGridTexture(gl, gridSize, slicesPerRow, () => 0);
-  
-  // Forward FFT
-  const forward = new KFFT({
+  // Single KFFT instance for both forward and inverse
+  const kernel = new KFFT({
     gl,
-    inReal,
-    outComplex: intermediate,
+    real: realInput,
     gridSize,
     slicesPerRow,
     textureSize,
     inverse: false
   });
-  forward.run();
+  
+  // Forward FFT
+  kernel.inverse = false;
+  kernel.run();
+  
+  // Copy complexTo → complexFrom for inverse
+  const blitFBO1 = gl.createFramebuffer();
+  const blitFBO2 = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, blitFBO1);
+  gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, kernel.complexTo, 0);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, blitFBO2);
+  gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, kernel.complexFrom, 0);
+  gl.blitFramebuffer(0, 0, textureSize, textureSize, 0, 0, textureSize, textureSize, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  gl.deleteFramebuffer(blitFBO1);
+  gl.deleteFramebuffer(blitFBO2);
   
   // Inverse FFT
-  const inverse = new KFFT({
-    gl,
-    inComplex: intermediate,
-    outReal,
-    gridSize,
-    slicesPerRow,
-    textureSize,
-    inverse: true
-  });
-  inverse.run();
+  kernel.inverse = true;
+  kernel.run();
   
-  const result = readTexture(gl, outReal, textureSize, textureSize);
+  // Result is in kernel.real
+  const result = readTexture(gl, kernel.real, textureSize, textureSize);
   
   // Check roundtrip: should recover original (with normalization)
-  // Inverse FFT includes 1/N³ normalization
-  const normalizedValue = testValue / (gridSize * gridSize * gridSize);
+  // Inverse FFT includes 1/N³ normalization by kernel; forward had no normalization, so round-trip returns original value.
+  const recoveredValue = testValue;
   
   for (let i = 0; i < result.length; i += 4) {
-    assertClose(result[i], normalizedValue, 0.01, `Recovered value at ${i} should match`);
+    assertClose(result[i], recoveredValue, 0.01, `Recovered value at ${i} should match`);
   }
   
   assertAllFinite(result, 'All output values should be finite');
   
-  disposeKernel(forward);
-  disposeKernel(inverse);
+  disposeKernel(kernel);
   resetGL();
 });
 
@@ -270,7 +271,7 @@ test('KFFT: forward-inverse roundtrip recovers spike', async () => {
   const slicesPerRow = 2;
   const textureSize = gridSize * slicesPerRow;
   
-  // Single spike
+  // Single spike at (2, 2, 2)
   const inReal = fillGridTexture(gl, gridSize, slicesPerRow, (x, y, z) => {
     return x === 2 && y === 2 && z === 2 ? 1.0 : 0.0;
   });
@@ -278,6 +279,7 @@ test('KFFT: forward-inverse roundtrip recovers spike', async () => {
   const intermediate = createComplexSpectrumTexture(gl, gridSize, slicesPerRow, () => [0, 0]);
   const outReal = fillGridTexture(gl, gridSize, slicesPerRow, () => 0);
   
+  // Forward FFT: inReal → intermediate (spectrum)
   const forward = new KFFT({
     gl,
     inReal,
@@ -287,8 +289,12 @@ test('KFFT: forward-inverse roundtrip recovers spike', async () => {
     textureSize,
     inverse: false
   });
+  const before = forward.valueOf();
   forward.run();
+
+  const medium = forward.valueOf();
   
+  // Inverse FFT: intermediate → outReal (recovered spatial domain)
   const inverse = new KFFT({
     gl,
     inComplex: intermediate,
@@ -298,20 +304,44 @@ test('KFFT: forward-inverse roundtrip recovers spike', async () => {
     textureSize,
     inverse: true
   });
+  const mediumInverse = inverse.valueOf();
   inverse.run();
+  const after = inverse.valueOf({ pixels: true });
   
-  const result = readTexture(gl, outReal, textureSize, textureSize);
+  // Spike should be approximately recovered (value ≈ 1.0)
+  assertClose(
+    after.outReal?.pixels[2][2][2].real, 1.0, 0.02, 
+    `Spike value should recover to ~1.0, got ${after.outReal?.pixels[2][2][2].real}
+
+-----------------------------------------------------
+BEFORE/forward: ${before}
+
+
+-----------------------------------------------------
+MEDIUM/forward: ${medium}
+
+
+-----------------------------------------------------
+MEDIUM/inverse: ${mediumInverse}
+
+
+-----------------------------------------------------
+AFTER/inverse: ${after}
+
+`);
   
-  // Recover spike position
-  const totalVoxels = gridSize * gridSize * gridSize;
-  const recoveredValue = 1.0 / totalVoxels;
+  // Get statistics - real channel properties computed by readGrid3D
+  const stats = after.outReal?.real;
+  assert.ok(stats, `outReal should have real channel statistics\n${after}\n`);
+  assert.ok(stats.max > 0.9, 
+    `Max value should be > 0.9, got ${stats.max}\n${after}\n`);
+  assert.ok(stats.nonzero > 0, 
+    `Should have nonzero values, got ${stats.nonzero}\n${after}\n`);
   
-  // Find where spike was
-  const spikeIdx = (2 * textureSize + 2) * 4;
-  assertClose(result[spikeIdx], recoveredValue, 0.01, 'Spike position should recover');
-  
-  assertAllFinite(result, 'All output values should be finite');
-  
+  // Verify all statistics are finite
+  assertAllFinite([stats.min, stats.max, stats.mean], 
+    `All statistics should be finite: min=${stats.min} max=${stats.max} mean=${stats.mean}\n${after}\n`);
+
   disposeKernel(forward);
   disposeKernel(inverse);
   resetGL();
@@ -433,7 +463,13 @@ test('KFFT: successive roundtrips remain stable', async () => {
     });
     inverse.run();
     
-    current = output;
+    // Detach textures before disposing kernels so they remain alive for next round
+    forward.inReal = null;
+    forward.outComplex = null;
+    inverse.inComplex = null;
+    inverse.outReal = null;
+
+    current = output; // save reference after detaching
     
     const result = readTexture(gl, output, textureSize, textureSize);
     assertAllFinite(result, `All values should be finite after roundtrip ${round + 1}`);

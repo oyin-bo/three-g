@@ -9,6 +9,7 @@
 
 import fsQuadVert from '../shaders/fullscreen.vert.js';
 import posIntegrateFrag from '../shaders/pos_integrate.frag.js';
+import { readLinear, formatNumber } from '../diag.js';
 
 export class KIntegratePosition {
   /**
@@ -97,6 +98,61 @@ export class KIntegratePosition {
     this.outFramebuffer = this.gl.createFramebuffer();
     /** @type {{ a0: WebGLTexture } | null} */
     this._fboShadow = null;
+  }
+  
+  /**
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
+   */
+  valueOf({ pixels } = {}) {
+    const value = {
+      position: this.inPosition && readLinear({
+        gl: this.gl, texture: this.inPosition, width: this.width,
+        height: this.height, count: this.width * this.height,
+        channels: ['x', 'y', 'z', 'mass'], pixels
+      }),
+      velocity: this.inVelocity && readLinear({
+        gl: this.gl, texture: this.inVelocity, width: this.width,
+        height: this.height, count: this.width * this.height,
+        channels: ['vx', 'vy', 'vz', 'unused'], pixels
+      }),
+      outPosition: this.outPosition && readLinear({
+        gl: this.gl, texture: this.outPosition, width: this.width,
+        height: this.height, count: this.width * this.height,
+        channels: ['x', 'y', 'z', 'mass'], pixels
+      }),
+      width: this.width,
+      height: this.height,
+      dt: this.dt,
+      renderCount: this.renderCount
+    };
+    
+    // Compute position displacement
+    const displacement = value.position?.x && value.outPosition?.x ? 
+      Math.sqrt(
+        (value.outPosition.x.mean - value.position.x.mean) ** 2 +
+        (value.outPosition.y.mean - value.position.y.mean) ** 2 +
+        (value.outPosition.z.mean - value.position.z.mean) ** 2
+      ) : 0;
+    
+    value.toString = () =>
+`KIntegratePosition(${this.width}×${this.height}) dt=${formatNumber(this.dt)} #${this.renderCount}
+
+position: ${value.position}
+
+velocity: ${value.velocity}
+
+→ outPosition: ${value.outPosition ? `displacement=${formatNumber(displacement)} ` : ''}${value.outPosition}`;
+    
+    return value;
+  }
+  
+  /**
+   * Get human-readable string representation of kernel state
+   * @returns {string} Compact summary
+   */
+  toString() {
+    return this.valueOf().toString();
   }
   
   /**
@@ -192,6 +248,8 @@ export class KIntegratePosition {
 
     // Unbind
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    
+    this.renderCount = (this.renderCount || 0) + 1;
   }
   
   /**

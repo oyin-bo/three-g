@@ -13,8 +13,8 @@ import { KPoisson } from './k-poisson.js';
 import { KGradient } from './k-gradient.js';
 import { KForceSample } from './k-force-sample.js';
 import { KNearField } from './k-near-field.js';
-import { KIntegrateVelocity } from '../gravity-multipole/k-integrate-velocity.js';
-import { KIntegratePosition } from '../gravity-multipole/k-integrate-position.js';
+import { KIntegrateVelocity } from './k-integrate-velocity.js';
+import { KIntegratePosition } from './k-integrate-position.js';
 
 export class ParticleSystemMeshKernels {
   /**
@@ -104,6 +104,12 @@ export class ParticleSystemMeshKernels {
     // Create velocity textures: public active texture and internal write target
     this.velocityTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
     this.velocityTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
+
+    // Create force grid textures for mesh method (R32F grid textures for inverse FFT output)
+    const gridTextureSize = this.meshConfig.gridSize * this.meshConfig.slicesPerRow;
+    this.forceGridX = createTexture2D(this.gl, gridTextureSize, gridTextureSize, this.gl.R32F);
+    this.forceGridY = createTexture2D(this.gl, gridTextureSize, gridTextureSize, this.gl.R32F);
+    this.forceGridZ = createTexture2D(this.gl, gridTextureSize, gridTextureSize, this.gl.R32F);
 
     // Upload particle data
     const { positions, velocities } = this.particleData;
@@ -334,15 +340,15 @@ export class ParticleSystemMeshKernels {
     // Inverse FFT for each force component: force spectra -> force grids
     // Set spectrum input and grid output, then run with inverse flag
     this.fftInverseKernel.spectrum = this.gradientKernel.outForceSpectrumX;
-    this.fftInverseKernel.grid = this.gradientKernel.outForceSpectrumX;
+    this.fftInverseKernel.grid = this.forceGridX;
     this.fftInverseKernel.run();
     
     this.fftInverseKernel.spectrum = this.gradientKernel.outForceSpectrumY;
-    this.fftInverseKernel.grid = this.gradientKernel.outForceSpectrumY;
+    this.fftInverseKernel.grid = this.forceGridY;
     this.fftInverseKernel.run();
     
     this.fftInverseKernel.spectrum = this.gradientKernel.outForceSpectrumZ;
-    this.fftInverseKernel.grid = this.gradientKernel.outForceSpectrumZ;
+    this.fftInverseKernel.grid = this.forceGridZ;
     this.fftInverseKernel.run();
   }
   
@@ -352,9 +358,9 @@ export class ParticleSystemMeshKernels {
     
     // Sample far-field forces at particle positions
   this.forceSampleKernel.inPosition = this.positionTexture;
-    this.forceSampleKernel.inForceGridX = this.gradientKernel.outForceSpectrumX;
-    this.forceSampleKernel.inForceGridY = this.gradientKernel.outForceSpectrumY;
-    this.forceSampleKernel.inForceGridZ = this.gradientKernel.outForceSpectrumZ;
+    this.forceSampleKernel.inForceGridX = this.forceGridX;
+    this.forceSampleKernel.inForceGridY = this.forceGridY;
+    this.forceSampleKernel.inForceGridZ = this.forceGridZ;
     this.forceSampleKernel.run();
   }
   
@@ -445,6 +451,18 @@ export class ParticleSystemMeshKernels {
     if (this.velocityTextureWrite) {
       gl.deleteTexture(this.velocityTextureWrite);
       this.velocityTextureWrite = null;
+    }
+    if (this.forceGridX) {
+      gl.deleteTexture(this.forceGridX);
+      this.forceGridX = null;
+    }
+    if (this.forceGridY) {
+      gl.deleteTexture(this.forceGridY);
+      this.forceGridY = null;
+    }
+    if (this.forceGridZ) {
+      gl.deleteTexture(this.forceGridZ);
+      this.forceGridZ = null;
     }
     
     if (this.quadVAO) {

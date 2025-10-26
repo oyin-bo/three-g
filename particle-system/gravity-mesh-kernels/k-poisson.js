@@ -9,6 +9,7 @@
 
 import fsQuadVert from '../shaders/fullscreen.vert.js';
 import poissonFrag from './shaders/poisson.frag.js';
+import { readLinear, readGrid3D, formatNumber } from '../diag.js';
 
 export class KPoisson {
   /**
@@ -125,7 +126,50 @@ export class KPoisson {
     
     return vao;
   }
+  
+  /**
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
+   */
+  valueOf({ pixels } = {}) {
+    const value = {
+      densitySpectrum: this.inDensitySpectrum && readLinear({
+        gl: this.gl, texture: this.inDensitySpectrum, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      potentialSpectrum: this.outPotentialSpectrum && readLinear({
+        gl: this.gl, texture: this.outPotentialSpectrum, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      gridSize: this.gridSize,
+      slicesPerRow: this.slicesPerRow,
+      textureSize: this.textureSize,
+      gravitationalConstant: this.gravitationalConstant,
+      worldSize: [...this.worldSize],
+      assignment: this.assignment,
+      renderCount: this.renderCount
+    };
+    
+    value.toString = () =>
+`KPoisson(${this.gridSize}³ grid) texture=${this.textureSize}×${this.textureSize} G=${formatNumber(this.gravitationalConstant)} assignment=${this.assignment} #${this.renderCount}
 
+densitySpectrum: ${value.densitySpectrum}
+
+→ potentialSpectrum: ${value.potentialSpectrum}`;
+    
+    return value;
+  }
+  
+  /**
+   * Get human-readable string representation of kernel state
+   * @returns {string} Compact summary
+   */
+  toString() {
+    return this.valueOf().toString();
+  }
+  
   run() {
     const gl = this.gl;
     
@@ -189,6 +233,8 @@ export class KPoisson {
     gl.bindVertexArray(prevVAO);
     if (prevBlend) gl.enable(gl.BLEND);
     if (prevDepthTest) gl.enable(gl.DEPTH_TEST);
+    
+    this.renderCount = (this.renderCount || 0) + 1;
   }
 
   dispose() {

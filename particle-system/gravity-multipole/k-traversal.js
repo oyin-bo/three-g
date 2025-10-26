@@ -9,6 +9,7 @@
 
 import fsQuadVert from '../shaders/fullscreen.vert.js';
 import traversalFrag from '../shaders/traversal.frag.js';
+import { readLinear, formatNumber } from '../diag.js';
 
 export class KTraversal {
   /**
@@ -25,44 +26,54 @@ export class KTraversal {
    *   theta?: number,
    *   gravityStrength?: number,
    *   softening?: number
-   * }} options
+   * }} params
    */
-  constructor(options) {
-    this.gl = options.gl;
-    
+  constructor({
+    gl,
+    inPosition,
+    inLevelA0,
+    outForce,
+    particleTexWidth = 0,
+    particleTexHeight = 0,
+    numLevels = 7,
+    levelConfigs = [],
+    worldBounds = { min: [-4, -4, 0], max: [4, 4, 2] },
+    theta = 0.5,
+    gravityStrength = 0.0003,
+    softening = 0.2
+  }) {
+    this.gl = gl;
+
     // Particle texture dimensions
-    this.particleTexWidth = options.particleTexWidth || 0;
-    this.particleTexHeight = options.particleTexHeight || 0;
-    
+    this.particleTexWidth = particleTexWidth;
+    this.particleTexHeight = particleTexHeight;
+
     // Resource slots - follow kernel contract: (truthy || === null) ? use : create
-    this.inPosition = (options.inPosition || options.inPosition === null)
-      ? options.inPosition
+    this.inPosition = (inPosition || inPosition === null)
+      ? inPosition
       : createTextureRGBA32F(this.gl, this.particleTexWidth, this.particleTexHeight);
-    
-    this.inLevelA0 = (options.inLevelA0 || options.inLevelA0 === null)
-      ? options.inLevelA0
+
+    this.inLevelA0 = (inLevelA0 || inLevelA0 === null)
+      ? inLevelA0
       : [];
-    
+
     // Allocate outForce if not provided (truthy) or explicitly null
-    this.outForce = (options.outForce || options.outForce === null) 
-      ? options.outForce 
+    this.outForce = (outForce || outForce === null)
+      ? outForce
       : createTextureRGBA32F(this.gl, this.particleTexWidth, this.particleTexHeight);
-    
+
     // Octree configuration
-    this.numLevels = options.numLevels || 7;
-    this.levelConfigs = options.levelConfigs || [];
-    
+    this.numLevels = numLevels;
+    this.levelConfigs = levelConfigs;
+
     // World bounds
-    this.worldBounds = options.worldBounds || {
-      min: [-4, -4, 0],
-      max: [4, 4, 2]
-    };
-    
+    this.worldBounds = worldBounds;
+
     // Physics parameters
-    this.theta = options.theta !== undefined ? options.theta : 0.5;
-    this.gravityStrength = options.gravityStrength !== undefined ? options.gravityStrength : 0.0003;
-    this.softening = options.softening !== undefined ? options.softening : 0.2;
-    
+    this.theta = theta;
+    this.gravityStrength = gravityStrength;
+    this.softening = softening;
+
     // Create shader program
     // Compile and link shader program (inline, like KPyramidBuild)
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
@@ -111,181 +122,200 @@ export class KTraversal {
     this.gl.vertexAttribPointer(0, 2, this.gl.FLOAT, false, 0, 0);
     this.gl.bindVertexArray(null);
     this.quadVAO = quadVAO;
-    
+
     // Create an internal framebuffer (configured per-run). Keep a shadow
     // of attachments so run() can rebind only when they change.
     this.outFramebuffer = this.gl.createFramebuffer();
     /** @type {{ a0: WebGLTexture } | null} */
     this._fboShadow = null;
   }
-  
+
   /**
-   * @param {string} vertSrc
-   * @param {string} fragSrc
-   * @returns {WebGLProgram}
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
    */
-  // shader program and VAO created inline in constructor; helper methods removed
-  
-  /**
-   * @param {WebGLTexture} texture
-   * @returns {WebGLFramebuffer}
-   */
-  _createFramebuffer(texture) {
-    const gl = this.gl;
-    const fbo = gl.createFramebuffer();
-    if (!fbo) throw new Error('Failed to create framebuffer');
-    
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-    
-    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error(`Framebuffer incomplete: ${status}`);
-    }
-    
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    return fbo;
+  valueOf({ pixels } = {}) {
+    const value = {
+      position: this.inPosition && readLinear({
+        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
+        height: this.particleTexHeight, count: this.particleTexWidth * this.particleTexHeight,
+        channels: ['x', 'y', 'z', 'mass'], pixels
+      }),
+      force: this.outForce && readLinear({
+        gl: this.gl, texture: this.outForce, width: this.particleTexWidth,
+        height: this.particleTexHeight, count: this.particleTexWidth * this.particleTexHeight,
+        channels: ['fx', 'fy', 'fz', 'w'], pixels
+      }),
+      levels: this.inLevelA0 && this.inLevelA0.map((tex, i) => tex && (() => {
+        const { gridSize = 1, slicesPerRow = 1, size = 0 } = this.levelConfigs[i] || {};
+        return {
+          level: i,
+          ...readLinear({
+            gl: this.gl,
+            texture: tex,
+            width: gridSize * slicesPerRow,
+            height: Math.ceil(gridSize / slicesPerRow) * gridSize,
+            count: size,
+            channels: ['cx', 'cy', 'cz', 'mass'],
+            pixels
+          })
+        };
+      })()).filter(Boolean),
+      particleTexWidth: this.particleTexWidth,
+      particleTexHeight: this.particleTexHeight,
+      numLevels: this.numLevels,
+      theta: this.theta,
+      gravityStrength: this.gravityStrength,
+      softening: this.softening,
+      worldBounds: { min: [...this.worldBounds.min], max: [...this.worldBounds.max] },
+      totalForce: 0,
+      renderCount: this.renderCount
+    };
+
+    value.totalForce = value.force?.fx ? Math.sqrt(value.force.fx.mean ** 2 + value.force.fy.mean ** 2 + value.force.fz.mean ** 2) : 0;
+
+    value.toString = () =>
+      `KTraversal(${this.particleTexWidth}×${this.particleTexHeight}) theta=${this.theta} G=${this.gravityStrength} soft=${this.softening} levels=${this.numLevels} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
+
+position: ${value.position}
+
+force: ${value.force ? `totalForceMag=${formatNumber(value.totalForce)} ` : ''}${value.force}
+
+${!value.levels ? 'L:none' : value.levels.map(l => `L${l.level}:\n${l.toString()}\n`).join('\n')}`;
+
+    return value;
   }
-  
+
+  /**
+   * Get human-readable string representation of kernel state
+   * @returns {string} Markdown-formatted summary
+   */
+  toString() {
+    return this.valueOf().toString();
+  }
+
   /**
    * Run the kernel (synchronous)
    */
   run() {
-    const gl = this.gl;
-    
-    // console.log(`[KTraversal.run] START: texW=${this.particleTexWidth}, texH=${this.particleTexHeight}, numLevels=${this.numLevels}`);
-    
-    if (!this.inPosition || !this.outForce) {
-      throw new Error('KTraversal: missing required textures');
-    }
-    
-    if (this.inLevelA0.length < this.numLevels) {
-      throw new Error(`KTraversal: expected ${this.numLevels} level textures, got ${this.inLevelA0.length}`);
-    }
-    
-    gl.useProgram(this.program);
+    if (!this.inPosition || !this.outForce) throw new Error('KTraversal: missing required textures');
+
+    if (this.inLevelA0.length < this.numLevels) throw new Error(`KTraversal: expected ${this.numLevels} level textures, got ${this.inLevelA0.length}`);
+
+    this.gl.useProgram(this.program);
 
     // Ensure framebuffer attachments match our output
     if (this._fboShadow?.a0 !== this.outForce) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outForce, 0);
-      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-      const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-      if (status !== gl.FRAMEBUFFER_COMPLETE) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.outFramebuffer);
+      this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, this.outForce, 0);
+      this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0]);
+      const status = this.gl.checkFramebufferStatus(this.gl.FRAMEBUFFER);
+      if (status !== this.gl.FRAMEBUFFER_COMPLETE) {
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
         throw new Error(`Framebuffer incomplete: ${status}`);
       }
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
 
       this._fboShadow = { a0: this.outForce };
     }
 
     // Bind output framebuffer
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
-    gl.viewport(0, 0, this.particleTexWidth, this.particleTexHeight);
-    
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.outFramebuffer);
+    this.gl.viewport(0, 0, this.particleTexWidth, this.particleTexHeight);
+
     // Setup GL state
-    gl.disable(gl.DEPTH_TEST);
-    gl.disable(gl.BLEND);
-    gl.disable(gl.SCISSOR_TEST);
-    gl.colorMask(true, true, true, true);
-    
+    this.gl.disable(this.gl.DEPTH_TEST);
+    this.gl.disable(this.gl.BLEND);
+    this.gl.disable(this.gl.SCISSOR_TEST);
+    this.gl.colorMask(true, true, true, true);
+
     // Bind position texture
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.inPosition);
-    gl.uniform1i(gl.getUniformLocation(this.program, 'u_particlePositions'), 0);
-    
+    this.gl.activeTexture(this.gl.TEXTURE0);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.inPosition);
+    this.gl.uniform1i(this.gl.getUniformLocation(this.program, 'u_particlePositions'), 0);
+
     // Set particle count
     const particleCount = this.particleTexWidth * this.particleTexHeight;
-    gl.uniform1i(gl.getUniformLocation(this.program, 'u_particleCount'), particleCount);
-    
+    this.gl.uniform1i(this.gl.getUniformLocation(this.program, 'u_particleCount'), particleCount);
+
     // Bind all octree level textures (A0 only for monopole)
-    // console.log(`[KTraversal] Binding ${this.numLevels} level textures. inLevelA0 length: ${this.inLevelA0.length}`);
     for (let i = 0; i < this.numLevels; i++) {
-      const unit = gl.TEXTURE1 + i;
-      gl.activeTexture(unit);
+      const unit = this.gl.TEXTURE1 + i;
+      this.gl.activeTexture(unit);
       // Only bind if texture exists, otherwise bind null
       const texture = this.inLevelA0[i] || null;
-      const hasTexture = !!texture;
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.uniform1i(gl.getUniformLocation(this.program, `u_quadtreeLevel${i}`), i + 1);
-      if (i < 3 || i === this.numLevels - 1) {
-        // console.log(`  Level ${i}: u_quadtreeLevel${i} -> TEXTURE${i+1}, texture=${hasTexture}, gridSize=${this.levelConfigs[i].gridSize}`);
-      }
+      this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+      this.gl.uniform1i(this.gl.getUniformLocation(this.program, `u_quadtreeLevel${i}`), i + 1);
     }
-    
+
     // Set level configuration uniforms
     const levelSizes = new Float32Array(this.numLevels);
     const levelGridSizes = new Float32Array(this.numLevels);
     const levelSlicesPerRow = new Float32Array(this.numLevels);
-    
+
     const worldExtent = Math.max(
       this.worldBounds.max[0] - this.worldBounds.min[0],
       this.worldBounds.max[1] - this.worldBounds.min[1],
       this.worldBounds.max[2] - this.worldBounds.min[2]
     );
-    
+
     for (let i = 0; i < this.numLevels; i++) {
       const config = this.levelConfigs[i];
       levelSizes[i] = worldExtent / config.gridSize;  // World-space cell size
       levelGridSizes[i] = config.gridSize;
       levelSlicesPerRow[i] = config.slicesPerRow;
     }
-    
-    gl.uniform1fv(gl.getUniformLocation(this.program, 'u_cellSizes'), levelSizes);
-    gl.uniform1fv(gl.getUniformLocation(this.program, 'u_gridSizes'), levelGridSizes);
-    gl.uniform1fv(gl.getUniformLocation(this.program, 'u_slicesPerRow'), levelSlicesPerRow);
-    
+
+    this.gl.uniform1fv(this.gl.getUniformLocation(this.program, 'u_cellSizes'), levelSizes);
+    this.gl.uniform1fv(this.gl.getUniformLocation(this.program, 'u_gridSizes'), levelGridSizes);
+    this.gl.uniform1fv(this.gl.getUniformLocation(this.program, 'u_slicesPerRow'), levelSlicesPerRow);
+
     // Set physics parameters
-    gl.uniform2f(gl.getUniformLocation(this.program, 'u_texSize'),
+    this.gl.uniform2f(this.gl.getUniformLocation(this.program, 'u_texSize'),
       this.particleTexWidth, this.particleTexHeight);
-    gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMin'),
+    this.gl.uniform3f(this.gl.getUniformLocation(this.program, 'u_worldMin'),
       this.worldBounds.min[0], this.worldBounds.min[1], this.worldBounds.min[2]);
-    gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMax'),
+    this.gl.uniform3f(this.gl.getUniformLocation(this.program, 'u_worldMax'),
       this.worldBounds.max[0], this.worldBounds.max[1], this.worldBounds.max[2]);
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_theta'), this.theta);
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_G'), this.gravityStrength);
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_softening'), this.softening);
-    gl.uniform1i(gl.getUniformLocation(this.program, 'u_numLevels'), this.numLevels);
-    
+    this.gl.uniform1f(this.gl.getUniformLocation(this.program, 'u_theta'), this.theta);
+    this.gl.uniform1f(this.gl.getUniformLocation(this.program, 'u_G'), this.gravityStrength);
+    this.gl.uniform1f(this.gl.getUniformLocation(this.program, 'u_softening'), this.softening);
+    this.gl.uniform1i(this.gl.getUniformLocation(this.program, 'u_numLevels'), this.numLevels);
+
     // Draw
-    gl.bindVertexArray(this.quadVAO);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    
+    this.gl.bindVertexArray(this.quadVAO);
+    this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+
     // DEBUG: Check for GL errors
-    const err = gl.getError();
-    if (err !== gl.NO_ERROR) {
-      console.error('[KTraversal] WebGL error after drawArrays:', err);
-    }
-    
-    gl.bindVertexArray(null);
+    const err = this.gl.getError();
+    if (err !== this.gl.NO_ERROR) console.error('[KTraversal] WebGL error after drawArrays:', err);
+
+    this.gl.bindVertexArray(null);
 
     for (let i = 0; i < this.numLevels; i++) {
-      const unit = gl.TEXTURE1 + i;
-      gl.activeTexture(unit);
-      gl.bindTexture(gl.TEXTURE_2D, null);
+      const unit = this.gl.TEXTURE1 + i;
+      this.gl.activeTexture(unit);
+      this.gl.bindTexture(this.gl.TEXTURE_2D, null);
     }
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    gl.useProgram(null);
+    this.gl.activeTexture(this.gl.TEXTURE0);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+    this.gl.useProgram(null);
 
     // Unbind
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+
+    this.renderCount = (this.renderCount || 0) + 1;
+
+    
   }
-  
-  /**
-   * Dispose all resources
-   */
+
   dispose() {
-    const gl = this.gl;
+    if (this.program) this.gl.deleteProgram(this.program);
+    if (this.quadVAO) this.gl.deleteVertexArray(this.quadVAO);
+    if (this.outFramebuffer) this.gl.deleteFramebuffer(this.outFramebuffer);
 
-    if (this.program) gl.deleteProgram(this.program);
-    if (this.quadVAO) gl.deleteVertexArray(this.quadVAO);
-    if (this.outFramebuffer) gl.deleteFramebuffer(this.outFramebuffer);
-
-    if (this.inPosition) gl.deleteTexture(this.inPosition);
-    if (this.outForce) gl.deleteTexture(this.outForce);
+    if (this.inPosition) this.gl.deleteTexture(this.inPosition);
+    if (this.outForce) this.gl.deleteTexture(this.outForce);
 
     this._fboShadow = null;
   }

@@ -6,6 +6,11 @@
  * Implements forward and inverse 3D FFT for PM method.
  * Follows the WebGL2 Kernel contract, adapted for complex FFT operations.
  * 
+ * LEAN ARCHITECTURE:
+ * - Uses exactly 3 textures: real (R32F), complexFrom (RG32F), complexTo (RG32F)
+ * - 3 shader program variants baked from single generator
+ * - Texture swapping invariant: complexFrom holds input/result, complexTo holds intermediate
+ * 
  * NORMALIZATION CONVENTION:
  * - Forward: F̂(k) = Σ f(x)·exp(-2πikx)           [unnormalized]
  * - Inverse: f(x) = (1/N³)·Σ F̂(k)·exp(2πikx)    [normalized by 1/N³]
@@ -13,15 +18,15 @@
 
 import fftFrag from './shaders/fft.frag.js';
 import fsQuadVert from '../shaders/fullscreen.vert.js';
+import { readLinear, readGrid3D, formatNumber } from '../diag.js';
 
 export class KFFT {
   /**
    * @param {{
    *   gl: WebGL2RenderingContext,
-   *   inReal?: WebGLTexture|null,
-   *   inComplex?: WebGLTexture|null,
-   *   outComplex?: WebGLTexture|null,
-   *   outReal?: WebGLTexture|null,
+   *   real?: WebGLTexture|null,
+   *   complexFrom?: WebGLTexture|null,
+   *   complexTo?: WebGLTexture|null,
    *   gridSize?: number,
    *   slicesPerRow?: number,
    *   textureSize?: number,
@@ -31,148 +36,26 @@ export class KFFT {
   constructor(options) {
     this.gl = options.gl;
 
-    // Resource slots
-    this.inReal = (options.inReal || options.inReal === null) ? options.inReal : createTextureRGBA32F(this.gl, options.gridSize || 64, options.gridSize || 64);
-    this.inComplex = (options.inComplex || options.inComplex === null) ? options.inComplex : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
-    this.outComplex = (options.outComplex || options.outComplex === null) ? options.outComplex : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
-    this.outReal = (options.outReal || options.outReal === null) ? options.outReal : createTextureRGBA32F(this.gl, options.gridSize || 64, options.gridSize || 64);
-
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || 8;
     this.textureSize = options.textureSize || (this.gridSize * this.slicesPerRow);
 
+    // Lean texture architecture: exactly 3 textures
+    this.real = options.real || createTextureR32F(this.gl, this.textureSize, this.textureSize);
+    this.ownsReal = !options.real;
+    this.complexFrom = options.complexFrom || createComplexTexture(this.gl, this.textureSize, this.textureSize);
+    this.ownsComplexFrom = !options.complexFrom;
+    this.complexTo = options.complexTo || createComplexTexture(this.gl, this.textureSize, this.textureSize);
+    this.ownsComplexTo = !options.complexTo;
+
     // FFT direction
     this.inverse = options.inverse || false;
 
-    // Compile FFT shader program
-    const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
-    if (!vert) throw new Error('Failed to create vertex shader');
-    this.gl.shaderSource(vert, fsQuadVert);
-    this.gl.compileShader(vert);
-    if (!this.gl.getShaderParameter(vert, this.gl.COMPILE_STATUS)) {
-      const info = this.gl.getShaderInfoLog(vert);
-      this.gl.deleteShader(vert);
-      throw new Error(`Vertex shader compile failed: ${info || 'no error log'}`);
-    }
-
-    const frag = this.gl.createShader(this.gl.FRAGMENT_SHADER);
-    if (!frag) throw new Error('Failed to create fragment shader');
-    this.gl.shaderSource(frag, fftFrag);
-    this.gl.compileShader(frag);
-    if (!this.gl.getShaderParameter(frag, this.gl.COMPILE_STATUS)) {
-      const info = this.gl.getShaderInfoLog(frag);
-      this.gl.deleteShader(frag);
-      throw new Error(`Fragment shader compile failed: ${info}`);
-    }
-
-    this.fftProgram = this.gl.createProgram();
-    if (!this.fftProgram) throw new Error('Failed to create program');
-    this.gl.attachShader(this.fftProgram, vert);
-    this.gl.attachShader(this.fftProgram, frag);
-    this.gl.linkProgram(this.fftProgram);
-    if (!this.gl.getProgramParameter(this.fftProgram, this.gl.LINK_STATUS)) {
-      const info = this.gl.getProgramInfoLog(this.fftProgram);
-      this.gl.deleteProgram(this.fftProgram);
-      throw new Error(`Program link failed: ${info}`);
-    }
-
-    this.gl.deleteShader(vert);
-    this.gl.deleteShader(frag);
-
-    // Create real-to-complex conversion program (simple shader)
-    const realToComplexFragSrc = `#version 300 es
-      precision highp float;
-      in vec2 v_uv;
-      out vec4 outColor;
-      uniform sampler2D u_massGrid;
-      void main() {
-        float mass = texture(u_massGrid, v_uv).r;
-        outColor = vec4(mass, 0.0, 0.0, 0.0);
-      }
-    `;
-
-    const vert2 = this.gl.createShader(this.gl.VERTEX_SHADER);
-    if (!vert2) throw new Error('Failed to create vertex shader');
-    this.gl.shaderSource(vert2, fsQuadVert);
-    this.gl.compileShader(vert2);
-    if (!this.gl.getShaderParameter(vert2, this.gl.COMPILE_STATUS)) {
-      const info = this.gl.getShaderInfoLog(vert2);
-      this.gl.deleteShader(vert2);
-      throw new Error(`Vertex shader compile failed: ${info}`);
-    }
-
-    const frag2 = this.gl.createShader(this.gl.FRAGMENT_SHADER);
-    if (!frag2) throw new Error('Failed to create fragment shader');
-    this.gl.shaderSource(frag2, realToComplexFragSrc);
-    this.gl.compileShader(frag2);
-    if (!this.gl.getShaderParameter(frag2, this.gl.COMPILE_STATUS)) {
-      const info = this.gl.getShaderInfoLog(frag2);
-      this.gl.deleteShader(frag2);
-      throw new Error(`Fragment shader compile failed: ${info}`);
-    }
-
-    this.realToComplexProgram = this.gl.createProgram();
-    if (!this.realToComplexProgram) throw new Error('Failed to create program');
-    this.gl.attachShader(this.realToComplexProgram, vert2);
-    this.gl.attachShader(this.realToComplexProgram, frag2);
-    this.gl.linkProgram(this.realToComplexProgram);
-    if (!this.gl.getProgramParameter(this.realToComplexProgram, this.gl.LINK_STATUS)) {
-      const info = this.gl.getProgramInfoLog(this.realToComplexProgram);
-      this.gl.deleteProgram(this.realToComplexProgram);
-      throw new Error(`Program link failed: ${info}`);
-    }
-
-    this.gl.deleteShader(vert2);
-    this.gl.deleteShader(frag2);
-
-    // Create complex-to-real extraction program
-    const complexToRealFragSrc = `#version 300 es
-      precision highp float;
-      in vec2 v_uv;
-      out vec4 outColor;
-      uniform sampler2D u_complexTexture;
-      uniform float u_normalizeInverse;  // Apply 1/N normalization factor
-      void main() {
-        vec2 complex = texture(u_complexTexture, v_uv).rg;
-        float realPart = complex.r * u_normalizeInverse;
-        outColor = vec4(realPart, 0.0, 0.0, 0.0);
-      }
-    `;
-
-    const vert3 = this.gl.createShader(this.gl.VERTEX_SHADER);
-    if (!vert3) throw new Error('Failed to create vertex shader');
-    this.gl.shaderSource(vert3, fsQuadVert);
-    this.gl.compileShader(vert3);
-    if (!this.gl.getShaderParameter(vert3, this.gl.COMPILE_STATUS)) {
-      const info = this.gl.getShaderInfoLog(vert3);
-      this.gl.deleteShader(vert3);
-      throw new Error(`Vertex shader compile failed: ${info}`);
-    }
-
-    const frag3 = this.gl.createShader(this.gl.FRAGMENT_SHADER);
-    if (!frag3) throw new Error('Failed to create fragment shader');
-    this.gl.shaderSource(frag3, complexToRealFragSrc);
-    this.gl.compileShader(frag3);
-    if (!this.gl.getShaderParameter(frag3, this.gl.COMPILE_STATUS)) {
-      const info = this.gl.getShaderInfoLog(frag3);
-      this.gl.deleteShader(frag3);
-      throw new Error(`Fragment shader compile failed: ${info}`);
-    }
-
-    this.complexToRealProgram = this.gl.createProgram();
-    if (!this.complexToRealProgram) throw new Error('Failed to create program');
-    this.gl.attachShader(this.complexToRealProgram, vert3);
-    this.gl.attachShader(this.complexToRealProgram, frag3);
-    this.gl.linkProgram(this.complexToRealProgram);
-    if (!this.gl.getProgramParameter(this.complexToRealProgram, this.gl.LINK_STATUS)) {
-      const info = this.gl.getProgramInfoLog(this.complexToRealProgram);
-      this.gl.deleteProgram(this.complexToRealProgram);
-      throw new Error(`Program link failed: ${info}`);
-    }
-
-    this.gl.deleteShader(vert3);
-    this.gl.deleteShader(frag3);
+    // Compile 3 shader program variants from single generator
+    this.fftProgramRealToComplex = this._compileProgram(fftFrag({ collapsed: 'from' }));
+    this.fftProgramComplexToReal = this._compileProgram(fftFrag({ collapsed: 'to' }));
+    this.fftProgramComplexToComplex = this._compileProgram(fftFrag());
 
     // Create quad VAO
     const quadVAO = this.gl.createVertexArray();
@@ -189,128 +72,151 @@ export class KFFT {
     this.gl.bindVertexArray(null);
     this.quadVAO = quadVAO;
 
-    // Create internal ping-pong textures for FFT stages
-    this.workingTexture = this._createComplexTexture();
-    this.pingPongTexture = this._createComplexTexture();
-    this.workingFramebuffer = this.gl.createFramebuffer();
-    this.pingPongFramebuffer = this.gl.createFramebuffer();
+    // Create framebuffers for rendering
+    this.framebufferFrom = this.gl.createFramebuffer();
+    this.framebufferTo = this.gl.createFramebuffer();
+    this.framebufferReal = this.gl.createFramebuffer();
   }
 
   /**
-   * Create an RG32F complex texture
+   * Compile a shader program from fragment shader source
    * @private
+   * @param {string} fragSource
    */
-  _createComplexTexture() {
+  _compileProgram(fragSource) {
     const gl = this.gl;
-    const tex = gl.createTexture();
-    if (!tex) throw new Error('Failed to create texture');
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, this.textureSize, this.textureSize, 0, gl.RG, gl.FLOAT, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    return tex;
+
+    const vert = gl.createShader(gl.VERTEX_SHADER);
+    if (!vert) throw new Error('Failed to create vertex shader');
+    gl.shaderSource(vert, fsQuadVert);
+    gl.compileShader(vert);
+    if (!gl.getShaderParameter(vert, gl.COMPILE_STATUS)) {
+      const info = gl.getShaderInfoLog(vert);
+      gl.deleteShader(vert);
+      throw new Error(`Vertex shader compile failed: ${info || 'no error log'}`);
+    }
+
+    const frag = gl.createShader(gl.FRAGMENT_SHADER);
+    if (!frag) throw new Error('Failed to create fragment shader');
+    gl.shaderSource(frag, fragSource);
+    gl.compileShader(frag);
+    if (!gl.getShaderParameter(frag, gl.COMPILE_STATUS)) {
+      const info = gl.getShaderInfoLog(frag);
+      gl.deleteShader(frag);
+      throw new Error(`Fragment shader compile failed: ${info}`);
+    }
+
+    const program = gl.createProgram();
+    if (!program) throw new Error('Failed to create program');
+    gl.attachShader(program, vert);
+    gl.attachShader(program, frag);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      const info = gl.getProgramInfoLog(program);
+      gl.deleteProgram(program);
+      throw new Error(`Program link failed: ${info}`);
+    }
+
+    gl.deleteShader(vert);
+    gl.deleteShader(frag);
+
+    return program;
+  }
+  
+  /**
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
+   */
+  valueOf({ pixels } = {}) {
+    const value = {
+      real: this.real && readGrid3D({
+        gl: this.gl, texture: this.real, width: this.textureSize,
+        height: this.textureSize, gridSize: this.gridSize,
+        channels: ['real'], pixels, format: this.gl.R32F
+      }),
+      complexFrom: this.complexFrom && readLinear({
+        gl: this.gl, texture: this.complexFrom, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      complexTo: this.complexTo && readLinear({
+        gl: this.gl, texture: this.complexTo, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      gridSize: this.gridSize,
+      slicesPerRow: this.slicesPerRow,
+      textureSize: this.textureSize,
+      inverse: this.inverse,
+      renderCount: this.renderCount
+    };
+    
+    value.toString = () =>
+`KFFT(${this.gridSize}³ grid) texture=${this.textureSize}×${this.textureSize} slices=${this.slicesPerRow} inverse=${this.inverse} #${this.renderCount}
+
+real: ${value.real}
+
+complexFrom: ${value.complexFrom}
+
+→ complexTo: ${value.complexTo}`;
+    
+    return value;
+  }
+  
+  /**
+   * Get human-readable string representation of kernel state
+   * @returns {string} Compact summary
+   */
+  toString() {
+    return this.valueOf().toString();
   }
 
   /**
    * Run the kernel (synchronous)
    * 
-   * Forward FFT: inReal → outComplex
-   * Inverse FFT: inComplex → outReal
+   * Forward FFT: real → complexTo (result in complexTo)
+   * Inverse FFT: complexFrom → real (result in real)
    */
   run() {
-    const gl = this.gl;
-
     if (this.inverse) {
       this._runInverse();
     } else {
       this._runForward();
     }
+    
+    this.renderCount = (this.renderCount || 0) + 1;
   }
 
   /**
    * Forward FFT: real → complex spectrum
+   * Result ends up in complexTo
    * @private
    */
   _runForward() {
     const gl = this.gl;
 
-    if (!this.inReal || !this.outComplex) {
-      throw new Error('KFFT forward: missing inReal or outComplex');
+    if (!this.real || !this.complexTo) {
+      throw new Error('KFFT forward: missing real or complexTo');
     }
 
-    // Step 1: Convert real to complex
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.workingFramebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.workingTexture, 0);
-    gl.viewport(0, 0, this.textureSize, this.textureSize);
-    gl.disable(gl.BLEND);
-    gl.disable(gl.DEPTH_TEST);
-    gl.useProgram(this.realToComplexProgram);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.inReal);
-    gl.uniform1i(gl.getUniformLocation(this.realToComplexProgram, 'u_massGrid'), 0);
-    gl.bindVertexArray(this.quadVAO);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    gl.bindVertexArray(null);
-
-    // Step 2: Perform 3D FFT
+    // Perform 3D FFT with first stage using real-to-complex shader
     this._perform3DFFT(false);
-
-    // Step 3: Copy result to output
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.workingFramebuffer);
-    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.workingTexture, 0);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.pingPongFramebuffer);
-    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outComplex, 0);
-    gl.blitFramebuffer(0, 0, this.textureSize, this.textureSize,
-      0, 0, this.textureSize, this.textureSize,
-      gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
   }
 
   /**
    * Inverse FFT: complex spectrum → real
+   * Input from complexFrom, result ends up in real
    * @private
    */
   _runInverse() {
     const gl = this.gl;
 
-    if (!this.inComplex || !this.outReal) {
-      throw new Error('KFFT inverse: missing inComplex or outReal');
+    if (!this.complexFrom || !this.real) {
+      throw new Error('KFFT inverse: missing complexFrom or real');
     }
 
-    // Step 1: Copy input to working texture
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.pingPongFramebuffer);
-    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.inComplex, 0);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.workingFramebuffer);
-    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.workingTexture, 0);
-    gl.blitFramebuffer(0, 0, this.textureSize, this.textureSize,
-      0, 0, this.textureSize, this.textureSize,
-      gl.COLOR_BUFFER_BIT, gl.NEAREST);
-
-    // Step 2: Perform inverse 3D FFT
+    // Perform inverse 3D FFT with last stage using complex-to-real shader
     this._perform3DFFT(true);
-
-    // Step 3: Extract real part and write to output
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.pingPongFramebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outReal, 0);
-    gl.viewport(0, 0, this.textureSize, this.textureSize);
-    gl.disable(gl.BLEND);
-    gl.disable(gl.DEPTH_TEST);
-    gl.useProgram(this.complexToRealProgram);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.workingTexture);
-    gl.uniform1i(gl.getUniformLocation(this.complexToRealProgram, 'u_complexTexture'), 0);
-    // Apply normalization: 1/N³ = (1/N)³ for inverse FFT
-    const normalizeInverse = 1.0 / (this.gridSize * this.gridSize * this.gridSize);
-    gl.uniform1f(gl.getUniformLocation(this.complexToRealProgram, 'u_normalizeInverse'), normalizeInverse);
-    gl.bindVertexArray(this.quadVAO);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    gl.bindVertexArray(null);
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
   /**
@@ -322,57 +228,98 @@ export class KFFT {
     const gl = this.gl;
     const numStages = Math.log2(this.gridSize);
 
-    gl.useProgram(this.fftProgram);
     gl.viewport(0, 0, this.textureSize, this.textureSize);
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
 
-    // Set common uniforms
-    gl.uniform1f(gl.getUniformLocation(this.fftProgram, 'u_gridSize'), this.gridSize);
-    gl.uniform1f(gl.getUniformLocation(this.fftProgram, 'u_slicesPerRow'), this.slicesPerRow);
-    gl.uniform1i(gl.getUniformLocation(this.fftProgram, 'u_inverse'), inverse ? 1 : 0);
-    gl.uniform1i(gl.getUniformLocation(this.fftProgram, 'u_numStages'), numStages);
-
     // Perform FFT along each axis (X, Y, Z)
     for (let axis = 0; axis < 3; axis++) {
-      gl.uniform1i(gl.getUniformLocation(this.fftProgram, 'u_axis'), axis);
-
       for (let stage = 0; stage < numStages; stage++) {
-        gl.uniform1i(gl.getUniformLocation(this.fftProgram, 'u_stage'), stage);
+        const isFirstStage = (axis === 0 && stage === 0);
+        const isLastStage = (axis === 2 && stage === numStages - 1);
 
-        // Ping-pong between working and pingPong textures
-        const isEven = stage % 2 === 0;
-        const srcTex = isEven ? this.workingTexture : this.pingPongTexture;
-        const dstTex = isEven ? this.pingPongTexture : this.workingTexture;
-        const dstFBO = isEven ? this.pingPongFramebuffer : this.workingFramebuffer;
+        // Select shader program
+        let program;
+        if (!inverse && isFirstStage) {
+          program = this.fftProgramRealToComplex;
+        } else if (inverse && isLastStage) {
+          program = this.fftProgramComplexToReal;
+        } else {
+          program = this.fftProgramComplexToComplex;
+        }
 
-        gl.bindFramebuffer(gl.FRAMEBUFFER, dstFBO);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dstTex, 0);
+        gl.useProgram(program);
 
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, srcTex);
-        gl.uniform1i(gl.getUniformLocation(this.fftProgram, 'u_spectrum'), 0);
+        // Set common uniforms
+        gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), this.gridSize);
+        gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), this.slicesPerRow);
+        gl.uniform1i(gl.getUniformLocation(program, 'u_inverse'), inverse ? 1 : 0);
+        gl.uniform1i(gl.getUniformLocation(program, 'u_numStages'), numStages);
+        gl.uniform1i(gl.getUniformLocation(program, 'u_axis'), axis);
+        gl.uniform1i(gl.getUniformLocation(program, 'u_stage'), stage);
+        gl.uniform1i(gl.getUniformLocation(program, 'u_debugMode'), 0);
+
+        // Special handling for first/last stages
+        if (!inverse && isFirstStage) {
+          // First forward stage: read from real, write to complexTo
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, this.real);
+          gl.uniform1i(gl.getUniformLocation(program, 'u_realInput'), 0);
+
+          gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebufferTo);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.complexTo, 0);
+        } else if (inverse && isLastStage) {
+          // Last inverse stage: read from complexFrom, write to real with normalization
+          const normalizeInverse = 1.0 / (this.gridSize * this.gridSize * this.gridSize);
+          gl.uniform1f(gl.getUniformLocation(program, 'u_normalizeInverse'), normalizeInverse);
+
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, this.complexFrom);
+          gl.uniform1i(gl.getUniformLocation(program, 'u_spectrum'), 0);
+
+          gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebufferReal);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.real, 0);
+        } else {
+          // Middle stages: ping-pong between complexFrom and complexTo
+          // After first stage of axis 0 (forward) or before last stage of axis 2 (inverse),
+          // we need to track which texture has the current data
+          
+          // Strategy: 
+          // - Forward: first stage writes to complexTo, then ping-pong
+          // - Inverse: start from complexFrom, ping-pong, last stage reads from complexFrom
+          
+          const stageIndex = axis * numStages + stage;
+          let srcTex, dstTex, dstFBO;
+          
+          if (!inverse) {
+            // Forward: first stage already wrote to complexTo
+            // Subsequent stages ping-pong
+            const isEvenStage = (stageIndex - 1) % 2 === 0;
+            srcTex = isEvenStage ? this.complexTo : this.complexFrom;
+            dstTex = isEvenStage ? this.complexFrom : this.complexTo;
+            dstFBO = isEvenStage ? this.framebufferFrom : this.framebufferTo;
+          } else {
+            // Inverse: start from complexFrom, ping-pong until last stage
+            const isEvenStage = stageIndex % 2 === 0;
+            srcTex = isEvenStage ? this.complexFrom : this.complexTo;
+            dstTex = isEvenStage ? this.complexTo : this.complexFrom;
+            dstFBO = isEvenStage ? this.framebufferTo : this.framebufferFrom;
+          }
+
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, srcTex);
+          gl.uniform1i(gl.getUniformLocation(program, 'u_spectrum'), 0);
+
+          gl.bindFramebuffer(gl.FRAMEBUFFER, dstFBO);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dstTex, 0);
+        }
 
         gl.bindVertexArray(this.quadVAO);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.bindVertexArray(null);
       }
-
-      // After each axis, ensure result is in workingTexture for next axis
-      const finalIsInPingPong = (numStages % 2) !== 0;
-      if (finalIsInPingPong) {
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.pingPongFramebuffer);
-        gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.pingPongTexture, 0);
-        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.workingFramebuffer);
-        gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.workingTexture, 0);
-        gl.blitFramebuffer(0, 0, this.textureSize, this.textureSize,
-          0, 0, this.textureSize, this.textureSize,
-          gl.COLOR_BUFFER_BIT, gl.NEAREST);
-      }
     }
 
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
@@ -382,31 +329,40 @@ export class KFFT {
   dispose() {
     const gl = this.gl;
 
-    if (this.fftProgram) gl.deleteProgram(this.fftProgram);
-    if (this.realToComplexProgram) gl.deleteProgram(this.realToComplexProgram);
-    if (this.complexToRealProgram) gl.deleteProgram(this.complexToRealProgram);
+    if (this.fftProgramRealToComplex) gl.deleteProgram(this.fftProgramRealToComplex);
+    if (this.fftProgramComplexToReal) gl.deleteProgram(this.fftProgramComplexToReal);
+    if (this.fftProgramComplexToComplex) gl.deleteProgram(this.fftProgramComplexToComplex);
     if (this.quadVAO) gl.deleteVertexArray(this.quadVAO);
-    if (this.workingTexture) gl.deleteTexture(this.workingTexture);
-    if (this.pingPongTexture) gl.deleteTexture(this.pingPongTexture);
-    if (this.workingFramebuffer) gl.deleteFramebuffer(this.workingFramebuffer);
-    if (this.pingPongFramebuffer) gl.deleteFramebuffer(this.pingPongFramebuffer);
+    if (this.framebufferFrom) gl.deleteFramebuffer(this.framebufferFrom);
+    if (this.framebufferTo) gl.deleteFramebuffer(this.framebufferTo);
+    if (this.framebufferReal) gl.deleteFramebuffer(this.framebufferReal);
 
-    // Note: Do not delete inReal, inComplex, outComplex, outReal as they are
-    // owned by external code (ParticleSystemSpectralKernels)
+    if (this.real) {
+      if (this.ownsReal) gl.deleteTexture(this.real);
+      this.real = null;
+    }
+    if (this.complexFrom) {
+      if (this.ownsComplexFrom) gl.deleteTexture(this.complexFrom);
+      this.complexFrom = null;
+    }
+    if (this.complexTo) {
+      if (this.ownsComplexTo) gl.deleteTexture(this.complexTo);
+      this.complexTo = null;
+    }
   }
 }
 
 /**
- * Helper: Create a RGBA32F texture
+ * Helper: Create an R32F single-channel texture
  * @param {WebGL2RenderingContext} gl
  * @param {number} width
  * @param {number} height
  */
-function createTextureRGBA32F(gl, width, height) {
+function createTextureR32F(gl, width, height) {
   const texture = gl.createTexture();
   if (!texture) throw new Error('Failed to create texture');
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, width, height, 0, gl.RED, gl.FLOAT, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -418,13 +374,14 @@ function createTextureRGBA32F(gl, width, height) {
 /**
  * Helper: Create an RG32F complex texture
  * @param {WebGL2RenderingContext} gl
- * @param {number} size
+ * @param {number} width
+ * @param {number} height
  */
-function createComplexTexture(gl, size) {
+function createComplexTexture(gl, width, height) {
   const texture = gl.createTexture();
   if (!texture) throw new Error('Failed to create texture');
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, size, size, 0, gl.RG, gl.FLOAT, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, width, height, 0, gl.RG, gl.FLOAT, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

@@ -3,12 +3,14 @@
 import * as THREE from "three";
 import { createScene } from "three-pop";
 import { massSpotMesh } from "./mass-spot-mesh.js";
+import { particleSystemKernels } from "./particle-system/particle-system-kernels.js";
+import { LaplacianForceModuleKernels } from "./particle-system/graph-laplacian-kernels/laplacian-force-module-kernels.js";
+import { generateSocialGraph } from "./particle-system/utils/social-graph-generator.js";
 
-// Import kernel-based particle systems
-import { ParticleSystemMonopoleKernels } from "./particle-system/gravity-multipole/particle-system-monopole-kernels.js";
-import { ParticleSystemQuadrupoleKernels } from "./particle-system/gravity-multipole/particle-system-quadrupole-kernels.js";
-import { ParticleSystemSpectralKernels } from "./particle-system/gravity-spectral-kernels/particle-system-spectral-kernels.js";
-import { ParticleSystemMeshKernels } from "./particle-system/gravity-mesh-kernels/particle-system-mesh-kernels.js";
+const COLOR1 = new THREE.Color().setHSL(0.0, 1.0, 0.6);
+const COLOR2 = new THREE.Color().setHSL(0.33, 1.0, 0.6);
+const COLOR3 = new THREE.Color().setHSL(0.66, 1.0, 0.6);
+const SCRATCH_COLOR = new THREE.Color();
 
 // 1. Setup Scene
 const outcome = createScene({
@@ -42,6 +44,9 @@ document.body.appendChild(container);
 const countInput = /** @type {HTMLInputElement} */ (
   document.getElementById("count-input")
 );
+const graphForceCheckbox = /** @type {HTMLInputElement} */ (
+  document.getElementById("graph-force-checkbox")
+);
 const monopoleRadio = /** @type {HTMLInputElement} */ (
   document.getElementById("monopole-radio")
 );
@@ -70,6 +75,7 @@ const worldBounds = /** @type {{ min: [number, number, number], max: [number, nu
 /** @type {'monopole' | 'quadrupole' | 'spectral' | 'mesh'} */
 let calculationMethod = "monopole"; // Default to monopole
 let frameCount = 0;
+let graphForcesEnabled = false;
 
 countInput.value = particleCount.toLocaleString();
 
@@ -96,10 +102,37 @@ function updateDocumentTitle(method) {
   }
 }
 
-/** @type {ParticleSystemMonopoleKernels | ParticleSystemQuadrupoleKernels | ParticleSystemSpectralKernels | ParticleSystemMeshKernels | null} */
+/**
+ * @param {number} x
+ * @param {number} y
+ * @param {number} z
+ * @param {{ min: [number, number, number], max: [number, number, number] }} worldBounds
+ */
+function encodeRGBFromBounds(x, y, z, worldBounds) {
+  const nx = (x - worldBounds.min[0]) / (worldBounds.max[0] - worldBounds.min[0]);
+  const ny = (y - worldBounds.min[1]) / (worldBounds.max[1] - worldBounds.min[1]);
+  const nz = (z - worldBounds.min[2]) / (worldBounds.max[2] - worldBounds.min[2]);
+
+  SCRATCH_COLOR.r = COLOR1.r * nx + COLOR2.r * ny + COLOR3.r * nz;
+  SCRATCH_COLOR.g = COLOR1.g * nx + COLOR2.g * ny + COLOR3.g * nz;
+  SCRATCH_COLOR.b = COLOR1.b * nx + COLOR2.b * ny + COLOR3.b * nz;
+
+  const norm = 1 / (nx + ny + nz || 1);
+  SCRATCH_COLOR.multiplyScalar(norm);
+
+  const r = Math.max(0, Math.min(255, Math.floor(SCRATCH_COLOR.r * 255)));
+  const g = Math.max(0, Math.min(255, Math.floor(SCRATCH_COLOR.g * 255)));
+  const b = Math.max(0, Math.min(255, Math.floor(SCRATCH_COLOR.b * 255)));
+
+  return ((r & 0xff) << 16) | ((g & 0xff) << 8) | (b & 0xff);
+}
+
+/** @type {ReturnType<typeof particleSystemKernels> | null} */
 let physics = null;
 /** @type {ReturnType<typeof massSpotMesh> | null} */
 let m = null;
+/** @type {LaplacianForceModuleKernels | null} */
+let graphModule = null;
 let positionTextureWrapper = /** @type {THREE.ExternalTexture | null} */ (null);
 let isInitialized = false;
 // Global color texture loaded from colors array
@@ -129,6 +162,7 @@ outcome.animate = () => {
   }
 
   physics.step();
+  
   renderer.resetState();
 
   if (positionTextureWrapper) {
@@ -160,7 +194,7 @@ recreateAll();
     spectralRadio.checked = method === "spectral";
     meshRadio.checked = method === "mesh";
     updateDocumentTitle(calculationMethod);
-    console.log("[Demo Kernels] Method toggled via DevTools:", method);
+    //console.log("[Demo Kernels] Method toggled via DevTools:", method);
     recreateAll();
   } else {
     console.error(
@@ -169,12 +203,12 @@ recreateAll();
   }
 };
 
-console.log("[Demo Kernels] DevTools helpers available:");
-console.log(
-  '  window.setMethod("monopole"|"quadrupole"|"spectral"|"mesh") - Switch calculation method'
-);
-console.log("  window.physics - Access kernel-based particle system");
-console.log("  window.m - Access mass spot mesh");
+// console.log("[Demo Kernels] DevTools helpers available:");
+// console.log(
+//   '  window.setMethod("monopole"|"quadrupole"|"spectral"|"mesh") - Switch calculation method'
+// );
+// console.log("  window.physics - Access kernel-based particle system");
+// console.log("  window.m - Access mass spot mesh");
 
 // 6. Count input handler
 /** @type {*} */
@@ -227,6 +261,16 @@ meshRadio.onchange = () => {
   }
 };
 
+// 8. Graph forces checkbox handler
+graphForceCheckbox.onchange = () => {
+  graphForcesEnabled = graphForceCheckbox.checked;
+  console.log(
+    "[Demo Kernels] Graph forces:",
+    graphForcesEnabled ? "ENABLED" : "DISABLED"
+  );
+  recreateAll();
+};
+
 /**
  * @param {string} message
  */
@@ -241,19 +285,23 @@ function recreateAll() {
   
   if (physics) physics.dispose();
   if (m && m.mesh) scene.remove(m.mesh);
+  if (graphModule) graphModule.dispose();
 
   isInitialized = false;
   frameCount = 0;
   positionTextureWrapper = null;
+  graphModule = null;
 
   updateStatus("Creating particle system...");
   
   const result = recreatePhysicsAndMesh();
   physics = result.physics;
   m = result.m;
+  graphModule = result.graphModule;
 
   /** @type {any} */ (window).m = m;
   /** @type {any} */ (window).physics = physics;
+  /** @type {any} */ (window).graphModule = graphModule;
   
   updateStatus("Initializing...");
 }
@@ -261,139 +309,82 @@ function recreateAll() {
 function recreatePhysicsAndMesh() {
   const particles = createParticles(particleCount, worldBounds);
 
-  const color1 = new THREE.Color().setHSL(0.0, 1.0, 0.6);
-  const color2 = new THREE.Color().setHSL(0.33, 1.0, 0.6);
-  const color3 = new THREE.Color().setHSL(0.66, 1.0, 0.6);
-  const finalColor = new THREE.Color();
-
   let gravityStrength = Math.random();
   gravityStrength = gravityStrength * 0.0001;
   gravityStrength = gravityStrength * gravityStrength;
   gravityStrength += 0.0000005;
 
-  // Calculate texture dimensions
-  const textureWidth = Math.ceil(Math.sqrt(particleCount));
-  const textureHeight = Math.ceil(particleCount / textureWidth);
-  const actualTextureSize = textureWidth * textureHeight;
-
-  const positions = new Float32Array(actualTextureSize * 4);
-  const velocities = new Float32Array(actualTextureSize * 4);
-  const colors = new Uint8Array(actualTextureSize * 4);
-
-  // Populate buffers
-  for (let i = 0; i < particles.length; i++) {
-    const spot = particles[i];
-    const vx = spot.x || 0;
-    const vy = spot.y || 0;
-    const vz = spot.z || 0;
-    const x =
-      (vx - worldBounds.min[0]) / (worldBounds.max[0] - worldBounds.min[0]);
-    const y =
-      (vy - worldBounds.min[1]) / (worldBounds.max[1] - worldBounds.min[1]);
-    const z =
-      (vz - worldBounds.min[2]) / (worldBounds.max[2] - worldBounds.min[2]);
-
-    finalColor.r = color1.r * x + color2.r * y + color3.r * z;
-    finalColor.g = color1.g * x + color2.g * y + color3.g * z;
-    finalColor.b = color1.b * x + color2.b * y + color3.b * z;
-
-    const factor = 1 / (x + y + z || 1);
-    finalColor.r *= factor;
-    finalColor.g *= factor;
-    finalColor.b *= factor;
-
-    const b = i * 4;
-    positions[b + 0] = spot.x;
-    positions[b + 1] = spot.y;
-    positions[b + 2] = spot.z;
-    positions[b + 3] = spot.mass;
-
-    velocities[b + 0] = 0;
-    velocities[b + 1] = 0;
-    velocities[b + 2] = 0;
-    velocities[b + 3] = 0;
-
-    colors[b + 0] = Math.floor(x * 255);
-    colors[b + 1] = Math.floor(y * 255);
-    colors[b + 2] = Math.floor(z * 255);
-    colors[b + 3] = 255;
+  // Generate graph edges if graph forces enabled
+  let edges = null;
+  let laplacianModule = null;
+  
+  if (graphForcesEnabled) {
+    console.log(`[Demo Kernels] Generating social graph for ${particleCount} nodes...`);
+    
+    // Target avg degree: 6 edges/node
+    const targetAvgDegree = 6;
+    const numClusters = Math.max(10, Math.ceil(Math.sqrt(particleCount) / 10));
+    const avgClusterSize = particleCount / numClusters;
+    const targetEdgesPerCluster = targetAvgDegree * avgClusterSize * 0.8;
+    const possiblePairsPerCluster = (avgClusterSize * (avgClusterSize - 1)) / 2;
+    const intraClusterProb = targetEdgesPerCluster / possiblePairsPerCluster;
+    
+    edges = generateSocialGraph(particleCount, {
+      avgDegree: targetAvgDegree,
+      powerLawExponent: 2.3,
+      numClusters: numClusters,
+      intraClusterProb: intraClusterProb,
+      interClusterProb: 0.002,
+      strengthMin: 0.001,
+      strengthMax: 0.005,
+    });
+    
+    console.log(
+      `[Demo Kernels] Generated ${edges.length} edges (avg degree: ${(
+        (2 * edges.length) / particleCount
+      ).toFixed(2)})`
+    );
+    
+    // Use NEGATIVE gravity for repulsion when using graph forces
+    gravityStrength = -gravityStrength * 50.0; // Negative = repulsion
+    console.log(
+      `[Demo Kernels] Using negative gravity (repulsion): ${gravityStrength.toExponential(2)}`
+    );
   }
 
-  const particleData = {
-    positions,
-    velocities,
-    colors
-  };
-
-  /** @type {ParticleSystemMonopoleKernels | ParticleSystemQuadrupoleKernels | ParticleSystemSpectralKernels | ParticleSystemMeshKernels} */
   let system;
 
   try {
-    switch (calculationMethod) {
-      case 'mesh': {
-        system = new ParticleSystemMeshKernels({
-          gl,
-          particleData,
-          worldBounds,
-          mesh: {
-            assignment: 'cic',
-            gridSize: 64,
-            slicesPerRow: 8,
-            nearFieldRadius: 2
-          },
-          gravityStrength,
-          softening: 0.002,
-          dt: 10 / 60,
-          damping: 0.002
-        });
-        console.log("[Demo Kernels] Created ParticleSystemMeshKernels");
-        break;
-      }
-      case 'spectral': {
-        system = new ParticleSystemSpectralKernels({
-          gl,
-          particleData,
-          worldBounds,
-          gridSize: 64,
-          assignment: 'CIC',
-          gravityStrength,
-          softening: 0.002,
-          dt: 10 / 60,
-          damping: 0.002
-        });
-        console.log("[Demo Kernels] Created ParticleSystemSpectralKernels");
-        break;
-      }
-      case 'quadrupole': {
-        system = new ParticleSystemQuadrupoleKernels({
-          gl,
-          particleData,
-          worldBounds,
-          theta: 0.7,
-          gravityStrength,
-          softening: 0.002,
-          dt: 10 / 60,
-          damping: 0.002
-        });
-        console.log("[Demo Kernels] Created ParticleSystemQuadrupoleKernels");
-        break;
-      }
-      case 'monopole':
-      default: {
-        system = new ParticleSystemMonopoleKernels({
-          gl,
-          particleData,
-          worldBounds,
-          theta: 0.7,
-          gravityStrength,
-          softening: 0.002,
-          dt: 10 / 60,
-          damping: 0.002
-        });
-        console.log("[Demo Kernels] Created ParticleSystemMonopoleKernels");
-        break;
-      }
+    const kernelOptions = /** @type {Parameters<typeof particleSystemKernels>[0]} */ ({
+      gl,
+      particles,
+      method: /** @type {'monopole' | 'quadrupole' | 'spectral' | 'mesh'} */ (calculationMethod),
+      gravityStrength,
+      softening: 0.002,
+      dt: 10 / 60,
+      damping: 0.002,
+      worldBounds,
+      get: /** @type {NonNullable<Parameters<typeof particleSystemKernels>[0]['get']>} */ ((spot, out) => {
+        const sx = spot?.x ?? 0;
+        const sy = spot?.y ?? 0;
+        const sz = spot?.z ?? 0;
+        out.rgb = encodeRGBFromBounds(sx, sy, sz, worldBounds);
+      })
+    });
+
+    if (calculationMethod === 'mesh') {
+      kernelOptions.mesh = {
+        assignment: 'cic',
+        gridSize: 64,
+        slicesPerRow: 8,
+        nearFieldRadius: 2
+      };
+    } else {
+      kernelOptions.theta = 0.7;
     }
+
+    system = particleSystemKernels(kernelOptions);
+    console.log(`[Demo Kernels] Created kernel system: ${calculationMethod}`);
   } catch (error) {
     console.error(`[Demo Kernels] Failed to create ${calculationMethod} system:`, error);
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -404,25 +395,8 @@ function recreatePhysicsAndMesh() {
   const textureSize = { width: system.textureWidth, height: system.textureHeight };
   const positionTexture = system.positionTexture;
 
-  // Dispose previous color texture if any
-  if (colorTexGlobal) {
-    gl.deleteTexture(colorTexGlobal);
-    colorTexGlobal = null;
-  }
-  // Create color texture from colors array
-  const colorTex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, colorTex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texImage2D(
-    gl.TEXTURE_2D, 0, gl.RGBA, textureSize.width, textureSize.height, 0,
-    gl.RGBA, gl.UNSIGNED_BYTE, colors
-  );
-  gl.bindTexture(gl.TEXTURE_2D, null);
-  // Store for animation use
-  colorTexGlobal = colorTex;
+  const colorTexture = buildColorTexture(gl, particles, textureSize, worldBounds);
+  colorTexGlobal = colorTexture;
 
   const meshInstance = massSpotMesh({
     textureMode: true,
@@ -430,8 +404,8 @@ function recreatePhysicsAndMesh() {
     textures: {
       // positionTexture is always defined here
       position: /** @type {WebGLTexture} */ (positionTexture),
-      color: colorTex,
-      size: [textureSize.width, textureHeight],
+      color: colorTexture,
+      size: [textureSize.width, textureSize.height],
     },
     fog: { start: 0.3, gray: 50 },
     enableProfiling: false,
@@ -440,7 +414,25 @@ function recreatePhysicsAndMesh() {
 
   scene.add(meshInstance.mesh);
 
-  return { physics: system, m: meshInstance };
+  // Create LaplacianForceModuleKernels if graph forces are enabled
+  if (graphForcesEnabled && edges) {
+    const textureSize = system.getTextureSize ? system.getTextureSize() : { width: system.textureWidth, height: system.textureHeight };
+    const hasFloatBlend = !!gl.getExtension('EXT_float_blend');
+    
+    laplacianModule = new LaplacianForceModuleKernels({
+      gl,
+      edges,
+      particleCount,
+      textureWidth: textureSize.width || system.textureWidth,
+      textureHeight: textureSize.height || system.textureHeight,
+      k: 0.3,  // Spring constant (3x stronger)
+      shardSize: 64,
+      normalized: false,
+      disableFloatBlend: !hasFloatBlend
+    });
+  }
+
+  return { physics: system, m: meshInstance, graphModule: laplacianModule };
 }
 
 /**
@@ -456,16 +448,12 @@ function createParticles(count, worldBounds) {
     (worldBounds.min[2] + worldBounds.max[2]) / 2,
   ];
 
-  // Calculate disc dimensions from worldBounds
   const radiusX = (worldBounds.max[0] - worldBounds.min[0]) / 2;
   const radiusZ = (worldBounds.max[2] - worldBounds.min[2]) / 2;
   const heightRange = worldBounds.max[1] - worldBounds.min[1];
 
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
-    // For density proportional to r^2 (empty center, dense edges):
-    // PDF: p(r) ∝ r^2, so CDF ∝ r^3
-    // Inverse CDF: r = u^(1/3) where u is uniform [0,1]
     const radiusFactor = Math.pow(Math.random(), 1 / 7);
     const height = (Math.random() - 0.5) * heightRange;
     let mass = Math.random();
@@ -481,4 +469,49 @@ function createParticles(count, worldBounds) {
   }
 
   return spots;
+}
+
+/**
+ * @param {WebGL2RenderingContext} gl
+ * @param {ReadonlyArray<{ x?: number, y?: number, z?: number }>} particles
+ * @param {{ width: number, height: number }} textureSize
+ * @param {{ min: [number, number, number], max: [number, number, number] }} worldBounds
+ */
+function buildColorTexture(gl, particles, textureSize, worldBounds) {
+  if (colorTexGlobal) {
+    gl.deleteTexture(colorTexGlobal);
+    colorTexGlobal = null;
+  }
+
+  const totalTexels = textureSize.width * textureSize.height;
+  const colors = new Uint8Array(totalTexels * 4);
+
+  for (let i = 0; i < totalTexels; i++) {
+    const base = i * 4;
+    const rgb = i < particles.length
+      ? encodeRGBFromBounds(particles[i].x || 0, particles[i].y || 0, particles[i].z || 0, worldBounds)
+      : 0;
+    colors[base + 0] = (rgb >> 16) & 0xff;
+    colors[base + 1] = (rgb >> 8) & 0xff;
+    colors[base + 2] = rgb & 0xff;
+    colors[base + 3] = 255;
+  }
+
+  const texture = gl.createTexture();
+  if (!texture) {
+    throw new Error('Failed to create color texture');
+  }
+
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(
+    gl.TEXTURE_2D, 0, gl.RGBA, textureSize.width, textureSize.height, 0,
+    gl.RGBA, gl.UNSIGNED_BYTE, colors
+  );
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  return texture;
 }

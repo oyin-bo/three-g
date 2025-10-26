@@ -1,19 +1,34 @@
 // @ts-check
 
 /**
- * FFT shader for 3D Fourier transforms
+ * FFT shader generator for 3D Fourier transforms
  *
  * Implements Cooley-Tukey radix-2 FFT for WebGL
- * Operates on complex data stored as RG (real, imaginary)
+ * Generates specialized shader variants for real↔complex conversion and complex↔complex stages
+ * 
+ * @param {{ collapsed?: 'from' | 'to' }} [options]
+ * @returns {string} GLSL shader source
  */
-
-export default /* glsl */ `#version 300 es
+export default function fftShader(options) {
+  const collapsed = options?.collapsed;
+  
+  return /* glsl */ `#version 300 es
 precision highp float;
 
 in vec2 v_uv;
 out vec4 outColor;
 
+${collapsed === 'from' ? `
+// Real-to-complex mode: read R32F, assume imaginary=0
+uniform sampler2D u_realInput;
+` : collapsed === 'to' ? `
+// Complex-to-real mode: read RG32F, write R32F with normalization
 uniform sampler2D u_spectrum;
+uniform float u_normalizeInverse;
+` : `
+// Complex-to-complex mode: standard FFT butterfly
+uniform sampler2D u_spectrum;
+`}
 uniform int u_axis;          // 0=X, 1=Y, 2=Z
 uniform int u_stage;         // FFT stage (0 to numStages-1)
 uniform int u_numStages;     // Total number of stages (log2(gridSize))
@@ -27,7 +42,8 @@ const float TWO_PI = 6.28318530718;
 
 // Convert 2D texture coords to 3D voxel coords
 ivec3 texCoordToVoxel(vec2 uv, float gridSize, float slicesPerRow) {
-  vec2 texel = uv * gridSize * slicesPerRow;
+  // Subtract 0.5 to account for fragment centers at half-integer positions
+  vec2 texel = uv * gridSize * slicesPerRow - 0.5;
   int ix = int(mod(texel.x, gridSize));
   int iy = int(mod(texel.y, gridSize));
   int sliceRow = int(texel.y / gridSize);
@@ -68,6 +84,20 @@ vec2 twiddle(float k, float N, float sign) {
 }
 
 void main() {
+${collapsed === 'from' ? `
+  // Real-to-complex conversion: read R32F real value, output (real, 0)
+  ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
+  vec2 realInputUV = v_uv;
+  float realValue = texture(u_realInput, realInputUV).r;
+  outColor = vec4(realValue, 0.0, 0.0, 0.0);
+` : collapsed === 'to' ? `
+  // Complex-to-real conversion: read RG32F complex, output real part with normalization
+  ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
+  vec2 complex = texture(u_spectrum, v_uv).rg;
+  float realPart = complex.r * u_normalizeInverse;
+  outColor = vec4(realPart, 0.0, 0.0, 0.0);
+` : `
+  // Standard FFT butterfly operation
   ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
   int N = int(u_gridSize);
   
@@ -134,14 +164,11 @@ void main() {
     result = complexSub(partnerComplex, complexMul(w, currentComplex));
   }
   
-  // Normalize if inverse FFT and final stage of each axis
-  // For 3D FFT, we normalize by N once per axis (total N³)
-  // Convention: forward unnormalized, inverse applies 1/N³ = (1/N)³
-  // This ensures IFFT(FFT(f)) = f for round-trip consistency
-  if (u_inverse == 1 && u_stage == 1) {
-    result /= u_gridSize;
-  }
+  // Normalization is applied separately in the complex-to-real extraction pass
+  // to avoid redundant scaling during butterfly stages
   
   outColor = vec4(result, 0.0, 0.0);
+`}
 }
 `;
+}

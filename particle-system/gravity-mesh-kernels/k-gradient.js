@@ -8,7 +8,8 @@
  */
 
 import fsQuadVert from '../shaders/fullscreen.vert.js';
-import gradientFrag from '../gravity-spectral/shaders/gradient.frag.js';
+import gradientFrag from './gradient.frag.js';
+import { readLinear, readGrid3D, formatNumber } from '../diag.js';
 
 export class KGradient {
   /**
@@ -121,7 +122,62 @@ export class KGradient {
     
     return vao;
   }
+  
+  /**
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
+   */
+  valueOf({ pixels } = {}) {
+    const value = {
+      potentialSpectrum: this.inPotentialSpectrum && readLinear({
+        gl: this.gl, texture: this.inPotentialSpectrum, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      forceSpectrumX: this.outForceSpectrumX && readLinear({
+        gl: this.gl, texture: this.outForceSpectrumX, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      forceSpectrumY: this.outForceSpectrumY && readLinear({
+        gl: this.gl, texture: this.outForceSpectrumY, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      forceSpectrumZ: this.outForceSpectrumZ && readLinear({
+        gl: this.gl, texture: this.outForceSpectrumZ, width: this.textureSize,
+        height: this.textureSize, count: this.textureSize * this.textureSize,
+        channels: ['real', 'imag'], pixels, format: this.gl.RG32F
+      }),
+      gridSize: this.gridSize,
+      slicesPerRow: this.slicesPerRow,
+      textureSize: this.textureSize,
+      worldSize: [...this.worldSize],
+      renderCount: this.renderCount
+    };
+    
+    value.toString = () =>
+`KGradient(${this.gridSize}³ grid) texture=${this.textureSize}×${this.textureSize} worldSize=[${this.worldSize}] #${this.renderCount}
 
+potentialSpectrum: ${value.potentialSpectrum}
+
+→ forceSpectrumX: ${value.forceSpectrumX}
+
+→ forceSpectrumY: ${value.forceSpectrumY}
+
+→ forceSpectrumZ: ${value.forceSpectrumZ}`;
+    
+    return value;
+  }
+  
+  /**
+   * Get human-readable string representation of kernel state
+   * @returns {string} Compact summary
+   */
+  toString() {
+    return this.valueOf().toString();
+  }
+  
   run() {
     const gl = this.gl;
     
@@ -188,6 +244,8 @@ export class KGradient {
     gl.bindVertexArray(prevVAO);
     if (prevBlend) gl.enable(gl.BLEND);
     if (prevDepthTest) gl.enable(gl.DEPTH_TEST);
+    
+    this.renderCount = (this.renderCount || 0) + 1;
   }
 
   dispose() {

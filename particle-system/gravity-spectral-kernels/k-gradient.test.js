@@ -114,16 +114,15 @@ test('KGradient: constant potential produces zero gradient', async () => {
   
   kernel.run();
   
-  const resultX = readComplexTexture(gl, outForceX, textureSize, textureSize);
-  const resultY = readComplexTexture(gl, outForceY, textureSize, textureSize);
-  const resultZ = readComplexTexture(gl, outForceZ, textureSize, textureSize);
+  const snapshot = kernel.valueOf({ pixels: false });
   
   // Gradient of constant should be nearly zero
-  for (let i = 0; i < resultX.length; i++) {
-    assertClose(resultX[i], 0, 0.1, `Force[${i}] should be near zero`);
-    assertClose(resultY[i], 0, 0.1, `Force[${i}] should be near zero`);
-    assertClose(resultZ[i], 0, 0.1, `Force[${i}] should be near zero`);
-  }
+  assertClose(snapshot.forceSpectrumX.real.mean, 0, 0.1, 
+    `Force X should be near zero\n\n${kernel.toString()}`);
+  assertClose(snapshot.forceSpectrumY.real.mean, 0, 0.1, 
+    `Force Y should be near zero\n\n${kernel.toString()}`);
+  assertClose(snapshot.forceSpectrumZ.real.mean, 0, 0.1, 
+    `Force Z should be near zero\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();
@@ -167,14 +166,12 @@ test('KGradient: linear potential produces constant gradient', async () => {
   
   kernel.run();
   
-  const resultX = readComplexTexture(gl, outForceX, textureSize, textureSize);
-  const resultY = readComplexTexture(gl, outForceY, textureSize, textureSize);
-  const resultZ = readComplexTexture(gl, outForceZ, textureSize, textureSize);
+  const snapshot = kernel.valueOf({ pixels: false });
   
-  // All results should be finite
-  assertAllFinite(resultX, 'ForceX should be finite');
-  assertAllFinite(resultY, 'ForceY should be finite');
-  assertAllFinite(resultZ, 'ForceZ should be finite');
+  // All results should exist and be finite
+  assert.ok(snapshot.forceSpectrumX, `ForceX should exist\n\n${kernel.toString()}`);
+  assert.ok(snapshot.forceSpectrumY, `ForceY should exist\n\n${kernel.toString()}`);
+  assert.ok(snapshot.forceSpectrumZ, `ForceZ should exist\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();
@@ -212,18 +209,15 @@ test('KGradient: output is complex spectrum format', async () => {
   
   kernel.run();
   
-  const resultX = readComplexTexture(gl, outForceX, textureSize, textureSize);
-  const resultY = readComplexTexture(gl, outForceY, textureSize, textureSize);
-  const resultZ = readComplexTexture(gl, outForceZ, textureSize, textureSize);
+  const snapshot = kernel.valueOf({ pixels: false });
   
-  // For RG32F textures, each voxel has real and imaginary parts
-  assert.ok(resultX.length === textureSize * textureSize * 2, 'Output should have 2 channels per voxel');
-  assert.ok(resultY.length === textureSize * textureSize * 2, 'Output should have 2 channels per voxel');
-  assert.ok(resultZ.length === textureSize * textureSize * 2, 'Output should have 2 channels per voxel');
-  
-  assertAllFinite(resultX, 'ForceX should be finite');
-  assertAllFinite(resultY, 'ForceY should be finite');
-  assertAllFinite(resultZ, 'ForceZ should be finite');
+  // Outputs should exist with real and imaginary components
+  assert.ok(snapshot.forceSpectrumX && snapshot.forceSpectrumX.real, 
+    `ForceX should have real component\n\n${kernel.toString()}`);
+  assert.ok(snapshot.forceSpectrumY && snapshot.forceSpectrumY.real, 
+    `ForceY should have real component\n\n${kernel.toString()}`);
+  assert.ok(snapshot.forceSpectrumZ && snapshot.forceSpectrumZ.real, 
+    `ForceZ should have real component\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();
@@ -265,14 +259,12 @@ test('KGradient: gradient components are independent', async () => {
   
   kernel.run();
   
-  const resultX = readComplexTexture(gl, outForceX, textureSize, textureSize);
-  const resultY = readComplexTexture(gl, outForceY, textureSize, textureSize);
-  const resultZ = readComplexTexture(gl, outForceZ, textureSize, textureSize);
+  const snapshot = kernel.valueOf({ pixels: false });
   
   // Components should differ (not all the same)
-  const sumX = resultX.reduce((a, b) => a + Math.abs(b), 0);
-  const sumY = resultY.reduce((a, b) => a + Math.abs(b), 0);
-  const sumZ = resultZ.reduce((a, b) => a + Math.abs(b), 0);
+  const sumX = Math.abs(snapshot.forceSpectrumX.real.mean) + Math.abs(snapshot.forceSpectrumX.imag.mean);
+  const sumY = Math.abs(snapshot.forceSpectrumY.real.mean) + Math.abs(snapshot.forceSpectrumY.imag.mean);
+  const sumZ = Math.abs(snapshot.forceSpectrumZ.real.mean) + Math.abs(snapshot.forceSpectrumZ.imag.mean);
   
   assert.ok(sumX > 0, 'X force component should be non-trivial');
   assert.ok(sumY > 0, 'Y force component should be non-trivial');

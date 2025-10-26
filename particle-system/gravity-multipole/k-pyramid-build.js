@@ -2,6 +2,7 @@
 
 import fsQuadVert from '../shaders/fullscreen.vert.js';
 import reductionFrag from '../shaders/reduction.frag.js';
+import { readGrid3D, formatNumber } from '../diag.js';
 
 /**
  * Builds octree pyramid via 2x2x2 reduction
@@ -116,6 +117,72 @@ export class KPyramidBuild {
     /** @type {{ a0: WebGLTexture, a1: WebGLTexture, a2: WebGLTexture } | null} */
     this._fboShadow = null;
   }
+  
+  /**
+   * Capture complete computational state for debugging and testing
+   * @param {{pixels?: boolean}} [options] - Capture options
+   */
+  valueOf({ pixels } = {}) {
+    const value = {
+      inA0: this.inA0 && readGrid3D({
+        gl: this.gl, texture: this.inA0, width: textureDimensions(this.inGridSize, this.inSlicesPerRow).width,
+        height: textureDimensions(this.inGridSize, this.inSlicesPerRow).height, gridSize: this.inGridSize,
+        channels: ['cx', 'cy', 'cz', 'mass'], pixels
+      }),
+      inA1: this.inA1 && readGrid3D({
+        gl: this.gl, texture: this.inA1, width: textureDimensions(this.inGridSize, this.inSlicesPerRow).width,
+        height: textureDimensions(this.inGridSize, this.inSlicesPerRow).height, gridSize: this.inGridSize,
+        channels: ['xx', 'yy', 'zz', 'xy'], pixels
+      }),
+      inA2: this.inA2 && readGrid3D({
+        gl: this.gl, texture: this.inA2, width: textureDimensions(this.inGridSize, this.inSlicesPerRow).width,
+        height: textureDimensions(this.inGridSize, this.inSlicesPerRow).height, gridSize: this.inGridSize,
+        channels: ['xz', 'yz', 'unused1', 'unused2'], pixels
+      }),
+      outA0: this.outA0 && readGrid3D({
+        gl: this.gl, texture: this.outA0, width: this.outTextureWidth,
+        height: this.outTextureHeight, gridSize: this.outGridSize,
+        channels: ['cx', 'cy', 'cz', 'mass'], pixels
+      }),
+      outA1: this.outA1 && readGrid3D({
+        gl: this.gl, texture: this.outA1, width: this.outTextureWidth,
+        height: this.outTextureHeight, gridSize: this.outGridSize,
+        channels: ['xx', 'yy', 'zz', 'xy'], pixels
+      }),
+      outA2: this.outA2 && readGrid3D({
+        gl: this.gl, texture: this.outA2, width: this.outTextureWidth,
+        height: this.outTextureHeight, gridSize: this.outGridSize,
+        channels: ['xz', 'yz', 'unused1', 'unused2'], pixels
+      }),
+      outSize: this.outSize,
+      outGridSize: this.outGridSize,
+      outSlicesPerRow: this.outSlicesPerRow,
+      inGridSize: this.inGridSize,
+      inSlicesPerRow: this.inSlicesPerRow,
+      renderCount: this.renderCount
+    };
+    
+    value.toString = () =>
+`KPyramidBuild(${this.inGridSize}³→${this.outGridSize}³) in=${this.inSlicesPerRow}slices out=${this.outSlicesPerRow}slices #${this.renderCount}
+
+inA0: ${value.inA0}
+inA1: ${value.inA1}
+inA2: ${value.inA2}
+
+→ outA0: ${value.outA0}
+→ outA1: ${value.outA1}
+→ outA2: ${value.outA2}`;
+    
+    return value;
+  }
+  
+  /**
+   * Get human-readable string representation of kernel state
+   * @returns {string} Compact summary
+   */
+  toString() {
+    return this.valueOf().toString();
+  }
 
   run() {
     this.gl.useProgram(this.program);
@@ -203,6 +270,8 @@ export class KPyramidBuild {
     this.gl.useProgram(null);
 
     this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+    
+    this.renderCount = (this.renderCount || 0) + 1;
   }
 
   dispose() {

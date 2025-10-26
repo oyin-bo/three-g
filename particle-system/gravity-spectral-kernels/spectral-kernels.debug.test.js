@@ -104,12 +104,17 @@ test('spectral-kernels.debug: can read velocity texture', async () => {
   gl.deleteFramebuffer(fbo);
   
   // Verify velocity data
-  assert.strictEqual(pixels[0], 0.5, 'Velocity X[0] should match');
-  assert.strictEqual(pixels[1], -0.5, 'Velocity Y[0] should match');
-  assert.strictEqual(pixels[2], 0.3, 'Velocity Z[0] should match');
+  const diag = `\n  Velocity texel dump:\n` +
+    `    Particle 0: [${pixels[0].toFixed(4)}, ${pixels[1].toFixed(4)}, ${pixels[2].toFixed(4)}, ${pixels[3].toFixed(4)}]\n` +
+    `    Particle 1: [${pixels[4].toFixed(4)}, ${pixels[5].toFixed(4)}, ${pixels[6].toFixed(4)}, ${pixels[7].toFixed(4)}]\n\n` +
+    system.positionKernel;
+
+  assert.strictEqual(pixels[0], 0.5, 'Velocity X[0] should match' + diag);
+  assert.strictEqual(pixels[1], -0.5, 'Velocity Y[0] should match' + diag);
+  assert.strictEqual(pixels[2], 0.3, 'Velocity Z[0] should match' + diag);
   
-  assert.strictEqual(pixels[4], -0.2, 'Velocity X[1] should match');
-  assert.strictEqual(pixels[5], 0.7, 'Velocity Y[1] should match');
+  assert.strictEqual(pixels[4], -0.2, 'Velocity X[1] should match' + diag);
+  assert.strictEqual(pixels[5], 0.7, 'Velocity Y[1] should match' + diag);
   
   system.dispose();
   canvas.remove();
@@ -253,8 +258,13 @@ test('spectral-kernels.debug: multiple steps change particle state', async () =>
                   Math.abs(finalVel[1] - initialVel[1]) + 
                   Math.abs(finalVel[2] - initialVel[2]);
   
+  const diag = `\n  Velocity delta diagnostics:\n` +
+    `    Initial velocity: [${Array.from(initialVel).map(v => v.toFixed(6)).join(', ')}]\n` +
+    `    Final velocity:   [${Array.from(finalVel).map(v => v.toFixed(6)).join(', ')}]\n` +
+    `    Diff magnitude: ${velDiff.toFixed(6)}`;
+
   assert.ok(velDiff > 0.001, 
-    `Velocities should change after simulation: diff=${velDiff.toFixed(6)}`);
+    `Velocities should change after simulation${diag}`);
   
   system.dispose();
   canvas.remove();

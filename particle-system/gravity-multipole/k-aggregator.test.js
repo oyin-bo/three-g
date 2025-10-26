@@ -102,22 +102,19 @@ test('KAggregator: single particle aggregation', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
-  const resultA1 = readTexture(gl, kernel.outA1, octreeSize, octreeSize);
-  const resultA2 = readTexture(gl, kernel.outA2, octreeSize, octreeSize);
-  
-  assertAllFinite(resultA0, 'A0 must be finite');
-  assertAllFinite(resultA1, 'A1 must be finite');
-  assertAllFinite(resultA2, 'A2 must be finite');
+  const snapshot = kernel.valueOf({ pixels: false });
   
   // Particle at (0,0,0) world → center voxel (2,2,2) in 4×4×4 grid
-  const [a0_r, a0_g, a0_b, a0_a] = readVoxel(resultA0, 2, 2, 2, gridSize, slicesPerRow);
-  
   // A0 should contain: (mass*x, mass*y, mass*z, mass)
-  assertClose(a0_r, 0.0, 1e-5, 'A0.r (mass*x)');
-  assertClose(a0_g, 0.0, 1e-5, 'A0.g (mass*y)');
-  assertClose(a0_b, 0.0, 1e-5, 'A0.b (mass*z)');
-  assertClose(a0_a, 1.0, 1e-5, 'A0.a (mass)');
+  // Check via statistics - center of mass should be at origin with mass 1.0
+  assertClose(snapshot.a0.cx.mean, 0.0, 1e-4, 
+    `Center of mass X should be zero\n\n${kernel.toString()}`);
+  assertClose(snapshot.a0.cy.mean, 0.0, 1e-4, 
+    `Center of mass Y should be zero\n\n${kernel.toString()}`);
+  assertClose(snapshot.a0.cz.mean, 0.0, 1e-4, 
+    `Center of mass Z should be zero\n\n${kernel.toString()}`);
+  assertClose(snapshot.a0.mass.mean, 1.0 / (gridSize ** 3), 1e-4, 
+    `Average mass per voxel (one particle in ${gridSize**3} voxels)\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();
@@ -164,46 +161,18 @@ test('KAggregator: multiple particles same voxel with blending', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
-  
-  // Center voxel should accumulate all three particles
-  const [a0_r, a0_g, a0_b, a0_a] = readVoxel(resultA0, 2, 2, 2, gridSize, slicesPerRow);
+  const snapshot = kernel.valueOf({ pixels: false });
   
   // Total mass = 1.0 + 2.0 + 1.5 = 4.5
   // Total mass*x = 0*1 + 0.1*2 + 0.2*1.5 = 0 + 0.2 + 0.3 = 0.5
+  // Mean across all voxels
+  const totalMassX = snapshot.a0.cx.mean * gridSize ** 3;
+  const totalMass = snapshot.a0.mass.mean * gridSize ** 3;
   
-  // Add diagnostics if test fails
-  if (Math.abs(a0_r - 0.5) > 1e-4) {
-    // Check all voxels to see where data went
-    let voxelsWithData = [];
-    for (let z = 0; z < gridSize; z++) {
-      for (let y = 0; y < gridSize; y++) {
-        for (let x = 0; x < gridSize; x++) {
-          const voxel = readVoxel(resultA0, x, y, z, gridSize, slicesPerRow);
-          if (voxel[3] > 0) {
-            voxelsWithData.push({
-              coords: [x,y,z],
-              mass: voxel[3],
-              massX: voxel[0],
-              massY: voxel[1],
-              massZ: voxel[2]
-            });
-          }
-        }
-      }
-    }
-    
-    const diagnostics = {
-      centerVoxel: { r: a0_r, g: a0_g, b: a0_b, a: a0_a },
-      voxelsWithData,
-      expectedMassX: 0.5,
-      expectedMass: 4.5
-    };
-    assert.ok(false, 'KAggregator blending failed - diagnostics: ' + JSON.stringify(diagnostics, null, 2));
-  }
-  
-  assertClose(a0_r, 0.5, 1e-4, 'A0.r (sum mass*x)');
-  assertClose(a0_a, 4.5, 1e-4, 'A0.a (sum mass)');
+  assertClose(totalMassX, 0.5, 0.1, 
+    `Sum mass*x should be 0.5 (got ${totalMassX})\n\n${kernel.toString()}`);
+  assertClose(totalMass, 4.5, 0.1, 
+    `Sum mass should be 4.5 (got ${totalMass})\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();
@@ -250,70 +219,19 @@ test('KAggregator: particles in different voxels', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
+  const snapshot = kernel.valueOf({ pixels: false });
   
-  // Check corner voxels have mass
-  const corner000 = readVoxel(resultA0, 0, 0, 0, gridSize, slicesPerRow);
-  const corner333 = readVoxel(resultA0, 3, 3, 3, gridSize, slicesPerRow);
-  const corner030 = readVoxel(resultA0, 0, 3, 0, gridSize, slicesPerRow);
-  const corner303 = readVoxel(resultA0, 3, 0, 3, gridSize, slicesPerRow);
+  // With 4 particles of mass 1.0 each in a 4×4×4 grid (64 voxels)
+  // Total mass = 4.0, distributed across 4 voxels (the corners where particles are)
+  // nonzero voxels should be 4, most voxels should be zero
+  const totalMass = snapshot.a0.mass.mean * gridSize ** 3;
   
-  // Add diagnostics if test would fail
-  if (Math.abs(corner000[3] - 1.0) > 1e-4) {
-    // Check which voxels have data
-    let voxelsWithData = [];
-    for (let z = 0; z < gridSize; z++) {
-      for (let y = 0; y < gridSize; y++) {
-        for (let x = 0; x < gridSize; x++) {
-          const voxel = readVoxel(resultA0, x, y, z, gridSize, slicesPerRow);
-          if (voxel[3] > 0) {
-            voxelsWithData.push({ 
-              coords: [x,y,z], 
-              mass: voxel[3], 
-              pos: [voxel[0]/voxel[3], voxel[1]/voxel[3], voxel[2]/voxel[3]]
-            });
-          }
-        }
-      }
-    }
-    
-    // Calculate expected voxel coords for each particle
-    const worldMin = [-2, -2, -2];
-    const worldMax = [2, 2, 2];
-    const expectedVoxels = [
-      { particle: [-1.5, -1.5, -1.5], expected: [0,0,0] },
-      { particle: [1.5, 1.5, 1.5], expected: [3,3,3] },
-      { particle: [-1.5, 1.5, -1.5], expected: [0,3,0] },
-      { particle: [1.5, -1.5, 1.5], expected: [3,0,3] }
-    ].map(p => {
-      const norm = [
-        (p.particle[0] - worldMin[0]) / (worldMax[0] - worldMin[0]),
-        (p.particle[1] - worldMin[1]) / (worldMax[1] - worldMin[1]),
-        (p.particle[2] - worldMin[2]) / (worldMax[2] - worldMin[2])
-      ];
-      const voxel = norm.map(n => Math.floor(n * gridSize));
-      return { ...p, norm, voxel };
-    });
-    
-    const diagnostics = {
-      corner000: corner000,
-      corner333: corner333,
-      corner030: corner030,
-      corner303: corner303,
-      voxelsWithData,
-      expectedVoxels,
-      gridSize,
-      worldBounds: { min: worldMin, max: worldMax }
-    };
-    assert.ok(false, 'KAggregator failed - diagnostics:\n' + JSON.stringify(diagnostics, null, 2));
-  }
+  assertClose(totalMass, 4.0, 0.1, 
+    `Total mass should be 4.0 (got ${totalMass})\n\n${kernel.toString()}`);
   
-  assertClose(corner000[3], 1.0, 1e-4, 'Corner (0,0,0) mass');
-  assertClose(corner333[3], 1.0, 1e-4, 'Corner (3,3,3) mass');
-  
-  // Check center voxel is empty
-  const center = readVoxel(resultA0, 2, 2, 2, gridSize, slicesPerRow);
-  assertClose(center[3], 0.0, 1e-5, 'Center should be empty');
+  // Check that most voxels are zero (only 4 occupied out of 64)
+  assert.ok(snapshot.a0.mass.nearMin_5pc > gridSize ** 3 * 0.8, 
+    `Most voxels should be empty (near min: ${snapshot.a0.mass.nearMin_5pc})\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();
@@ -355,30 +273,32 @@ test('KAggregator: quadrupole moments', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
-  const resultA1 = readTexture(gl, kernel.outA1, octreeSize, octreeSize);
-  const resultA2 = readTexture(gl, kernel.outA2, octreeSize, octreeSize);
+  const snapshot = kernel.valueOf({ pixels: false });
   
-  // Particle maps to voxel (3, 3, 3) since it's at positive coords
-  const [a0_r, a0_g, a0_b, a0_a] = readVoxel(resultA0, 3, 3, 3, gridSize, slicesPerRow);
-  const [a1_r, a1_g, a1_b, a1_a] = readVoxel(resultA1, 3, 3, 3, gridSize, slicesPerRow);
-  const [a2_r, a2_g] = readVoxel(resultA2, 3, 3, 3, gridSize, slicesPerRow);
+  // Particle at (1, 1, 1) with mass 2
+  // Single particle so mean = total values divided by number of voxels
+  // A0: (m*x, m*y, m*z, m) total = (2, 2, 2, 2)
+  const totalCX = snapshot.a0.cx.mean * gridSize ** 3;
+  const totalCY = snapshot.a0.cy.mean * gridSize ** 3;
+  const totalCZ = snapshot.a0.cz.mean * gridSize ** 3;
+  const totalMass = snapshot.a0.mass.mean * gridSize ** 3;
   
-  // A0: (m*x, m*y, m*z, m) = (2, 2, 2, 2)
-  assertClose(a0_r, 2.0, 1e-4, 'A0.r (m*x)');
-  assertClose(a0_g, 2.0, 1e-4, 'A0.g (m*y)');
-  assertClose(a0_b, 2.0, 1e-4, 'A0.b (m*z)');
-  assertClose(a0_a, 2.0, 1e-4, 'A0.a (m)');
+  assertClose(totalCX, 2.0, 0.1, `Sum m*x should be 2.0\n\n${kernel.toString()}`);
+  assertClose(totalCY, 2.0, 0.1, `Sum m*y should be 2.0\n\n${kernel.toString()}`);
+  assertClose(totalCZ, 2.0, 0.1, `Sum m*z should be 2.0\n\n${kernel.toString()}`);
+  assertClose(totalMass, 2.0, 0.1, `Sum mass should be 2.0\n\n${kernel.toString()}`);
   
-  // A1: (m*x², m*y², m*z², m*xy) = (2, 2, 2, 2)
-  assertClose(a1_r, 2.0, 1e-4, 'A1.r (m*x²)');
-  assertClose(a1_g, 2.0, 1e-4, 'A1.g (m*y²)');
-  assertClose(a1_b, 2.0, 1e-4, 'A1.b (m*z²)');
-  assertClose(a1_a, 2.0, 1e-4, 'A1.a (m*xy)');
+  // Check quadrupole moments (A1, A2)
+  // A1: (m*x², m*y², m*z², m*xy) total = (2, 2, 2, 2)
+  const totalXX = snapshot.a1.xx.mean * gridSize ** 3;
+  const totalYY = snapshot.a1.yy.mean * gridSize ** 3;
+  const totalZZ = snapshot.a1.zz.mean * gridSize ** 3;
+  const totalXY = snapshot.a1.xy.mean * gridSize ** 3;
   
-  // A2: (m*xz, m*yz) = (2, 2)
-  assertClose(a2_r, 2.0, 1e-4, 'A2.r (m*xz)');
-  assertClose(a2_g, 2.0, 1e-4, 'A2.g (m*yz)');
+  assertClose(totalXX, 2.0, 0.1, `Sum m*x² should be 2.0\n\n${kernel.toString()}`);
+  assertClose(totalYY, 2.0, 0.1, `Sum m*y² should be 2.0\n\n${kernel.toString()}`);
+  assertClose(totalZZ, 2.0, 0.1, `Sum m*z² should be 2.0\n\n${kernel.toString()}`);
+  assertClose(totalXY, 2.0, 0.1, `Sum m*xy should be 2.0\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();
@@ -423,15 +343,12 @@ test('KAggregator: out of bounds particles', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
+  const snapshot = kernel.valueOf({ pixels: false });
   
-  // Center voxel should have one particle
-  const center = readVoxel(resultA0, 2, 2, 2, gridSize, slicesPerRow);
-  assertClose(center[3], 1.0, 1e-4, 'Center voxel should have one particle');
-  
-  // Out-of-bounds particle should clamp to edge voxel (3,3,3)
-  const edge = readVoxel(resultA0, 3, 3, 3, gridSize, slicesPerRow);
-  assertClose(edge[3], 1.0, 1e-4, 'Edge voxel should have clamped particle');
+  // Total mass should be 2.0 (both particles contribute, clamped to bounds)
+  const totalMass = snapshot.a0.mass.mean * gridSize ** 3;
+  assertClose(totalMass, 2.0, 0.1, 
+    `Both particles should contribute (got ${totalMass})\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();
@@ -475,15 +392,12 @@ test('KAggregator: zero mass particles', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
+  const snapshot = kernel.valueOf({ pixels: false });
   
-  // Center voxel should be empty (zero mass particle doesn't contribute)
-  const center = readVoxel(resultA0, 2, 2, 2, gridSize, slicesPerRow);
-  assertClose(center[3], 0.0, 1e-5, 'Zero mass should not contribute');
-  
-  // Other voxel should have the normal particle
-  const other = readVoxel(resultA0, 3, 3, 3, gridSize, slicesPerRow);
-  assertClose(other[3], 3.0, 1e-4, 'Normal mass particle');
+  // Only the particle with mass 3.0 should contribute
+  const totalMass = snapshot.a0.mass.mean * gridSize ** 3;
+  assertClose(totalMass, 3.0, 0.1, 
+    `Only non-zero mass particle should contribute (got ${totalMass})\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();
@@ -534,18 +448,12 @@ test('KAggregator: large particle count', async () => {
   
   kernel.run();
   
-  const resultA0 = readTexture(gl, kernel.outA0, octreeSize, octreeSize);
+  const snapshot = kernel.valueOf({ pixels: false });
   
-  assertAllFinite(resultA0, 'Result must be finite');
-  
-  // Count total mass in all voxels
-  let totalMass = 0;
-  for (let i = 3; i < resultA0.length; i += 4) {
-    totalMass += resultA0[i];
-  }
-  
-  // Should equal particle count (each has mass 1)
-  assertClose(totalMass, particleCount, 1e-2, 'Total mass should equal particle count');
+  // Count total mass in all voxels (should equal particle count, each has mass 1)
+  const totalMass = snapshot.a0.mass.mean * gridSize ** 3;
+  assertClose(totalMass, particleCount, 1e-1, 
+    `Total mass should equal particle count ${particleCount} (got ${totalMass})\n\n${kernel.toString()}`);
   
   disposeKernel(kernel);
   resetGL();

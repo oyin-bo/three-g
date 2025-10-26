@@ -27,7 +27,8 @@ const float TWO_PI = 6.28318530718;
 
 // Convert 2D texture coords to 3D voxel coords
 ivec3 texCoordToVoxel(vec2 uv, float gridSize, float slicesPerRow) {
-  vec2 texel = uv * gridSize * slicesPerRow;
+  // Subtract 0.5 to account for fragment centers at half-integer positions
+  vec2 texel = uv * gridSize * slicesPerRow - 0.5;
   int sliceIndex = int(texel.y / gridSize) * int(slicesPerRow) + int(texel.x / gridSize);
   int iz = sliceIndex;
   int ix = int(mod(texel.x, gridSize));
