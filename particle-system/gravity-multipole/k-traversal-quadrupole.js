@@ -511,6 +511,28 @@ vec4 sampleLevelA2(int level, ivec2 coord) {
   return texelFetch(u_levelsA2, ivec3(coord, level), 0);
 }
 
+// Compute distance from point to nearest point on voxel
+float distToNearestPoint(vec3 point, ivec3 voxel, vec3 worldMin, float cellSize) {
+  vec3 voxelMin = worldMin + vec3(voxel) * cellSize;
+  vec3 voxelMax = voxelMin + vec3(cellSize);
+  vec3 nearest = clamp(point, voxelMin, voxelMax);
+  return length(point - nearest);
+}
+
+// Compute distance from point to farthest point on voxel
+float distToFarthestPoint(vec3 point, ivec3 voxel, vec3 worldMin, float cellSize) {
+  vec3 voxelMin = worldMin + vec3(voxel) * cellSize;
+  vec3 voxelMax = voxelMin + vec3(cellSize);
+  
+  // Farthest corner is the one where each coordinate is maximally far
+  vec3 farthest;
+  farthest.x = (point.x < (voxelMin.x + voxelMax.x) * 0.5) ? voxelMax.x : voxelMin.x;
+  farthest.y = (point.y < (voxelMin.y + voxelMax.y) * 0.5) ? voxelMax.y : voxelMin.y;
+  farthest.z = (point.z < (voxelMin.z + voxelMax.z) * 0.5) ? voxelMax.z : voxelMin.z;
+  
+  return length(point - farthest);
+}
+
 void main() {
   ivec2 coord = ivec2(gl_FragCoord.xy);
   int myIndex = coord.y * int(u_texSize.x) + coord.x;
