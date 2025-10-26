@@ -21,6 +21,7 @@ out vec4 outColor;
 ${collapsed === 'from' ? `
 // Real-to-complex mode: read R32F, assume imaginary=0
 uniform sampler2D u_realInput;
+uniform float u_massToDensity;  // Convert mass per voxel to physical density
 ` : collapsed === 'to' ? `
 // Complex-to-real mode: read RG32F, write R32F with normalization
 uniform sampler2D u_spectrum;
@@ -120,9 +121,9 @@ void main() {
   vec2 partnerComplex;
   
 ${collapsed === 'from' ? `
-  // Real-to-complex: read R32F, treat as complex with imag=0
-  float currentReal = texture(u_realInput, currentUV).r;
-  float partnerReal = texture(u_realInput, partnerUV).r;
+  // Real-to-complex: read R32F, treat as complex with imag=0, scale to density
+  float currentReal = texture(u_realInput, currentUV).r * u_massToDensity;
+  float partnerReal = texture(u_realInput, partnerUV).r * u_massToDensity;
   currentComplex = vec2(currentReal, 0.0);
   partnerComplex = vec2(partnerReal, 0.0);
 ` : `

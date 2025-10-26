@@ -150,6 +150,12 @@ export class ParticleSystemSpectralKernels {
     ];
     const fourPiG = 4 * Math.PI * this.options.gravityStrength;
 
+    // Compute mass-to-density scaling: ΔV = (Lx·Ly·Lz) / N³
+    // massToDensity = 1 / ΔV = N³ / (Lx·Ly·Lz)
+    const voxelVolume = (worldSize[0] * worldSize[1] * worldSize[2]) / 
+                        (this.gridSize * this.gridSize * this.gridSize);
+    const massToDensity = 1.0 / voxelVolume;
+
     // Create shared texture objects to wire kernels together
     // These prevent auto-creation of textures inside kernels
     // Textures are square: (gridSize×slicesPerRow) × (gridSize×sliceRows)
@@ -191,7 +197,8 @@ export class ParticleSystemSpectralKernels {
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureWidth3D,
-      inverse: false
+      inverse: false,
+      massToDensity: massToDensity
     });
 
     // 3. Poisson solver kernel    

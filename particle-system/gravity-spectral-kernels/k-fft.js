@@ -30,7 +30,8 @@ export class KFFT {
    *   gridSize?: number,
    *   slicesPerRow?: number,
    *   textureSize?: number,
-   *   inverse?: boolean
+   *   inverse?: boolean,
+   *   massToDensity?: number
    * }} options
    */
   constructor(options) {
@@ -48,6 +49,9 @@ export class KFFT {
 
     // FFT direction
     this.inverse = options.inverse || false;
+
+    // Mass-to-density scaling for forward FFT on real grid
+    this.massToDensity = options.massToDensity || 1.0;
 
     // Compile 3 shader program variants from single generator
     this.fftProgramRealToComplex = this._compileProgram(fftFrag({ collapsed: 'from' }));
@@ -223,6 +227,7 @@ complexFrom: ${value.complexFrom}
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, this.real);
           gl.uniform1i(gl.getUniformLocation(program, 'u_realInput'), 0);
+          gl.uniform1f(gl.getUniformLocation(program, 'u_massToDensity'), this.massToDensity);
 
           gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebufferTo);
           gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.complexTo, 0);
