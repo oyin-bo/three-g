@@ -66,7 +66,7 @@ const statusDiv = /** @type {HTMLDivElement} */ (
 // 3. Initialize state
 const gl = /** @type {WebGL2RenderingContext} */ (renderer.getContext());
 
-let particleCount = 50000;
+let particleCount = 5000;
 const worldBounds = /** @type {{ min: [number, number, number], max: [number, number, number] }} */ ({
   min: [-2, -0.1, -2],
   max: [2, 0.1, 2]
@@ -148,6 +148,113 @@ let originalColorBuffer = null;
 let originalColorWidth = 0;
 let originalColorHeight = 0;
 
+/**
+ * Create a simple kernel to apply forces to velocities
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ */
+function createGraphVelocityKernel(gl, width, height) {
+  const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+  if (!vertexShader) throw new Error('Failed to create vertex shader');
+  gl.shaderSource(vertexShader, `#version 300 es
+    in vec2 a_position;
+    out vec2 v_texCoord;
+    void main() {
+      v_texCoord = a_position * 0.5 + 0.5;
+      gl_Position = vec4(a_position, 0.0, 1.0);
+    }
+  `);
+  gl.compileShader(vertexShader);
+  
+  const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+  if (!fragmentShader) throw new Error('Failed to create fragment shader');
+  gl.shaderSource(fragmentShader, `#version 300 es
+    precision highp float;
+    uniform sampler2D u_velocity;
+    uniform sampler2D u_position;
+    uniform sampler2D u_force;
+    uniform float u_dt;
+    uniform float u_damping;
+    in vec2 v_texCoord;
+    out vec4 outColor;
+    
+    void main() {
+      vec4 vel = texture(u_velocity, v_texCoord);
+      vec4 pos = texture(u_position, v_texCoord);
+      vec4 force = texture(u_force, v_texCoord);
+      
+      float mass = pos.w;
+      if (mass > 0.0) {
+        // Apply force: v += (F / m) * dt
+        vec3 accel = force.xyz / mass;
+        vel.xyz += accel * u_dt;
+        
+        // Apply damping
+        vel.xyz *= (1.0 - u_damping);
+      }
+      
+      outColor = vel;
+    }
+  `);
+  gl.compileShader(fragmentShader);
+  
+  const program = gl.createProgram();
+  if (!program) throw new Error('Failed to create program');
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  
+  const positionBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  
+  const framebuffer = gl.createFramebuffer();
+  
+  return {
+    apply({ inVelocity, inPosition, inForce, outVelocity, dt, damping }) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outVelocity, 0);
+      
+      // Check framebuffer status
+      const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+      if (status !== gl.FRAMEBUFFER_COMPLETE) {
+        console.error('[GraphVelocityKernel] Framebuffer incomplete:', status);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        return;
+      }
+      
+      gl.viewport(0, 0, width, height);
+      
+      gl.useProgram(program);
+      
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, inVelocity);
+      gl.uniform1i(gl.getUniformLocation(program, 'u_velocity'), 0);
+      
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, inPosition);
+      gl.uniform1i(gl.getUniformLocation(program, 'u_position'), 1);
+      
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, inForce);
+      gl.uniform1i(gl.getUniformLocation(program, 'u_force'), 2);
+      
+      gl.uniform1f(gl.getUniformLocation(program, 'u_dt'), dt);
+      gl.uniform1f(gl.getUniformLocation(program, 'u_damping'), damping);
+      
+      const posLoc = gl.getAttribLocation(program, 'a_position');
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.enableVertexAttribArray(posLoc);
+      gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+      
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+  };
+}
+
 // 4. Animation loop - MUST be set BEFORE recreateAll()
 outcome.animate = () => {
   if (!physics || !m) {
@@ -170,7 +277,69 @@ outcome.animate = () => {
     return;
   }
 
+  // Step 1: Apply gravity forces
   physics.step();
+  
+  // Step 2: Apply graph forces additively to velocities
+  if (graphModule) {
+    try {
+      const physAny = /** @type {any} */ (physics);
+      const gl = physics.gl;
+      
+      // Create force texture and framebuffer for graph forces if needed
+      if (!physAny._graphForceTexture) {
+        physAny._graphForceTexture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, physAny._graphForceTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, physics.textureWidth, physics.textureHeight, 0, gl.RGBA, gl.FLOAT, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        
+        physAny._graphForceFB = gl.createFramebuffer();
+      }
+      
+      // Clear force texture to zero
+      gl.bindFramebuffer(gl.FRAMEBUFFER, physAny._graphForceFB);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, physAny._graphForceTexture, 0);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      
+      // Compute graph forces
+      graphModule.accumulate({
+        positionTexture: physAny.positionTexture,
+        targetForceTexture: physAny._graphForceTexture,
+        targetForceFramebuffer: physAny._graphForceFB,
+        dt: physAny.options?.dt || 10/60
+      });
+      
+      // Apply graph forces to velocities (F*dt/m added to velocity)
+      // This requires a simple shader that reads force texture and updates velocity texture
+      if (!physAny._graphVelocityKernel) {
+        // Create a simple kernel to apply forces to velocities
+        physAny._graphVelocityKernel = createGraphVelocityKernel(gl, physics.textureWidth, physics.textureHeight);
+      }
+      
+      physAny._graphVelocityKernel.apply({
+        inVelocity: physAny.velocityTexture,
+        inPosition: physAny.positionTexture,
+        inForce: physAny._graphForceTexture,
+        outVelocity: physAny.velocityTextureWrite,
+        dt: physAny.options?.dt || 10/60,
+        damping: physAny.options?.damping || 0.002
+      });
+      
+      // Swap velocity textures
+      const tmp = physAny.velocityTexture;
+      physAny.velocityTexture = physAny.velocityTextureWrite;
+      physAny.velocityTextureWrite = tmp;
+      
+    } catch (err) {
+      console.warn('[Demo Kernels] Graph forces error:', err);
+    }
+  }
   
   renderer.resetState();
 
@@ -360,7 +529,7 @@ function recreatePhysicsAndMesh() {
   let gravityStrength = Math.random();
   gravityStrength = gravityStrength * 0.0001;
   gravityStrength = gravityStrength * gravityStrength;
-  gravityStrength += 0.0000005;
+  gravityStrength += 0.000005;
 
   // Generate graph edges if graph forces enabled
   let edges = null;
@@ -370,10 +539,10 @@ function recreatePhysicsAndMesh() {
     console.log(`[Demo Kernels] Generating social graph for ${particleCount} nodes...`);
     
     // Target avg degree: 6 edges/node
-    const targetAvgDegree = 6;
+    const targetAvgDegree = 8;
     const numClusters = Math.max(10, Math.ceil(Math.sqrt(particleCount) / 10));
     const avgClusterSize = particleCount / numClusters;
-    const targetEdgesPerCluster = targetAvgDegree * avgClusterSize * 0.8;
+    const targetEdgesPerCluster = targetAvgDegree * avgClusterSize * 0.9;
     const possiblePairsPerCluster = (avgClusterSize * (avgClusterSize - 1)) / 2;
     const intraClusterProb = targetEdgesPerCluster / possiblePairsPerCluster;
     
@@ -393,8 +562,37 @@ function recreatePhysicsAndMesh() {
       ).toFixed(2)})`
     );
     
+    // Reassign particle masses based on edge connectivity (degree)
+    const degreeCount = new Float32Array(particleCount);
+    for (const edge of edges) {
+      degreeCount[edge.from]++;
+      degreeCount[edge.to]++;
+    }
+    
+    // Find min/max degree for normalization
+    let minDegree = Infinity;
+    let maxDegree = -Infinity;
+    for (let i = 0; i < particleCount; i++) {
+      if (degreeCount[i] < minDegree) minDegree = degreeCount[i];
+      if (degreeCount[i] > maxDegree) maxDegree = degreeCount[i];
+    }
+    
+    // Assign masses: higher degree = higher mass (range: 0.1 to 10.0)
+    const massMin = 0.1;
+    const massMax = 10.0;
+    for (let i = 0; i < particleCount; i++) {
+      const normalizedDegree = maxDegree > minDegree 
+        ? (degreeCount[i] - minDegree) / (maxDegree - minDegree)
+        : 0.5;
+      particles[i].mass = massMin + normalizedDegree * (massMax - massMin);
+    }
+    
+    console.log(
+      `[Demo Kernels] Reassigned masses: min=${minDegree} edges (mass=${massMin}), max=${maxDegree} edges (mass=${massMax})`
+    );
+    
     // Use NEGATIVE gravity for repulsion when using graph forces
-    gravityStrength = -gravityStrength * 0.005; // Negative = repulsion
+    gravityStrength = -gravityStrength * 0.02; // Negative = repulsion
     console.log(
       `[Demo Kernels] Using negative gravity (repulsion): ${gravityStrength.toExponential(2)}`
     );
@@ -408,9 +606,9 @@ function recreatePhysicsAndMesh() {
       particles,
       method: /** @type {'monopole' | 'quadrupole' | 'spectral' | 'mesh'} */ (calculationMethod),
       gravityStrength,
-      softening: 0.002,
+      softening: 0.006,
       dt: 10 / 60,
-      damping: 0.002,
+      damping: 0.006,
       worldBounds,
       get: /** @type {NonNullable<Parameters<typeof particleSystemKernels>[0]['get']>} */ ((spot, out) => {
         const sx = spot?.x ?? 0;
@@ -480,7 +678,7 @@ function recreatePhysicsAndMesh() {
       particleCount,
       textureWidth: textureSize.width || system.textureWidth,
       textureHeight: textureSize.height || system.textureHeight,
-      k: 0.3,  // Spring constant (3x stronger)
+      k: 1,  // Spring constant (3x stronger)
       shardSize: 64,
       normalized: false,
       disableFloatBlend: !hasFloatBlend
