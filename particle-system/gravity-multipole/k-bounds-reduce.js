@@ -285,29 +285,22 @@ out vec4 fragColor;
 void main() {
   ivec2 outCoord = ivec2(gl_FragCoord.xy);
   
-  // Each output pixel 0 and 1 sample from a 4×4 region of input
-  // Both pixels read from the same region but output min/max respectively
-  ivec2 baseCoord = outCoord * 4;
-  
   vec3 minBound = vec3(1e20);
   vec3 maxBound = vec3(-1e20);
   bool hasValidData = false;
   
-  // Sample 4×4 region (16 samples)
-  for (int dy = 0; dy < 4; dy++) {
-    for (int dx = 0; dx < 4; dx++) {
-      ivec2 sampleCoord = baseCoord + ivec2(dx, dy);
-      
-      // Bounds check
-      if (sampleCoord.x >= int(u_inputSize.x) || sampleCoord.y >= int(u_inputSize.y)) {
-        continue;
-      }
-      
-      vec4 texel = texelFetch(u_inputTex, sampleCoord, 0);
+  // Both fragments scan the entire texture to find global min/max
+  // This ensures both pixels have complete information regardless of layout
+  int width = int(u_inputSize.x);
+  int height = int(u_inputSize.y);
+  
+  for (int y = 0; y < height; y++) {
+    for (int x = 0; x < width; x++) {
+      ivec2 coord = ivec2(x, y);
+      vec4 texel = texelFetch(u_inputTex, coord, 0);
       vec3 pos = texel.xyz;
       float mass = texel.w;
       
-      // Only include particles with positive mass
       if (mass > 0.0) {
         minBound = min(minBound, pos);
         maxBound = max(maxBound, pos);
@@ -316,8 +309,7 @@ void main() {
     }
   }
   
-  // Output: min to pixel 0, max to pixel 1
-  // ivec2(gl_FragCoord) gives (0,0) for pixel 0, (1,0) for pixel 1
+  // Output based on pixel coordinate
   if (outCoord.x == 0) {
     // Pixel 0: output minBounds
     fragColor = vec4(minBound, hasValidData ? 1.0 : 0.0);

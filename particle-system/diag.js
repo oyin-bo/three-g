@@ -322,7 +322,7 @@ export function readLinear({ gl, texture, width, height, count, channels = ['x',
       // Format: channel[min▃▄▅▆▇█+max] mean=X std=Y |hist| nz=count
       const minStr = s.min === 0 ? '0' : formatNumber(s.min);
       const maxStr = s.max === 0 ? '0' : (s.max > 0 ? '+' : '') + formatNumber(s.max);
-      let line = `${channel}[${minStr}${s.profile}${maxStr}]`;
+      let line = `${channel.padEnd(7)}[${minStr}${s.profile}${maxStr}]`;
       line += ` mean=${formatNumber(s.mean)} std=${formatNumber(s.stddev)}`;
       line += ` median=${formatNumber(s.median)}`;
       line += ` |${s.histogram}|`;

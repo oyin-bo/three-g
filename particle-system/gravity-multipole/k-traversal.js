@@ -144,7 +144,7 @@ export class KTraversal {
       force: this.outForce && readLinear({
         gl: this.gl, texture: this.outForce, width: this.particleTexWidth,
         height: this.particleTexHeight, count: this.particleTexWidth * this.particleTexHeight,
-        channels: ['fx', 'fy', 'fz', 'w'], pixels
+        channels: ['fx', 'fy', 'fz', 'w'], pixels: true
       }),
       levels: this.inLevelA0 && this.inLevelA0.map((tex, i) => tex && (() => {
         const { gridSize = 1, slicesPerRow = 1, size = 0 } = this.levelConfigs[i] || {};
@@ -172,7 +172,17 @@ export class KTraversal {
       renderCount: this.renderCount
     };
 
-    value.totalForce = value.force?.fx ? Math.sqrt(value.force.fx.mean ** 2 + value.force.fy.mean ** 2 + value.force.fz.mean ** 2) : 0;
+    // Calculate total force as sum of individual particle force magnitudes
+    if (value.force?.pixels && value.force.pixels.length > 0) {
+      let totalMag = 0;
+      for (const pixel of value.force.pixels) {
+        const mag = Math.sqrt(pixel.fx ** 2 + pixel.fy ** 2 + pixel.fz ** 2);
+        totalMag += mag;
+      }
+      value.totalForce = totalMag;
+    } else {
+      value.totalForce = 0;
+    }
 
     value.toString = () =>
       `KTraversal(${this.particleTexWidth}×${this.particleTexHeight}) theta=${this.theta} G=${this.gravityStrength} soft=${this.softening} levels=${this.numLevels} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]

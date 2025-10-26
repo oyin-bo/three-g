@@ -46,6 +46,8 @@ test('KBoundsReduce: simple particle set', async () => {
     particleTexHeight: height,
     particleCount
   });
+
+  const before = kernel.valueOf({ pixels: true });
   
   kernel.run();
   
@@ -54,17 +56,19 @@ test('KBoundsReduce: simple particle set', async () => {
   // Read bounds texture (2×1): pixel 0 = min, pixel 1 = max
   const minBounds = snapshot.bounds?.pixels?.[0];
   const maxBounds = snapshot.bounds?.pixels?.[1];
+
+  const diag = '\n\nBEFORE: ' + before + '\n\nAFTER: ' + snapshot + '\n\n';
   
   assert.ok(minBounds, 'Min bounds should exist');
   assert.ok(maxBounds, 'Max bounds should exist');
   
-  assertClose(minBounds.x, 0, 1e-5, `Min X\n\n${kernel.toString()}`);
-  assertClose(minBounds.y, 0, 1e-5, `Min Y\n\n${kernel.toString()}`);
-  assertClose(minBounds.z, 0, 1e-5, `Min Z\n\n${kernel.toString()}`);
-  assertClose(maxBounds.x, 1, 1e-5, `Max X\n\n${kernel.toString()}`);
-  assertClose(maxBounds.y, 1, 1e-5, `Max Y\n\n${kernel.toString()}`);
-  assertClose(maxBounds.z, 1, 1e-5, `Max Z\n\n${kernel.toString()}`);
-  
+  assertClose(minBounds.x, 0, 1e-5, `Min X${diag}`);
+  assertClose(minBounds.y, 0, 1e-5, `Min Y${diag}`);
+  assertClose(minBounds.z, 0, 1e-5, `Min Z${diag}`);
+  assertClose(maxBounds.x, 1, 1e-5, `Max X${diag}`);
+  assertClose(maxBounds.y, 1, 1e-5, `Max Y${diag}`);
+  assertClose(maxBounds.z, 1, 1e-5, `Max Z${diag}`);
+
   disposeKernel(kernel);
   resetGL();
 });

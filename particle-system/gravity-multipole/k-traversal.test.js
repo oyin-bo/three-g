@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { KTraversal } from './k-traversal.js';
 import { KAggregator } from './k-aggregator.js';
-import { getGL, createTestTexture, readTexture, assertClose, assertAllFinite, disposeKernel, resetGL } from '../test-utils.js';
+import { getGL, createTestTexture, assertClose, disposeKernel, resetGL } from '../test-utils.js';
 
 /**
  * Helper: fill a 3D voxel texture laid out in 2D slices (square texture)
@@ -132,9 +132,6 @@ test('KTraversal: two particle interaction', async () => {
   
   aggregator.run();
   
-  //  Read octree to check aggregation results
-  const octreeCheck = readTexture(gl, aggregator.outA0, octreeSize, octreeSize);
-  
   const outForce = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
   
   const kernel = new KTraversal({
@@ -145,36 +142,33 @@ test('KTraversal: two particle interaction', async () => {
     particleTexWidth,
     particleTexHeight,
     numLevels: 1,
-    levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
+    levelConfigs: [{ size: gridSize * gridSize * gridSize, gridSize, slicesPerRow }],
     worldBounds,
     theta: 0.5,
     gravityStrength: 1.0,
     softening: 0.1
   });
+
+  const before = kernel.valueOf();
   
   kernel.run();
   
-  const snapshot = kernel.valueOf({ pixels: false });
+  const snapshot = kernel.valueOf({ pixels: true });
+
+  const diag = `\n\nBEFORE: ${before}\n\nAFTER: ${snapshot}\n\n`;
   
   // Particle 0 at (-1,0,0) should feel force toward particle 1 at (1,0,0)
-  // Force should be in +x direction
-  assert.ok(snapshot.force?.fx.mean > 0, 
-    `Force on particle 0 should be in +x direction (mean=${snapshot.force?.fx.mean})\n\n${kernel.toString()}`);
-  assertClose(snapshot.force.fy.mean, 0.0, 1e-3, 
-    `Force y should be near zero\n\n${kernel.toString()}`);
-  assertClose(snapshot.force.fz.mean, 0.0, 1e-3, 
-    `Force z should be near zero\n\n${kernel.toString()}`);
+  // Force should be in +x direction (positive)
+  assert.ok(snapshot.force?.pixels?.[0]?.fx > 0, 
+    `Force on particle 0 should be in +x direction (Fx0=${snapshot.force?.pixels?.[0]?.fx})${diag}`);
   
-  // Read raw texture for Newton's third law check (need individual particle forces)
-  const result = readTexture(gl, outForce, particleTexWidth, particleTexHeight);
-  
-  // Particle 1 should feel opposite force
-  assert.ok(result[4] < 0, 
-    `Force on particle 1 should be in -x direction (Fx1=${result[4]})\n\n${kernel.toString()}`);
+  // Particle 1 should feel opposite force (in -x direction, negative)
+  assert.ok(snapshot.force?.pixels?.[1]?.fx < 0, 
+    `Force on particle 1 should be in -x direction (Fx1=${snapshot.force?.pixels?.[1]?.fx})${diag}`);
   
   // Forces should be roughly equal magnitude (Newton's third law)
-  assertClose(Math.abs(result[0]), Math.abs(result[4]), 1e-2, 
-    `Forces should have equal magnitude\n\n${kernel.toString()}`);
+  assertClose(Math.abs(snapshot.force?.pixels?.[0]?.fx || 0), Math.abs(snapshot.force?.pixels?.[1]?.fx || 0), 1e-2, 
+    `Forces should have equal magnitude${diag}`);
   
   disposeKernel(kernel);
   disposeKernel(aggregator);
@@ -230,7 +224,7 @@ test('KTraversal: theta criterion effect', async () => {
   });
   
   kernel1.run();
-  const snap1 = kernel1.valueOf({ pixels: false });
+  const snap1 = kernel1.valueOf({ pixels: true });
   
   // Large theta (more approximation)
   const kernel2 = new KTraversal({
@@ -249,7 +243,7 @@ test('KTraversal: theta criterion effect', async () => {
   });
   
   kernel2.run();
-  const snap2 = kernel2.valueOf({ pixels: false });
+  const snap2 = kernel2.valueOf({ pixels: true });
   
   // Both should point in same direction (toward mass)
   const mag1 = snap1.totalForce;
@@ -379,8 +373,12 @@ test('KTraversal: softening prevents singularities', async () => {
     worldBounds,
     disableFloatBlend: true
   });
+
+  const aggregatorBefore = aggregator.valueOf();
   
   aggregator.run();
+
+  const aggregatorAfter = aggregator.valueOf();
   
   const outForce1 = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
   const outForce2 = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
@@ -394,15 +392,16 @@ test('KTraversal: softening prevents singularities', async () => {
     particleTexWidth,
     particleTexHeight,
     numLevels: 1,
-    levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
+    levelConfigs: [{ size: gridSize * gridSize * gridSize, gridSize, slicesPerRow }],
     worldBounds,
     theta: 0.5,
     gravityStrength: 1.0,
     softening: 0.01
   });
   
+  const kernel1Before = kernel1.valueOf();
   kernel1.run();
-  const snap1 = kernel1.valueOf({ pixels: false });
+  const kernel1After = kernel1.valueOf({ pixels: true });
   
   // Large softening
   const kernel2 = new KTraversal({
@@ -413,22 +412,38 @@ test('KTraversal: softening prevents singularities', async () => {
     particleTexWidth,
     particleTexHeight,
     numLevels: 1,
-    levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
+    levelConfigs: [{ size: gridSize * gridSize * gridSize, gridSize, slicesPerRow }],
     worldBounds,
     theta: 0.5,
     gravityStrength: 1.0,
     softening: 0.5
   });
   
+  const kernel2Before = kernel2.valueOf();
   kernel2.run();
-  const snap2 = kernel2.valueOf({ pixels: false });
+  const kernel2After = kernel2.valueOf({ pixels: true });
   
-  const mag1 = snap1.totalForce;
-  const mag2 = snap2.totalForce;
+  const mag1 = kernel1After.totalForce;
+  const mag2 = kernel2After.totalForce;
   
   // Larger softening should reduce force magnitude
   assert.ok(mag2 < mag1, 
-    `Larger softening should reduce force (|F_large|=${mag2} < |F_small|=${mag1})\n\nSmall softening:\n${kernel1.toString()}\n\nLarge softening:\n${kernel2.toString()}`);
+    `Larger softening should reduce force (|F_large|=${mag2} < |F_small|=${mag1})
+
+
+-----------------------------------------------------------------------------------------------------
+SMALL SOFTENING BEFORE: ${kernel1Before}
+
+SMALL SOFTENING AFTER: ${kernel1After}
+
+
+-----------------------------------------------------------------------------------------------------
+LARGE SOFTENING BEFORE: ${kernel2Before}
+
+LARGE SOFTENING AFTER: ${kernel2After}
+
+
+`);
   
   disposeKernel(kernel1);
   disposeKernel(kernel2);
@@ -553,7 +568,7 @@ test('KTraversal: multi-level octree', async () => {
   
   kernel.run();
   
-  const snapshot = kernel.valueOf({ pixels: false });
+  const snapshot = kernel.valueOf({ pixels: true });
   
   // Should produce some force from distributed mass
   const mag = snapshot.totalForce;

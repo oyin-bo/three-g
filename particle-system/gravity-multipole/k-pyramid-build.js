@@ -162,6 +162,11 @@ export class KPyramidBuild {
       renderCount: this.renderCount
     };
     
+    // Add lowercase aliases for backward compatibility with tests
+    /** @type {any} */ (value).a0 = value.outA0;
+    /** @type {any} */ (value).a1 = value.outA1;
+    /** @type {any} */ (value).a2 = value.outA2;
+    
     value.toString = () =>
 `KPyramidBuild(${this.inGridSize}³→${this.outGridSize}³) in=${this.inSlicesPerRow}slices out=${this.outSlicesPerRow}slices #${this.renderCount}
 
