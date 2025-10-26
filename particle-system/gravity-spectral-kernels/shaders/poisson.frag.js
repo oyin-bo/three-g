@@ -19,6 +19,7 @@ out vec4 outColor;
 uniform sampler2D u_densitySpectrum;
 uniform float u_gridSize;
 uniform float u_slicesPerRow;
+uniform vec2 u_textureSize;
 uniform float u_gravitationalConstant;  // 4πG
 uniform vec3 u_worldSize;              // Physical size per axis of simulation box
 uniform int u_splitMode;               // 0 = none, 1 = hard cutoff, 2 = Gaussian
@@ -32,8 +33,8 @@ const float TWO_PI = 6.28318530718;
 
 // Convert 2D texture coords to 3D voxel coords
 ivec3 texCoordToVoxel(vec2 uv, float gridSize, float slicesPerRow) {
-  // Subtract 0.5 to account for fragment centers at half-integer positions
-  vec2 texel = uv * gridSize * slicesPerRow - 0.5;
+  // Map uv -> texel coordinates using actual texture dimensions, then subtract 0.5
+  vec2 texel = uv * u_textureSize - 0.5;
   int sliceIndex = int(texel.y / gridSize) * int(slicesPerRow) + int(texel.x / gridSize);
   int iz = sliceIndex;
   int ix = int(mod(texel.x, gridSize));

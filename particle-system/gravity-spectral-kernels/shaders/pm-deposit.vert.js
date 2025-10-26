@@ -13,7 +13,7 @@ precision highp float;
 
 // Particle data from texture
 uniform sampler2D u_positions;
-uniform vec2 u_textureSize;
+uniform vec2 u_particleTextureSize;
 
 // Grid parameters
 uniform float u_gridSize;        // Grid resolution (N)
@@ -23,6 +23,7 @@ uniform vec3 u_worldMax;
 uniform float u_particleSize;    // Point size for deposition kernel
 uniform int u_assignment;        // 0 = NGP, 1 = CIC
 uniform vec3 u_cellOffset;       // Offset applied for CIC (0 or 1 per axis)
+uniform vec2 u_textureSize;      // 2D packed texture size (width, height)
 
 // Outputs to fragment shader
 out float v_mass;
@@ -34,10 +35,10 @@ void main() {
   int particleIndex = gl_VertexID;
   
   // Convert to texture coordinates
-  int texWidth = int(u_textureSize.x);
+  int texWidth = int(u_particleTextureSize.x);
   int texX = particleIndex % texWidth;
   int texY = particleIndex / texWidth;
-  vec2 texCoord = (vec2(texX, texY) + 0.5) / u_textureSize;
+  vec2 texCoord = (vec2(texX, texY) + 0.5) / u_particleTextureSize;
   
   // Read particle position and mass
   vec4 posData = texture(u_positions, texCoord);
@@ -83,8 +84,8 @@ void main() {
   );
   
   // Convert to NDC [-1, 1]
-  float textureSize = u_gridSize * u_slicesPerRow;
-  vec2 ndc = (texel / textureSize) * 2.0 - 1.0;
+  // Normalize texel coordinates by the actual texture dimensions
+  vec2 ndc = vec2(texel.x / u_textureSize.x, texel.y / u_textureSize.y) * 2.0 - 1.0;
   
   gl_Position = vec4(ndc, 0.0, 1.0);
   gl_PointSize = u_particleSize;

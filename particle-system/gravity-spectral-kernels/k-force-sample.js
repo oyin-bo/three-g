@@ -25,6 +25,9 @@ export class KForceSample {
    *   particleTexHeight?: number,
    *   gridSize?: number,
    *   slicesPerRow?: number,
+  *   textureSize?: number,
+  *   textureWidth?: number,
+  *   textureHeight?: number,
    *   worldBounds?: {min: [number,number,number], max: [number,number,number]},
    *   accumulate?: boolean
    * }} options
@@ -47,6 +50,8 @@ export class KForceSample {
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || 8;
+  this.textureWidth = options.textureWidth || options.textureSize || (this.gridSize * this.slicesPerRow);
+  this.textureHeight = options.textureHeight || options.textureSize || (this.gridSize * Math.ceil(this.gridSize / this.slicesPerRow));
 
     // World bounds
     this.worldBounds = options.worldBounds || {
@@ -117,7 +122,7 @@ export class KForceSample {
    * @param {{pixels?: boolean}} [options] - Capture options
    */
   valueOf({ pixels } = {}) {
-    const textureSize = this.gridSize * this.slicesPerRow;
+    const textureSize = this.textureWidth; // legacy
     const value = {
       position: this.inPosition && readLinear({
         gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
@@ -125,18 +130,18 @@ export class KForceSample {
         channels: ['x', 'y', 'z', 'mass'], pixels
       }),
       forceGridX: this.inForceGridX && readGrid3D({
-        gl: this.gl, texture: this.inForceGridX, width: textureSize,
-        height: textureSize, gridSize: this.gridSize,
+        gl: this.gl, texture: this.inForceGridX, width: this.textureWidth,
+        height: this.textureHeight, gridSize: this.gridSize,
         channels: ['fx'], pixels, format: this.gl.R32F
       }),
       forceGridY: this.inForceGridY && readGrid3D({
-        gl: this.gl, texture: this.inForceGridY, width: textureSize,
-        height: textureSize, gridSize: this.gridSize,
+        gl: this.gl, texture: this.inForceGridY, width: this.textureWidth,
+        height: this.textureHeight, gridSize: this.gridSize,
         channels: ['fy'], pixels, format: this.gl.R32F
       }),
       forceGridZ: this.inForceGridZ && readGrid3D({
-        gl: this.gl, texture: this.inForceGridZ, width: textureSize,
-        height: textureSize, gridSize: this.gridSize,
+        gl: this.gl, texture: this.inForceGridZ, width: this.textureWidth,
+        height: this.textureHeight, gridSize: this.gridSize,
         channels: ['fz'], pixels, format: this.gl.R32F
       }),
       force: this.outForce && readLinear({
@@ -154,7 +159,7 @@ export class KForceSample {
       renderCount: this.renderCount
     };
 
-    const totalForce = value.force?.fx ? Math.sqrt(value.force.fx.mean ** 2 + value.force.fy.mean ** 2 + value.force.fz.mean ** 2) : 0;
+  const totalForce = (value.force && value.force.fx) ? Math.sqrt(value.force.fx.mean ** 2 + value.force.fy.mean ** 2 + value.force.fz.mean ** 2) : 0;
 
     value.toString = () =>
       `KForceSample(${this.particleCount} particles from ${this.gridSize}³ grid) accumulate=${this.accumulate} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
@@ -241,8 +246,12 @@ forceGridZ: ${value.forceGridZ}
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_forceGridZ'), 3);
 
     // Set uniforms
-    gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'),
+    // Particle texture size for vertex fetch
+    gl.uniform2f(gl.getUniformLocation(this.program, 'u_particleTextureSize'),
       this.particleTexWidth, this.particleTexHeight);
+    // Packed 3D grid texture size for voxel->texcoord mapping
+    gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'),
+      this.textureWidth, this.textureHeight);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMin'),
@@ -317,14 +326,18 @@ function createTextureRGBA32F(gl, width, height) {
 
 /**
  * Helper: Create an RG32F complex texture
+ * Accepts either (gl, size) for square textures or (gl, width, height)
  * @param {WebGL2RenderingContext} gl
- * @param {number} size
+ * @param {number} width
+ * @param {number} [height]
  */
-function createComplexTexture(gl, size) {
+function createComplexTexture(gl, width, height) {
+  const w = width;
+  const h = (height === undefined) ? width : height;
   const texture = gl.createTexture();
   if (!texture) throw new Error('Failed to create texture');
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, size, size, 0, gl.RG, gl.FLOAT, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, w, h, 0, gl.RG, gl.FLOAT, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

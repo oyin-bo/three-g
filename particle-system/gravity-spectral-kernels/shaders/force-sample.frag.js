@@ -23,6 +23,8 @@ uniform float u_gridSize;        // Grid resolution (N)
 uniform float u_slicesPerRow;    // Z-slices per row
 uniform vec3 u_worldMin;         // World bounds
 uniform vec3 u_worldMax;
+uniform vec2 u_textureSize; // packed 3D grid texture size (width, height)
+uniform vec2 u_particleTextureSize; // particle sheet size (width, height)
 
 /**
  * Convert 3D voxel coordinates to 2D texture coordinates
@@ -35,7 +37,8 @@ vec2 voxelToTexCoord(vec3 voxel, float gridSize, float slicesPerRow) {
   float texX = float(sliceCol * int(gridSize)) + voxel.x + 0.5;
   float texY = float(sliceRow * int(gridSize)) + voxel.y + 0.5;
   
-  return vec2(texX, texY) / (gridSize * slicesPerRow);
+  // Normalize by the actual 2D texture width/height
+  return vec2(texX / u_textureSize.x, texY / u_textureSize.y);
 }
 
 /**

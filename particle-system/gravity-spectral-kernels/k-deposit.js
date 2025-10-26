@@ -22,7 +22,9 @@ export class KDeposit {
    *   particleTexHeight?: number,
    *   gridSize?: number,
    *   slicesPerRow?: number,
-   *   textureSize?: number,
+  *   textureSize?: number,
+  *   textureWidth?: number,
+  *   textureHeight?: number,
    *   worldBounds?: {min: [number,number,number], max: [number,number,number]},
    *   assignment?: 'NGP'|'CIC',
    *   disableFloatBlend?: boolean
@@ -47,7 +49,10 @@ export class KDeposit {
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || 8;
-    this.textureSize = options.textureSize || (this.gridSize * this.slicesPerRow);
+  // 2D packed texture dimensions (may be non-square)
+  this.textureWidth = options.textureWidth || options.textureSize || (this.gridSize * this.slicesPerRow);
+  this.textureHeight = options.textureHeight || options.textureSize || (this.gridSize * Math.ceil(this.gridSize / this.slicesPerRow));
+  this.textureSize = this.textureWidth; // legacy fallback
 
     // World bounds
     this.worldBounds = options.worldBounds || {
@@ -196,7 +201,7 @@ massGrid: ${value.massGrid ? `totalMass=${formatNumber(totalMass)} ` : ''}${valu
 
     // Bind output framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
-    gl.viewport(0, 0, this.textureSize, this.textureSize);
+    gl.viewport(0, 0, this.textureWidth, this.textureHeight);
 
     // Clear grid
     gl.clearColor(0, 0, 0, 0);
@@ -224,8 +229,11 @@ massGrid: ${value.massGrid ? `totalMass=${formatNumber(totalMass)} ` : ''}${valu
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_positionTexture'), 0);
 
     // Set uniforms
-    gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'),
+    // Particle position texture size (width, height)
+    gl.uniform2f(gl.getUniformLocation(this.program, 'u_particleTextureSize'),
       this.particleTexWidth, this.particleTexHeight);
+    // Packed 3D grid texture size (width, height)
+    gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.textureWidth, this.textureHeight);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMin'),

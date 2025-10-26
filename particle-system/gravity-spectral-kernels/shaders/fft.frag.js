@@ -37,14 +37,15 @@ uniform int u_inverse;       // 0=forward, 1=inverse
 uniform float u_gridSize;    // Grid dimension (e.g., 64)
 uniform float u_slicesPerRow;
 uniform int u_debugMode;     // 0 = normal, 1 = current, 2 = partner
+uniform vec2 u_textureSize;  // 2D packed texture size (width, height)
 
 const float PI = 3.14159265359;
 const float TWO_PI = 6.28318530718;
 
 // Convert 2D texture coords to 3D voxel coords
 ivec3 texCoordToVoxel(vec2 uv, float gridSize, float slicesPerRow) {
-  // Subtract 0.5 to account for fragment centers at half-integer positions
-  vec2 texel = uv * gridSize * slicesPerRow - 0.5;
+  // Map uv -> texel coordinates using full texture dimensions, then subtract 0.5
+  vec2 texel = uv * u_textureSize - 0.5;
   int ix = int(mod(texel.x, gridSize));
   int iy = int(mod(texel.y, gridSize));
   int sliceRow = int(texel.y / gridSize);
@@ -60,7 +61,8 @@ vec2 voxelToTexCoord(ivec3 voxel, float gridSize, float slicesPerRow) {
   float texX = float(sliceCol * int(gridSize) + voxel.x) + 0.5;
   float texY = float(sliceRow * int(gridSize) + voxel.y) + 0.5;
   
-  return vec2(texX, texY) / (gridSize * slicesPerRow);
+  // Normalize by actual texture width/height
+  return vec2(texX / u_textureSize.x, texY / u_textureSize.y);
 }
 
 // Complex multiplication: (a + bi) * (c + di) = (ac - bd) + (ad + bc)i

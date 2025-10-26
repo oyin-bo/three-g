@@ -22,6 +22,7 @@ uniform sampler2D u_potentialSpectrum;
 uniform int u_axis;  // 0=X, 1=Y, 2=Z
 uniform float u_gridSize;
 uniform float u_slicesPerRow;
+uniform vec2 u_textureSize;
 uniform vec3 u_worldSize;
 
 const float PI = 3.14159265359;
@@ -29,8 +30,8 @@ const float TWO_PI = 6.28318530718;
 
 // Convert 2D texture coords to 3D voxel coords
 ivec3 texCoordToVoxel(vec2 uv, float gridSize, float slicesPerRow) {
-  // Subtract 0.5 to account for fragment centers at half-integer positions
-  vec2 texel = uv * gridSize * slicesPerRow - 0.5;
+  // Map uv -> texel coords using actual texture dimensions, then subtract 0.5
+  vec2 texel = uv * u_textureSize - 0.5;
   int ix = int(mod(texel.x, gridSize));
   int iy = int(mod(texel.y, gridSize));
   int sliceRow = int(texel.y / gridSize);

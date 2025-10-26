@@ -182,7 +182,8 @@ export class ParticleSystemSpectralKernels {
       particleTexHeight: this.textureHeight,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureWidth3D,
+  textureWidth: this.textureWidth3D,
+  textureHeight: this.textureHeight3D,
       worldBounds: /** @type {any} */ (this.options.worldBounds),
       assignment: this.options.assignment,
       disableFloatBlend: this.disableFloatBlend
@@ -196,7 +197,8 @@ export class ParticleSystemSpectralKernels {
       complexTo: this.fftComplexTexture2,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureWidth3D,
+  textureWidth: this.textureWidth3D,
+  textureHeight: this.textureHeight3D,
       inverse: false,
       massToDensity: massToDensity
     });
@@ -208,7 +210,8 @@ export class ParticleSystemSpectralKernels {
       outPotentialSpectrum: null,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureWidth3D,
+  textureWidth: this.textureWidth3D,
+  textureHeight: this.textureHeight3D,
       gravitationalConstant: fourPiG,
       worldSize: /** @type {[number, number, number]} */ (worldSize),
       assignment: this.options.assignment
@@ -223,7 +226,8 @@ export class ParticleSystemSpectralKernels {
       outForceSpectrumZ: this.forceSpectrumZTexture,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureWidth3D,
+  textureWidth: this.textureWidth3D,
+  textureHeight: this.textureHeight3D,
       worldSize: /** @type {[number, number, number]} */ (worldSize)
     });
 
@@ -243,6 +247,8 @@ export class ParticleSystemSpectralKernels {
       particleTexHeight: this.textureHeight,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
+      textureWidth: this.textureWidth3D,
+      textureHeight: this.textureHeight3D,
       worldBounds: /** @type {any} */ (this.options.worldBounds)
     });
 

@@ -29,7 +29,9 @@ export class KFFT {
    *   complexTo?: WebGLTexture|null,
    *   gridSize?: number,
    *   slicesPerRow?: number,
-   *   textureSize?: number,
+  *   textureSize?: number,
+  *   textureWidth?: number,
+  *   textureHeight?: number,
    *   inverse?: boolean,
    *   massToDensity?: number
    * }} options
@@ -40,12 +42,15 @@ export class KFFT {
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || 8;
-    this.textureSize = options.textureSize || (this.gridSize * this.slicesPerRow);
+  // Support non-square packed textures: accept textureWidth/textureHeight
+  this.textureWidth = options.textureWidth || options.textureSize || (this.gridSize * this.slicesPerRow);
+  this.textureHeight = options.textureHeight || options.textureSize || (this.gridSize * Math.ceil(this.gridSize / this.slicesPerRow));
+  this.textureSize = this.textureWidth; // legacy fallback
 
-    // Lean texture architecture: exactly 3 textures
-    this.real = options.real || createTextureR32F(this.gl, this.textureSize, this.textureSize);
-    this.complexFrom = options.complexFrom || createComplexTexture(this.gl, this.textureSize, this.textureSize);
-    this.complexTo = options.complexTo || createComplexTexture(this.gl, this.textureSize, this.textureSize);
+  // Lean texture architecture: exactly 3 textures (use provided or create with real dims)
+  this.real = options.real || createTextureR32F(this.gl, this.textureWidth, this.textureHeight);
+  this.complexFrom = options.complexFrom || createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
+  this.complexTo = options.complexTo || createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
 
     // FFT direction
     this.inverse = options.inverse || false;
@@ -190,7 +195,7 @@ complexFrom: ${value.complexFrom}
     const gl = this.gl;
     const numStages = Math.log2(this.gridSize);
 
-    gl.viewport(0, 0, this.textureSize, this.textureSize);
+  gl.viewport(0, 0, this.textureWidth, this.textureHeight);
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
 
@@ -215,6 +220,8 @@ complexFrom: ${value.complexFrom}
         // Set common uniforms
         gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), this.gridSize);
         gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), this.slicesPerRow);
+  // Provide packed 3D texture dimensions
+  gl.uniform2f(gl.getUniformLocation(program, 'u_textureSize'), this.textureWidth, this.textureHeight);
         gl.uniform1i(gl.getUniformLocation(program, 'u_inverse'), this.inverse ? 1 : 0);
         gl.uniform1i(gl.getUniformLocation(program, 'u_numStages'), numStages);
         gl.uniform1i(gl.getUniformLocation(program, 'u_axis'), axis);
@@ -319,15 +326,18 @@ function createTextureR32F(gl, width, height) {
 
 /**
  * Helper: Create an RG32F complex texture
+ * Accepts either (gl, size) for square textures or (gl, width, height)
  * @param {WebGL2RenderingContext} gl
  * @param {number} width
- * @param {number} height
+ * @param {number} [height]
  */
 function createComplexTexture(gl, width, height) {
+  const w = width;
+  const h = (height === undefined) ? width : height;
   const texture = gl.createTexture();
   if (!texture) throw new Error('Failed to create texture');
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, width, height, 0, gl.RG, gl.FLOAT, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, w, h, 0, gl.RG, gl.FLOAT, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

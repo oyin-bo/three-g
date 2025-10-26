@@ -13,13 +13,15 @@ import { readLinear, formatNumber } from '../diag.js';
 
 export class KPoisson {
   /**
-   * @param {{
+  * @param {{
    *   gl: WebGL2RenderingContext,
    *   inDensitySpectrum?: WebGLTexture|null,
    *   outPotentialSpectrum?: WebGLTexture|null,
    *   gridSize?: number,
    *   slicesPerRow?: number,
-   *   textureSize?: number,
+  *   textureSize?: number,
+  *   textureWidth?: number,
+  *   textureHeight?: number,
    *   gravitationalConstant?: number,
    *   worldSize?: [number, number, number],
    *   assignment?: 'NGP'|'CIC'|'TSC',
@@ -37,7 +39,9 @@ export class KPoisson {
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || 8;
-    this.textureSize = options.textureSize || (this.gridSize * this.slicesPerRow);
+  this.textureWidth = options.textureWidth || options.textureSize || (this.gridSize * this.slicesPerRow);
+  this.textureHeight = options.textureHeight || options.textureSize || (this.gridSize * Math.ceil(this.gridSize / this.slicesPerRow));
+  this.textureSize = this.textureWidth; // legacy
 
     // Physics parameters
     this.gravitationalConstant = options.gravitationalConstant !== undefined ? options.gravitationalConstant : (4.0 * Math.PI * 0.0003);
@@ -109,13 +113,13 @@ export class KPoisson {
   valueOf({ pixels } = {}) {
     const value = {
       densitySpectrum: this.inDensitySpectrum && readLinear({
-        gl: this.gl, texture: this.inDensitySpectrum, width: this.textureSize,
-        height: this.textureSize, count: this.textureSize * this.textureSize,
+        gl: this.gl, texture: this.inDensitySpectrum, width: this.textureWidth,
+        height: this.textureHeight, count: this.textureWidth * this.textureHeight,
         channels: ['real', 'imag'], pixels, format: this.gl.RG32F
       }),
       potentialSpectrum: this.outPotentialSpectrum && readLinear({
-        gl: this.gl, texture: this.outPotentialSpectrum, width: this.textureSize,
-        height: this.textureSize, count: this.textureSize * this.textureSize,
+        gl: this.gl, texture: this.outPotentialSpectrum, width: this.textureWidth,
+        height: this.textureHeight, count: this.textureWidth * this.textureHeight,
         channels: ['real', 'imag'], pixels, format: this.gl.RG32F
       }),
       gridSize: this.gridSize,
@@ -130,7 +134,7 @@ export class KPoisson {
     };
 
     value.toString = () =>
-      `KPoisson(${this.gridSize}³ grid) texture=${this.textureSize}×${this.textureSize} G=${formatNumber(this.gravitationalConstant)} assignment=${this.assignment} #${this.renderCount}
+      `KPoisson(${this.gridSize}³ grid) texture=${this.textureWidth}×${this.textureHeight} G=${formatNumber(this.gravitationalConstant)} assignment=${this.assignment} #${this.renderCount}
 
 densitySpectrum: ${value.densitySpectrum}
 
@@ -172,9 +176,9 @@ densitySpectrum: ${value.densitySpectrum}
       this._fboShadow = this.outPotentialSpectrum;
     }
 
-    // Bind output framebuffer
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
-    gl.viewport(0, 0, this.textureSize, this.textureSize);
+  // Bind output framebuffer
+  gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
+  gl.viewport(0, 0, this.textureWidth, this.textureHeight);
 
     // Setup GL state
     gl.disable(gl.BLEND);
@@ -189,6 +193,8 @@ densitySpectrum: ${value.densitySpectrum}
     // Set uniforms
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
+  // Provide packed 3D texture dims
+  gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.textureWidth, this.textureHeight);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gravitationalConstant'), this.gravitationalConstant);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldSize'),
       this.worldSize[0], this.worldSize[1], this.worldSize[2]);
@@ -238,14 +244,18 @@ densitySpectrum: ${value.densitySpectrum}
 
 /**
  * Helper: Create an RG32F complex texture
+ * Accepts either (gl, size) for square textures or (gl, width, height)
  * @param {WebGL2RenderingContext} gl
- * @param {number} size
+ * @param {number} width
+ * @param {number} [height]
  */
-function createComplexTexture(gl, size) {
+function createComplexTexture(gl, width, height) {
+  const w = width;
+  const h = (height === undefined) ? width : height;
   const texture = gl.createTexture();
   if (!texture) throw new Error('Failed to create texture');
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, size, size, 0, gl.RG, gl.FLOAT, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, w, h, 0, gl.RG, gl.FLOAT, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
