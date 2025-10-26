@@ -455,17 +455,29 @@ void main() {
   vec3 worldExtent = worldMax - worldMin;
   float eps = max(u_softening, 1e-6);
 
+  // Barnes-Hut hierarchical traversal: coarsest to finest
   for (int level = min(u_numLevels - 1, ${maxL - 1}); level >= 0; level--) {
     float gridSize = u_gridSizes[level];
     float slicesPerRow = u_slicesPerRow[level];
     float cellSize = u_cellSizes[level];
 
+    // Find particle's voxel at this level
     vec3 relPos = (myPos - worldMin) / worldExtent;
-    ivec3 voxelCoord = ivec3(clamp(relPos * gridSize, vec3(0.0), vec3(gridSize - 0.01)));
+    relPos = clamp(relPos, vec3(0.0), vec3(1.0 - (1.0 / gridSize)));
+    ivec3 myVoxel = ivec3(floor(relPos * gridSize));
     
-    for (int vz = 0; vz < int(gridSize); vz++) {
-      for (int vy = 0; vy < int(gridSize); vy++) {
-        for (int vx = 0; vx < int(gridSize); vx++) {
+    // Hierarchical traversal: check ALL voxels at coarsest level, only neighbors at finer levels
+    bool isCoarsestLevel = (level == u_numLevels - 1);
+    int startX = isCoarsestLevel ? 0 : max(0, myVoxel.x - 1);
+    int startY = isCoarsestLevel ? 0 : max(0, myVoxel.y - 1);
+    int startZ = isCoarsestLevel ? 0 : max(0, myVoxel.z - 1);
+    int endX = isCoarsestLevel ? int(gridSize) - 1 : min(int(gridSize) - 1, myVoxel.x + 1);
+    int endY = isCoarsestLevel ? int(gridSize) - 1 : min(int(gridSize) - 1, myVoxel.y + 1);
+    int endZ = isCoarsestLevel ? int(gridSize) - 1 : min(int(gridSize) - 1, myVoxel.z + 1);
+    
+    for (int vz = startZ; vz <= endZ; vz++) {
+      for (int vy = startY; vy <= endY; vy++) {
+        for (int vx = startX; vx <= endX; vx++) {
           ivec3 testVoxel = ivec3(vx, vy, vz);
           ivec2 texCoord = voxelToTexel(testVoxel, gridSize, slicesPerRow);
           ${occupancyCheckCode}
@@ -477,31 +489,44 @@ void main() {
           vec3 r = myPos - com;
           float dist = length(r);
           
-          bool useCell = (cellSize / (dist + eps)) < u_theta || testVoxel == voxelCoord;
-          if (useCell) {
-            if (testVoxel == voxelCoord) continue;
-            float distSq = dist * dist + eps * eps;
-            float distCubed = distSq * sqrt(distSq);
-            vec3 monopoleForce = -u_G * mass * r / distCubed;
-            totalForce += monopoleForce;
-            if (level > 0) {
-              vec4 a1 = sampleLevelA1(level, texCoord);
-              vec4 a2 = sampleLevelA2(level, texCoord);
-              float qxx = a1.r - com.x * com.x * mass;
-              float qyy = a1.g - com.y * com.y * mass;
-              float qzz = a1.b - com.z * com.z * mass;
-              float qxy = a1.a - com.x * com.y * mass;
-              float qxz = a2.r - com.x * com.z * mass;
-              float qyz = a2.g - com.y * com.z * mass;
-              float dist5 = distSq * distSq * sqrt(distSq);
-              vec3 quadForce = vec3(0.0);
-              float trace = qxx + qyy + qzz;
-              quadForce += 1.5 * u_G * trace * r / dist5;
-              quadForce.x += u_G * (qxx * r.x + qxy * r.y + qxz * r.z) / dist5;
-              quadForce.y += u_G * (qxy * r.x + qyy * r.y + qyz * r.z) / dist5;
-              quadForce.z += u_G * (qxz * r.x + qyz * r.y + qzz * r.z) / dist5;
-              totalForce += quadForce * 2.5;
-            }
+          // MAC: use cell if far enough, OR if it's my own voxel (always refine)
+          bool farEnough = (cellSize / (dist + eps)) < u_theta;
+          bool isMyVoxel = (testVoxel.x == myVoxel.x && testVoxel.y == myVoxel.y && testVoxel.z == myVoxel.z);
+          
+          if (!farEnough && !isMyVoxel) {
+            // Too close for approximation, will be refined at next level
+            continue;
+          }
+          
+          if (isMyVoxel) {
+            // Skip self-voxel (handled at finer level or direct summation)
+            continue;
+          }
+          
+          // Apply force from this cell
+          float distSq = dist * dist + eps * eps;
+          float distCubed = distSq * sqrt(distSq);
+          vec3 monopoleForce = -u_G * mass * r / distCubed;
+          totalForce += monopoleForce;
+          
+          // Add quadrupole correction (except at finest level where it's negligible)
+          if (level > 0) {
+            vec4 a1 = sampleLevelA1(level, texCoord);
+            vec4 a2 = sampleLevelA2(level, texCoord);
+            float qxx = a1.r - com.x * com.x * mass;
+            float qyy = a1.g - com.y * com.y * mass;
+            float qzz = a1.b - com.z * com.z * mass;
+            float qxy = a1.a - com.x * com.y * mass;
+            float qxz = a2.r - com.x * com.z * mass;
+            float qyz = a2.g - com.y * com.z * mass;
+            float dist5 = distSq * distSq * sqrt(distSq);
+            vec3 quadForce = vec3(0.0);
+            float trace = qxx + qyy + qzz;
+            quadForce += 1.5 * u_G * trace * r / dist5;
+            quadForce.x += u_G * (qxx * r.x + qxy * r.y + qxz * r.z) / dist5;
+            quadForce.y += u_G * (qxy * r.x + qyy * r.y + qyz * r.z) / dist5;
+            quadForce.z += u_G * (qxz * r.x + qyz * r.y + qzz * r.z) / dist5;
+            totalForce += quadForce * 2.5;
           }
         }
       }
