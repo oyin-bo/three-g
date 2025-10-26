@@ -91,20 +91,26 @@ export class KBoundsReduce {
     this.quadVAO = quadVAO;
     
     // Allocate intermediate reduction textures (pyramid of reductions)
-    // Each level reduces by 16× (4×4 samples per output texel)
+    // Algorithm: reduce NxM → 2×1 (min, max) output in steps of 4×4 sampling
+    // For small inputs (≤4×4), we need only one intermediate level
+    // For larger inputs, we build a pyramid
     this.reductionLevels = [];
     let currentWidth = this.particleTexWidth;
     let currentHeight = this.particleTexHeight;
     
-    while (currentWidth > 1 || currentHeight > 1) {
-      currentWidth = Math.max(1, Math.ceil(currentWidth / 4));
+    // Build reduction pyramid until we can reduce to 2×1 in final pass
+    // The final pass will always render to 2×1, so intermediate levels
+    // help reduce large inputs step-by-step
+    while (currentWidth > 4 || currentHeight > 4) {
+      // Reduce dimensions by 4× via 4×4 sampling
+      currentWidth = Math.max(2, Math.ceil(currentWidth / 4));
       currentHeight = Math.max(1, Math.ceil(currentHeight / 4));
       
-      // Each level stores min in R,G,B and max in A (packed)
-      // Actually, we need 2 texels per level: one for min, one for max
-      // So make width = max(2, currentWidth)
-      const levelWidth = Math.max(2, currentWidth);
-      const tex = createReductionTexture(this.gl, levelWidth, currentHeight);
+      // Intermediate levels are 2D (not constrained to 2×1)
+      // to allow flexibility in pyramid structure
+      const levelWidth = currentWidth;
+      const levelHeight = currentHeight;
+      const tex = createReductionTexture(this.gl, levelWidth, levelHeight);
       const fbo = this.gl.createFramebuffer();
       this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, fbo);
       this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, tex, 0);
@@ -115,7 +121,7 @@ export class KBoundsReduce {
       }
       this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
       
-      this.reductionLevels.push({ texture: tex, framebuffer: fbo, width: levelWidth, height: currentHeight });
+      this.reductionLevels.push({ texture: tex, framebuffer: fbo, width: levelWidth, height: levelHeight });
     }
     
     // Create final framebuffer for outBounds
@@ -262,6 +268,9 @@ bounds: ${value.bounds}${boundsMin && boundsMax ? `
 
 /**
  * Bounds reduction shader - hierarchical min/max
+ * 
+ * All reduction levels output 2×1 format: pixel 0 = min, pixel 1 = max
+ * Uses proper hierarchical reduction via 4×4 sampling.
  */
 function boundsReduceShader() {
   return `#version 300 es
@@ -276,12 +285,13 @@ out vec4 fragColor;
 void main() {
   ivec2 outCoord = ivec2(gl_FragCoord.xy);
   
-  // Each output texel samples a 4×4 region of input
+  // Each output pixel 0 and 1 sample from a 4×4 region of input
+  // Both pixels read from the same region but output min/max respectively
   ivec2 baseCoord = outCoord * 4;
   
-  // Initialize to extreme values
   vec3 minBound = vec3(1e20);
   vec3 maxBound = vec3(-1e20);
+  bool hasValidData = false;
   
   // Sample 4×4 region (16 samples)
   for (int dy = 0; dy < 4; dy++) {
@@ -301,19 +311,19 @@ void main() {
       if (mass > 0.0) {
         minBound = min(minBound, pos);
         maxBound = max(maxBound, pos);
+        hasValidData = true;
       }
     }
   }
   
-  // Output format: texel 0 = min, texel 1 = max
-  if (outCoord.x == 0 && outCoord.y == 0) {
-    fragColor = vec4(minBound, 1.0);
-  } else if (outCoord.x == 1 && outCoord.y == 0) {
-    fragColor = vec4(maxBound, 1.0);
+  // Output: min to pixel 0, max to pixel 1
+  // ivec2(gl_FragCoord) gives (0,0) for pixel 0, (1,0) for pixel 1
+  if (outCoord.x == 0) {
+    // Pixel 0: output minBounds
+    fragColor = vec4(minBound, hasValidData ? 1.0 : 0.0);
   } else {
-    // Intermediate levels: pack min/max into RGBA
-    // Store both for next reduction pass
-    fragColor = vec4(minBound.xy, maxBound.xy);
+    // Pixel 1: output maxBounds
+    fragColor = vec4(maxBound, hasValidData ? 1.0 : 0.0);
   }
 }
 `;

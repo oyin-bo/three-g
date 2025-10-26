@@ -103,13 +103,13 @@ test('KBoundsReduce: negative coordinates', async () => {
   
   assert.ok(minBounds && maxBounds, 'Bounds should exist');
   
-  assertClose(minBounds.x, -2, 1e-5, 'Min X');
-  assertClose(minBounds.y, -3, 1e-5, 'Min Y');
-  assertClose(minBounds.z, -4, 1e-5, 'Min Z');
-  assertClose(maxBounds.x, 2, 1e-5, 'Max X');
-  assertClose(maxBounds.y, 3, 1e-5, 'Max Y');
-  assertClose(maxBounds.z, 4, 1e-5, 'Max Z');
-  
+  assertClose(minBounds.x, -2, 1e-5, 'Min X\n\n' + kernel);
+  assertClose(minBounds.y, -3, 1e-5, 'Min Y\n\n' + kernel);
+  assertClose(minBounds.z, -4, 1e-5, 'Min Z\n\n' + kernel);
+  assertClose(maxBounds.x, 2, 1e-5, 'Max X\n\n' + kernel);
+  assertClose(maxBounds.y, 3, 1e-5, 'Max Y\n\n' + kernel);
+  assertClose(maxBounds.z, 4, 1e-5, 'Max Z\n\n' + kernel);
+
   disposeKernel(kernel);
   resetGL();
 });

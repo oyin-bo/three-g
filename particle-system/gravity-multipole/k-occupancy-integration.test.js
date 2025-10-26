@@ -26,7 +26,7 @@ test('OccupancyIntegration: generate occupancy texture', async () => {
   const gl = getGL();
   
   // Create sparse particle distribution (only a few occupied cells)
-  const particleCount = 8;
+  const particleCount = 9;  // Use perfect square for texture layout
   const positions = new Float32Array(particleCount * 4);
   
   // Place all particles in one corner (should produce sparse occupancy)
@@ -119,9 +119,9 @@ test('OccupancyIntegration: skip empty cells during traversal', async () => {
   
   // Log performance comparison
   const speedup = timeWithout / timeWith;
-  console.log(`Occupancy enabled: ${timeWith.toFixed(2)}ms`);
-  console.log(`Occupancy disabled: ${timeWithout.toFixed(2)}ms`);
-  console.log(`Speedup: ${speedup.toFixed(2)}x`);
+  // console.log(`Occupancy enabled: ${timeWith.toFixed(2)}ms`);
+  // console.log(`Occupancy disabled: ${timeWithout.toFixed(2)}ms`);
+  // console.log(`Speedup: ${speedup.toFixed(2)}x`);
   
   // Both should produce valid results
   assert.ok(systemWithOccupancy.traversalKernel.outForce, 'System with occupancy should produce force output');

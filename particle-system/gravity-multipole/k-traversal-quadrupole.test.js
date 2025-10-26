@@ -101,6 +101,11 @@ test('KTraversalQuadrupole: single particle no force', async () => {
   const levelA1 = fillVoxelTexture(gl, gridSize, slicesPerRow, () => [0, 0, 0, 0]);
   const levelA2 = fillVoxelTexture(gl, gridSize, slicesPerRow, () => [0, 0, 0, 0]);
   
+  // Convert to texture arrays
+  const levelsA0 = createTextureArrayFromLevels(gl, [levelA0], octreeSize);
+  const levelsA1 = createTextureArrayFromLevels(gl, [levelA1], octreeSize);
+  const levelsA2 = createTextureArrayFromLevels(gl, [levelA2], octreeSize);
+  
   const outForce = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
   
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
@@ -108,9 +113,9 @@ test('KTraversalQuadrupole: single particle no force', async () => {
   const kernel = new KTraversalQuadrupole({
     gl,
     inPosition: posTex,
-    inLevelA0: [levelA0],
-    inLevelA1: [levelA1],
-    inLevelA2: [levelA2],
+    inLevelsA0: levelsA0,
+    inLevelsA1: levelsA1,
+    inLevelsA2: levelsA2,
     outForce,
     particleTexWidth,
     particleTexHeight,
@@ -182,9 +187,9 @@ test('KTraversalQuadrupole: two particle interaction', async () => {
   const kernel = new KTraversalQuadrupole({
     gl,
     inPosition: posTex,
-    inLevelA0: createTextureArrayFromLevels(gl, [aggregator.outA0], octreeSize),
-    inLevelA1: createTextureArrayFromLevels(gl, [aggregator.outA1], octreeSize),
-    inLevelA2: createTextureArrayFromLevels(gl, [aggregator.outA2], octreeSize),
+    inLevelsA0: createTextureArrayFromLevels(gl, [aggregator.outA0], octreeSize),
+    inLevelsA1: createTextureArrayFromLevels(gl, [aggregator.outA1], octreeSize),
+    inLevelsA2: createTextureArrayFromLevels(gl, [aggregator.outA2], octreeSize),
     outForce,
     particleTexWidth,
     particleTexHeight,
@@ -271,9 +276,9 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
   const kernelQuad = new KTraversalQuadrupole({
     gl,
     inPosition: posTex,
-    inLevelA0: createTextureArrayFromLevels(gl, [aggregator.outA0], octreeSize),
-    inLevelA1: createTextureArrayFromLevels(gl, [aggregator.outA1], octreeSize),
-    inLevelA2: createTextureArrayFromLevels(gl, [aggregator.outA2], octreeSize),
+    inLevelsA0: createTextureArrayFromLevels(gl, [aggregator.outA0], octreeSize),
+    inLevelsA1: createTextureArrayFromLevels(gl, [aggregator.outA1], octreeSize),
+    inLevelsA2: createTextureArrayFromLevels(gl, [aggregator.outA2], octreeSize),
     outForce: outForceQuad,
     particleTexWidth,
     particleTexHeight,
@@ -297,9 +302,9 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
   const kernelMono = new KTraversalQuadrupole({
     gl,
     inPosition: posTex,
-    inLevelA0: createTextureArrayFromLevels(gl, [aggregator.outA0], octreeSize),
-    inLevelA1: createTextureArrayFromLevels(gl, [aggregator.outA1], octreeSize),
-    inLevelA2: createTextureArrayFromLevels(gl, [aggregator.outA2], octreeSize),
+    inLevelsA0: createTextureArrayFromLevels(gl, [aggregator.outA0], octreeSize),
+    inLevelsA1: createTextureArrayFromLevels(gl, [aggregator.outA1], octreeSize),
+    inLevelsA2: createTextureArrayFromLevels(gl, [aggregator.outA2], octreeSize),
     outForce: outForceMono,
     particleTexWidth,
     particleTexHeight,
@@ -379,9 +384,9 @@ test('KTraversalQuadrupole: multiple hierarchy levels', async () => {
   const kernel = new KTraversalQuadrupole({
     gl,
     inPosition: posTex,
-    inLevelA0: arrayA0,
-    inLevelA1: arrayA1,
-    inLevelA2: arrayA2,
+    inLevelsA0: arrayA0,
+    inLevelsA1: arrayA1,
+    inLevelsA2: arrayA2,
     outForce,
     particleTexWidth,
     particleTexHeight,
@@ -444,9 +449,9 @@ test('KTraversalQuadrupole: zero mass particle', async () => {
   const kernel = new KTraversalQuadrupole({
     gl,
     inPosition: posTex,
-    inLevelA0: createTextureArrayFromLevels(gl, [aggregator.outA0], octreeSize),
-    inLevelA1: createTextureArrayFromLevels(gl, [aggregator.outA1], octreeSize),
-    inLevelA2: createTextureArrayFromLevels(gl, [aggregator.outA2], octreeSize),
+    inLevelsA0: createTextureArrayFromLevels(gl, [aggregator.outA0], octreeSize),
+    inLevelsA1: createTextureArrayFromLevels(gl, [aggregator.outA1], octreeSize),
+    inLevelsA2: createTextureArrayFromLevels(gl, [aggregator.outA2], octreeSize),
     outForce,
     particleTexWidth,
     particleTexHeight,
@@ -455,8 +460,7 @@ test('KTraversalQuadrupole: zero mass particle', async () => {
     worldBounds,
     theta: 0.5,
     gravityStrength: 0.0003,
-    softening: 0.2,
-    enableQuadrupoles: true
+    softening: 0.2
   });
   
   kernel.run();
