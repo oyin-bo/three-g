@@ -448,15 +448,18 @@ test('spectral-kernels.convergence: long simulation remains stable with fine tim
   
   const energyDrift = Math.abs((finalEnergy - initialEnergy) / initialEnergy);
   
+  // Capture system state for diagnostics
+  const diagFull = '\n\n' + system.toString();
+  
   // Energy drift should be reasonable for spectral method
   assert.ok(energyDrift < 0.3, 
-    `Long simulation should maintain reasonable energy conservation: drift=${(energyDrift * 100).toFixed(1)}%`);
+    `Long simulation should maintain reasonable energy conservation: drift=${(energyDrift * 100).toFixed(1)}%` + diagFull);
   
   // Check all values finite
   for (const p of finalParticles) {
     for (let i = 0; i < 3; i++) {
-      assert.ok(isFinite(p.position[i]), 'Position should remain finite');
-      assert.ok(isFinite(p.velocity[i]), 'Velocity should remain finite');
+      assert.ok(isFinite(p.position[i]), 'Position should remain finite' + diagFull);
+      assert.ok(isFinite(p.velocity[i]), 'Velocity should remain finite' + diagFull);
     }
   }
   

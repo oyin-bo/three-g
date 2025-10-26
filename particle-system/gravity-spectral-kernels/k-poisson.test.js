@@ -110,16 +110,25 @@ test('KPoisson: non-zero frequency computation', async () => {
     gravitationalConstant: 4.0 * Math.PI * 0.0003,
     worldSize: [4.0, 4.0, 4.0]
   });
+
+  const before = kernel.valueOf();
   
   // Read input for diagnostics
   // Run kernel
   kernel.run();
   
-  const snapshot = kernel.valueOf({ pixels: false });
+  const snapshot = kernel.valueOf();
   
-  // Non-DC modes should produce non-zero potential
-  assert.ok(snapshot.potentialSpectrum.real.max > 0 || snapshot.potentialSpectrum.imag.max > 0,
-    `Output potential should be non-zero for non-DC modes\n\n${kernel.toString()}`);
+  // Non-DC modes should produce non-zero potential (can be negative due to Green's function sign)
+  const maxMag = Math.max(Math.abs(snapshot.potentialSpectrum.real.max), Math.abs(snapshot.potentialSpectrum.real.min));
+  assert.ok(maxMag > 0,
+    `Output potential should be non-zero for non-DC modes
+
+BEFORE: ${before}
+AFTER: ${kernel}
+
+
+`);
   
   // Cleanup
   disposeKernel(kernel);

@@ -128,6 +128,9 @@ test('spectral-kernels.large-scale: 100 particles evolve without errors', async 
   // Verify all particles have valid data
   const particles = readAllParticleData(system, particleCount);
   
+  // Capture system state for diagnostics
+  const diagFull = '\n\n' + system.toString();
+  
   for (let i = 0; i < particleCount; i++) {
     const p = particles[i];
     
@@ -136,13 +139,13 @@ test('spectral-kernels.large-scale: 100 particles evolve without errors', async 
       `        velocity=[${p.velocity.slice(0, 3).map(v => v.toFixed(4)).join(', ')}]`;
 
     for (let j = 0; j < 3; j++) {
-      assert.ok(isFinite(p.position[j]), `Particle ${i} position[${j}] should be finite` + diag);
-      assert.ok(isFinite(p.velocity[j]), `Particle ${i} velocity[${j}] should be finite` + diag);
+      assert.ok(isFinite(p.position[j]), `Particle ${i} position[${j}] should be finite` + diag + diagFull);
+      assert.ok(isFinite(p.velocity[j]), `Particle ${i} velocity[${j}] should be finite` + diag + diagFull);
     }
     
     // Check positions are reasonable
     const r = Math.sqrt(p.position[0]**2 + p.position[1]**2 + p.position[2]**2);
-    assert.ok(r < 10, `Particle ${i} should stay in reasonable bounds: r=${r.toFixed(2)}` + diag);
+    assert.ok(r < 10, `Particle ${i} should stay in reasonable bounds: r=${r.toFixed(2)}` + diag + diagFull);
   }
   
   disposeSystem(system, canvas);
@@ -361,13 +364,16 @@ test('spectral-kernels.large-scale: particles cluster over time', async () => {
   
   const finalSpread = calculateSpread();
   
+  // Capture system state for diagnostics
+  const diagFull = '\n\n' + system.toString();
+  
   // System should cluster (spread should decrease)
   const diagCluster = `\n  Clustering diagnostics:\n` +
     `    Initial spread: ${initialSpread.toFixed(3)}\n` +
     `    Final spread:   ${finalSpread.toFixed(3)}`;
 
   assert.ok(finalSpread < initialSpread * 0.85, 
-    `System should cluster: spread ${initialSpread.toFixed(3)} -> ${finalSpread.toFixed(3)}` + diagCluster);
+    `System should cluster: spread ${initialSpread.toFixed(3)} -> ${finalSpread.toFixed(3)}` + diagCluster + diagFull);
   
   disposeSystem(system, canvas);
 });

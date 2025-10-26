@@ -473,7 +473,64 @@ Reverse Step: Inverse FFT X/Y/Z
     }
   }
 
+  /**
+   * Capture complete system state with kernel reflections
+   * @param {{pixels?: boolean}} [options]
+   * @returns {object & {toString: () => string}}
+   */
+  valueOf(options) {
+    const snapshot = {
+      frameCount: this.frameCount,
+      particleCount: this.options.particleCount,
+      gridSize: this.gridSize,
+      dt: this.options.dt,
+      gravityStrength: this.options.gravityStrength,
+      softening: this.options.softening,
+      damping: this.options.damping,
+      
+      // Kernel snapshots
+      deposit: this.depositKernel ? this.depositKernel.valueOf(options) : null,
+      fft: this.fftKernel ? this.fftKernel.valueOf(options) : null,
+      poisson: this.poissonKernel ? this.poissonKernel.valueOf(options) : null,
+      gradient: this.gradientKernel ? this.gradientKernel.valueOf(options) : null,
+      forceSample: this.forceSampleKernel ? this.forceSampleKernel.valueOf(options) : null,
+      velocity: this.velocityKernel ? this.velocityKernel.valueOf(options) : null,
+      position: this.positionKernel ? this.positionKernel.valueOf(options) : null,
+    };
+    // always capture to materialise at a point in time
+    const snapshotStr = this._formatSnapshot(snapshot);
+    snapshot.toString = () => snapshotStr;
+    
+    return snapshot;
+  }
 
+  /**
+   * Format snapshot as compact readable string
+   * @param {object} snapshot
+   * @returns {string}
+   */
+  _formatSnapshot(snapshot) {
+    let output = `\nParticleSystemSpectralKernels(${snapshot.particleCount}p grid=${snapshot.gridSize}³) frame=${snapshot.frameCount}\n`;
+    output += `  dt=${snapshot.dt.toExponential(2)} G=${snapshot.gravityStrength.toExponential(2)} soft=${snapshot.softening.toFixed(2)} damp=${snapshot.damping.toFixed(2)}\n`;
+    
+    if (snapshot.deposit) output += '\n' + snapshot.deposit.toString().split('\n').map(l => '  ' + l).join('\n');
+    if (snapshot.poisson) output += '\n' + snapshot.poisson.toString().split('\n').map(l => '  ' + l).join('\n');
+    if (snapshot.gradient) output += '\n' + snapshot.gradient.toString().split('\n').map(l => '  ' + l).join('\n');
+    if (snapshot.fft) output += '\n' + snapshot.fft.toString().split('\n').map(l => '  ' + l).join('\n');
+    if (snapshot.forceSample) output += '\n' + snapshot.forceSample.toString().split('\n').map(l => '  ' + l).join('\n');
+    if (snapshot.velocity) output += '\n' + snapshot.velocity.toString().split('\n').map(l => '  ' + l).join('\n');
+    if (snapshot.position) output += '\n' + snapshot.position.toString().split('\n').map(l => '  ' + l).join('\n');
+    
+    return output;
+  }
+
+  /**
+   * Get compact string representation
+   * @returns {string}
+   */
+  toString() {
+    return this.valueOf({ pixels: false }).toString();
+  }
 
   dispose() {
     // Kernels own and dispose all their texture properties

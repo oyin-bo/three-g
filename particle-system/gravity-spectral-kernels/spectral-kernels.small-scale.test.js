@@ -165,6 +165,9 @@ test('spectral-kernels.small-scale: two particles attract each other', async () 
   const final0 = readParticleData(system, 0);
   const final1 = readParticleData(system, 1);
   
+  // Capture full kernel state for diagnostics
+  const diagFull = '\n\n' + system.toString();
+  
   // Verify particles moved toward each other
   // Particle 0 should move in +x direction (toward particle 1)
   const diagTwoBody = `\n  Two-body diagnostics:\n` +
@@ -173,15 +176,15 @@ test('spectral-kernels.small-scale: two particles attract each other', async () 
     `    Final velocities:  P0=${final0.velocity.map(v => v.toFixed(4)).join(', ')}, P1=${final1.velocity.map(v => v.toFixed(4)).join(', ')}`;
 
   assert.ok(final0.position[0] > initial0.position[0], 
-    `Particle 0 should move right: ${initial0.position[0]} -> ${final0.position[0]}` + diagTwoBody);
+    `Particle 0 should move right: ${initial0.position[0]} -> ${final0.position[0]}` + diagTwoBody + diagFull);
   
   // Particle 1 should move in -x direction (toward particle 0)
   assert.ok(final1.position[0] < initial1.position[0], 
-    `Particle 1 should move left: ${initial1.position[0]} -> ${final1.position[0]}` + diagTwoBody);
+    `Particle 1 should move left: ${initial1.position[0]} -> ${final1.position[0]}` + diagTwoBody + diagFull);
   
   // Check velocity direction
-  assert.ok(final0.velocity[0] > 0, 'Particle 0 velocity should be positive (rightward)' + diagTwoBody);
-  assert.ok(final1.velocity[0] < 0, 'Particle 1 velocity should be negative (leftward)' + diagTwoBody);
+  assert.ok(final0.velocity[0] > 0, 'Particle 0 velocity should be positive (rightward)' + diagTwoBody + diagFull);
+  assert.ok(final1.velocity[0] < 0, 'Particle 1 velocity should be negative (leftward)' + diagTwoBody + diagFull);
   
   disposeSystem(system, canvas);
 });
@@ -240,13 +243,16 @@ test('spectral-kernels.small-scale: ten particles in cluster contract inward', a
   
   const finalRadius = getAverageRadius();
   
+  // Capture system state for diagnostics
+  const diagFull = '\n\n' + system.toString();
+  
   // Verify system contracted (particles moved inward)
   const diagCluster = `\n  Cluster contraction diagnostics:\n` +
     `    Initial average radius: ${initialRadius.toFixed(3)}\n` +
     `    Final average radius:   ${finalRadius.toFixed(3)}`;
 
   assert.ok(finalRadius < initialRadius, 
-    `Cluster should contract: initial radius=${initialRadius.toFixed(3)}, final radius=${finalRadius.toFixed(3)}` + diagCluster);
+    `Cluster should contract: initial radius=${initialRadius.toFixed(3)}, final radius=${finalRadius.toFixed(3)}` + diagCluster + diagFull);
   
   // Check no NaN or Inf values
   for (let i = 0; i < 10; i++) {

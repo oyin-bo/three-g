@@ -229,9 +229,12 @@ test('spectral-kernels.conservation: energy approximately conserved over time', 
   const energyDrift = Math.abs(finalE - initialE);
   const relDrift = energyDrift / Math.abs(initialE);
   
+  // Capture system state for diagnostics
+  const diagFull = '\n\n' + system.toString();
+  
   // Spectral method may have grid-related errors, allow reasonable tolerance
   assert.ok(relDrift < 0.25, 
-    `Energy should be approximately conserved (spectral/PM): initial=${initialE.toExponential(3)}, final=${finalE.toExponential(3)}, relDrift=${relDrift.toFixed(3)}`);
+    `Energy should be approximately conserved (spectral/PM): initial=${initialE.toExponential(3)}, final=${finalE.toExponential(3)}, relDrift=${relDrift.toFixed(3)}` + diagFull);
   
   system.dispose();
   canvas.remove();
@@ -301,8 +304,11 @@ test('spectral-kernels.conservation: momentum conserved in isolated system', asy
   const initialPMag = Math.sqrt(initialP[0]**2 + initialP[1]**2 + initialP[2]**2);
   const relChange = initialPMag > 1e-6 ? dp / initialPMag : dp;
   
+  // Capture system state for diagnostics
+  const diagFull = '\n\n' + system.toString();
+  
   assert.ok(relChange < 0.1 || dp < 0.01, 
-    `Momentum should be conserved: initial=[${initialP.map(x=>x.toFixed(4))}], final=[${finalP.map(x=>x.toFixed(4))}], dp=${dp.toFixed(4)}`);
+    `Momentum should be conserved: initial=[${initialP.map(x=>x.toFixed(4))}], final=[${finalP.map(x=>x.toFixed(4))}], dp=${dp.toFixed(4)}` + diagFull);
   
   system.dispose();
   canvas.remove();
@@ -377,8 +383,11 @@ test('spectral-kernels.conservation: angular momentum conserved in rotating syst
   const initialLMag = Math.sqrt(initialL[0]**2 + initialL[1]**2 + initialL[2]**2);
   const relChange = dL / initialLMag;
   
+  // Capture system state for diagnostics
+  const diagFull = '\n\n' + system.toString();
+  
   assert.ok(relChange < 0.15, 
-    `Angular momentum should be approximately conserved (spectral/PM): initial=[${initialL.map(x=>x.toFixed(3))}], final=[${finalL.map(x=>x.toFixed(3))}], relChange=${relChange.toFixed(3)}`);
+    `Angular momentum should be approximately conserved (spectral/PM): initial=[${initialL.map(x=>x.toFixed(3))}], final=[${finalL.map(x=>x.toFixed(3))}], relChange=${relChange.toFixed(3)}` + diagFull);
   
   system.dispose();
   canvas.remove();

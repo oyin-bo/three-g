@@ -258,13 +258,16 @@ test('spectral-kernels.debug: multiple steps change particle state', async () =>
                   Math.abs(finalVel[1] - initialVel[1]) + 
                   Math.abs(finalVel[2] - initialVel[2]);
   
+  // Capture system state for diagnostics
+  const diagFull = '\n\n' + system.toString();
+  
   const diag = `\n  Velocity delta diagnostics:\n` +
     `    Initial velocity: [${Array.from(initialVel).map(v => v.toFixed(6)).join(', ')}]\n` +
     `    Final velocity:   [${Array.from(finalVel).map(v => v.toFixed(6)).join(', ')}]\n` +
     `    Diff magnitude: ${velDiff.toFixed(6)}`;
 
   assert.ok(velDiff > 0.001, 
-    `Velocities should change after simulation${diag}`);
+    `Velocities should change after simulation${diag}${diagFull}`);
   
   system.dispose();
   canvas.remove();

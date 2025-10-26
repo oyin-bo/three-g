@@ -112,17 +112,20 @@ test('spectral-kernels.stability: high initial velocities remain bounded', async
     system.step();
   }
   
+  // Capture system state for diagnostics
+  const diagFull = '\n\n' + system.toString();
+  
   // Verify all particles have finite, reasonable values
   for (let i = 0; i < 4; i++) {
     const p = readParticleData(system, i);
     
     for (let j = 0; j < 3; j++) {
-      assert.ok(isFinite(p.position[j]), `Particle ${i} position[${j}] should be finite`);
-      assert.ok(isFinite(p.velocity[j]), `Particle ${i} velocity[${j}] should be finite`);
+      assert.ok(isFinite(p.position[j]), `Particle ${i} position[${j}] should be finite` + diagFull);
+      assert.ok(isFinite(p.velocity[j]), `Particle ${i} velocity[${j}] should be finite` + diagFull);
     }
     
     const speed = Math.sqrt(p.velocity[0]**2 + p.velocity[1]**2 + p.velocity[2]**2);
-    assert.ok(speed < 20, `Particle ${i} velocity should remain bounded: speed=${speed.toFixed(3)}`);
+    assert.ok(speed < 20, `Particle ${i} velocity should remain bounded: speed=${speed.toFixed(3)}` + diagFull);
   }
   
   disposeSystem(system, canvas);
@@ -153,13 +156,16 @@ test('spectral-kernels.stability: very small timestep remains stable', async () 
     system.step();
   }
   
+  // Capture system state for diagnostics
+  const diagFull = '\n\n' + system.toString();
+  
   // Verify particles still valid
   for (let i = 0; i < 2; i++) {
     const p = readParticleData(system, i);
     
     for (let j = 0; j < 3; j++) {
-      assert.ok(isFinite(p.position[j]), `Position should be finite with tiny timestep`);
-      assert.ok(isFinite(p.velocity[j]), `Velocity should be finite with tiny timestep`);
+      assert.ok(isFinite(p.position[j]), `Position should be finite with tiny timestep` + diagFull);
+      assert.ok(isFinite(p.velocity[j]), `Velocity should be finite with tiny timestep` + diagFull);
     }
   }
   
@@ -203,6 +209,9 @@ test('spectral-kernels.stability: dense particle cluster remains stable', async 
     system.step();
   }
   
+  // Capture system state for diagnostics
+  const diagFull = '\n\n' + system.toString();
+  
   // Check that no particles have exploded
   let maxSpeed = 0;
   for (let i = 0; i < particleCount; i++) {
@@ -210,10 +219,10 @@ test('spectral-kernels.stability: dense particle cluster remains stable', async 
     const speed = Math.sqrt(p.velocity[0]**2 + p.velocity[1]**2 + p.velocity[2]**2);
     maxSpeed = Math.max(maxSpeed, speed);
     
-    assert.ok(isFinite(speed), `Particle ${i} speed should be finite`);
+    assert.ok(isFinite(speed), `Particle ${i} speed should be finite` + diagFull);
   }
   
-  assert.ok(maxSpeed < 5.0, `Dense cluster should not explode: maxSpeed=${maxSpeed.toFixed(3)}`);
+  assert.ok(maxSpeed < 5.0, `Dense cluster should not explode: maxSpeed=${maxSpeed.toFixed(3)}` + diagFull);
   
   disposeSystem(system, canvas);
 });
@@ -309,20 +318,23 @@ test('spectral-kernels.stability: widely varying particle masses remain stable',
     system.step();
   }
   
+  // Capture system state for diagnostics
+  const diagFull = '\n\n' + system.toString();
+  
   // Verify all particles remain stable
   for (let i = 0; i < 4; i++) {
     const p = readParticleData(system, i);
     
     for (let j = 0; j < 3; j++) {
       assert.ok(isFinite(p.position[j]), 
-        `Particle ${i} position[${j}] should be finite with varying masses`);
+        `Particle ${i} position[${j}] should be finite with varying masses` + diagFull);
       assert.ok(isFinite(p.velocity[j]), 
-        `Particle ${i} velocity[${j}] should be finite with varying masses`);
+        `Particle ${i} velocity[${j}] should be finite with varying masses` + diagFull);
     }
     
     const speed = Math.sqrt(p.velocity[0]**2 + p.velocity[1]**2 + p.velocity[2]**2);
     assert.ok(speed < 3.0, 
-      `Particle ${i} should not have runaway velocity: speed=${speed.toFixed(3)}`);
+      `Particle ${i} should not have runaway velocity: speed=${speed.toFixed(3)}` + diagFull);
   }
   
   disposeSystem(system, canvas);
