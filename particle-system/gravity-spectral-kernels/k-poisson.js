@@ -29,23 +29,23 @@ export class KPoisson {
    */
   constructor(options) {
     this.gl = options.gl;
-    
+
     // Resource slots
     this.inDensitySpectrum = (options.inDensitySpectrum || options.inDensitySpectrum === null) ? options.inDensitySpectrum : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
     this.outPotentialSpectrum = (options.outPotentialSpectrum || options.outPotentialSpectrum === null) ? options.outPotentialSpectrum : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
-    
+
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || 8;
     this.textureSize = options.textureSize || (this.gridSize * this.slicesPerRow);
-    
+
     // Physics parameters
     this.gravitationalConstant = options.gravitationalConstant !== undefined ? options.gravitationalConstant : (4.0 * Math.PI * 0.0003);
     this.worldSize = options.worldSize || [100.0, 100.0, 100.0];
     this.assignment = options.assignment || 'CIC';
     this.poissonUseDiscrete = options.poissonUseDiscrete !== undefined ? options.poissonUseDiscrete : false;
     this.treePMSigma = options.treePMSigma || 0.0;
-    
+
     // Compile and link shader program
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
     if (!vert) throw new Error('Failed to create vertex shader');
@@ -88,20 +88,20 @@ export class KPoisson {
     const buffer = this.gl.createBuffer();
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
     const quadVertices = new Float32Array([
-      -1, -1,  1, -1,  -1, 1,  1, 1
+      -1, -1, 1, -1, -1, 1, 1, 1
     ]);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, quadVertices, this.gl.STATIC_DRAW);
     this.gl.enableVertexAttribArray(0);
     this.gl.vertexAttribPointer(0, 2, this.gl.FLOAT, false, 0, 0);
     this.gl.bindVertexArray(null);
     this.quadVAO = quadVAO;
-    
+
     // Create framebuffer
     this.outFramebuffer = this.gl.createFramebuffer();
     /** @type {WebGLTexture | null} */
     this._fboShadow = null;
   }
-  
+
   /**
    * Capture complete computational state for debugging and testing
    * @param {{pixels?: boolean}} [options] - Capture options
@@ -128,17 +128,17 @@ export class KPoisson {
       treePMSigma: this.treePMSigma,
       renderCount: this.renderCount
     };
-    
+
     value.toString = () =>
-`KPoisson(${this.gridSize}³ grid) texture=${this.textureSize}×${this.textureSize} G=${formatNumber(this.gravitationalConstant)} assignment=${this.assignment} #${this.renderCount}
+      `KPoisson(${this.gridSize}³ grid) texture=${this.textureSize}×${this.textureSize} G=${formatNumber(this.gravitationalConstant)} assignment=${this.assignment} #${this.renderCount}
 
 densitySpectrum: ${value.densitySpectrum}
 
 → potentialSpectrum: ${value.potentialSpectrum}`;
-    
+
     return value;
   }
-  
+
   /**
    * Get human-readable string representation of kernel state
    * @returns {string} Compact summary
@@ -146,19 +146,18 @@ densitySpectrum: ${value.densitySpectrum}
   toString() {
     return this.valueOf().toString();
   }
-  
+
   /**
    * Run the kernel (synchronous)
    */
   run() {
     const gl = this.gl;
-    
-    if (!this.inDensitySpectrum || !this.outPotentialSpectrum) {
-      throw new Error('KPoisson: missing required textures');
-    }
-    
+
+    if (!this.inDensitySpectrum) throw new Error('KPoisson: missing inDensitySpectrum texture');
+    if (!this.outPotentialSpectrum) throw new Error('KPoisson: missing outPotentialSpectrum texture');
+
     gl.useProgram(this.program);
-    
+
     // Configure framebuffer if needed
     if (this._fboShadow !== this.outPotentialSpectrum) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
@@ -176,47 +175,51 @@ densitySpectrum: ${value.densitySpectrum}
     // Bind output framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
     gl.viewport(0, 0, this.textureSize, this.textureSize);
-    
+
     // Setup GL state
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
     gl.colorMask(true, true, true, true);
-    
+
     // Bind input density spectrum
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.inDensitySpectrum);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_densitySpectrum'), 0);
-    
+
     // Set uniforms
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gravitationalConstant'), this.gravitationalConstant);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldSize'),
       this.worldSize[0], this.worldSize[1], this.worldSize[2]);
-    
+
     // Deconvolution order based on assignment
     let deconvolveOrder = 2; // CIC default
     if (this.assignment === 'TSC') deconvolveOrder = 3;
     if (this.assignment === 'NGP') deconvolveOrder = 1;
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_deconvolveOrder'), deconvolveOrder);
-    
+
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_useDiscrete'), this.poissonUseDiscrete ? 1 : 0);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gaussianSigma'), this.treePMSigma);
-    
+
+    // Set missing uniforms with defaults
+    gl.uniform1i(gl.getUniformLocation(this.program, 'u_splitMode'), 0);
+    gl.uniform1f(gl.getUniformLocation(this.program, 'u_kCut'), 0.0);
+
     // Draw fullscreen quad
     gl.bindVertexArray(this.quadVAO);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
-    
+
     // Cleanup
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, null);
     gl.useProgram(null);
-    
+
     this.renderCount = (this.renderCount || 0) + 1;
   }
-  
+
   dispose() {
     const gl = this.gl;
 

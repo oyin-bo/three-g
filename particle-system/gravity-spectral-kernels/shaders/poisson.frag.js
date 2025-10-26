@@ -98,6 +98,9 @@ void main() {
   if (k2 >= 1e-10) { // Avoid division by zero at DC (k=0)
     float green = -u_gravitationalConstant / k2;
     phi_k = rho_k * green;
+  } else {
+    // DC mode (k=0): set to zero (mean field should be zero in periodic box)
+    phi_k = vec2(0.0);
   }
 
   outColor = vec4(phi_k, 0.0, 0.0);

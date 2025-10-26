@@ -155,7 +155,8 @@ export class ParticleSystemSpectralKernels {
     // Textures are square: (gridSize×slicesPerRow) × (gridSize×sliceRows)
     // where sliceRows ≈ slicesPerRow due to sqrt formula
     this.massGridTexture = createTextureR32F(this.gl, this.textureWidth3D, this.textureHeight3D);
-    this.densitySpectrumTexture = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
+    this.fftComplexTexture1 = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
+    this.fftComplexTexture2 = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
     this.potentialSpectrumTexture = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
     this.forceSpectrumXTexture = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
     this.forceSpectrumYTexture = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
@@ -185,8 +186,8 @@ export class ParticleSystemSpectralKernels {
     this.fftKernel = new KFFT({
       gl: this.gl,
       real: this.massGridTexture,
-      complexFrom: this.densitySpectrumTexture,
-      complexTo: this.potentialSpectrumTexture,  // Reuse as working buffer
+      complexFrom: this.fftComplexTexture1,
+      complexTo: this.fftComplexTexture2,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureWidth3D,
@@ -196,8 +197,8 @@ export class ParticleSystemSpectralKernels {
     // 3. Poisson solver kernel    
     this.poissonKernel = new KPoisson({
       gl: this.gl,
-      inDensitySpectrum: this.densitySpectrumTexture,
-      outPotentialSpectrum: this.potentialSpectrumTexture,
+      inDensitySpectrum: null,
+      outPotentialSpectrum: null,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureWidth3D,
@@ -209,7 +210,7 @@ export class ParticleSystemSpectralKernels {
     // 4. Gradient kernel
     this.gradientKernel = new KGradient({
       gl: this.gl,
-      inPotentialSpectrum: this.potentialSpectrumTexture,
+      inPotentialSpectrum: null,
       outForceSpectrumX: this.forceSpectrumXTexture,
       outForceSpectrumY: this.forceSpectrumYTexture,
       outForceSpectrumZ: this.forceSpectrumZTexture,
@@ -312,44 +313,126 @@ export class ParticleSystemSpectralKernels {
     // Run PM/FFT pipeline
     this.depositKernel.run();           // Step 1: Deposit particles to grid
 
-    // Step 2: Forward FFT (real → complexTo)
+
+/**
+
+Complex texture ownership
+==========================
+
+These complex textures may be swapped around, so we need a system to reason about it.
+
+Few ground rules:
+* KFFT holds on its complexFrom and complexTo textures
+* Poisson starts with nothing, then borrow its textures from KFFT but in the end returns them
+* Gradient holds on to its outForceSpectrumX/Y/Z textures although they may get swapped, but it gets exact same back anyway
+
+Forward Step: FFT, Poisson, Gradient
+------------------------------------------------
+
+1. KFFT reads real (massGridTexture), writes complexTo which it kinda owns. Its complexFrom is scratch buffer.
+   As part of FFT it swaps complexFrom and complexTo internally many times.
+   Doesn't matter they are interchangeable, KFFT keeps both.
+
+2. Poisson takes complexTo from KFFT as inDensitySpectrum, and takes KFFT's complexFrom as outPotentialSpectrum.
+    At that point we null out KFFT's references to those textures since Poisson now holds them.
+
+3. Gradient takes Poisson's outPotentialSpectrum as inPotentialSpectrum, and writes to its own outForceSpectrumX/Y/Z textures.
+   Again, we null out Poisson's reference to outPotentialSpectrum since Gradient now holds it as input.
+
+Reverse Step: Inverse FFT X/Y/Z
+------------------------------------------------
+
+1. KFFT needs actual input from Gradient's outForceSpectrumX texture.
+    Poisson now lost its output to Gradient's input, so KFFT takes it for its scratch buffer complexTo.
+    Note: Poisson still holds its useless input just for a little longer until the end of the reverse FFT steps.
+    This is an inverse FFT, so output is real, and complexTo is a scratch buffer.
+    During the FFT run, KFFT swaps complexFrom and complexTo internally many times.
+    And so at the end we return complexFrom to Gradient as its outForceSpectrumX texture:
+    it could be the same texture, or a different instance.
+
+2. Now KFFT takes input from Gradient's outForceSpectrumY texture as complexFrom.
+    KFFT already has complexTo as scratct buffer, no need to assign.
+    (Poisson still holds input texture for a time.)
+    At the end we return complexFrom to Gradient as its outForceSpectrumY texture
+    (potentially swapped).
+
+3. KFFT now takes input from Gradient's outForceSpectrumZ texture as complexFrom.
+    KFFT already has complexTo as scratch buffer again.
+    (Poisson still holds input texture for a time.)
+    At the end of this last inverse KFFT we return complexFrom to Gradient as its outForceSpectrumZ.
+    Now KFFT has a scratch complexTo, and it takes back Poisson's input texture for complexFrom
+    and nulls out Poison fully. We are ready to start again.
+
+*/
+
+    ///////////////////////////////////////////////////////////////////////////
+    // FORWARD
+
+
+    // Forward FFT: real → complexFrom scratch + complexTo
+    this.fftKernel.real = this.massGridTexture;
     this.fftKernel.inverse = false;
     this.fftKernel.run();
-    // Result is now in fftKernel.complexTo (which is potentialSpectrumTexture)
 
-    // Step 3: Solve Poisson (reads from densitySpectrum, writes to potentialSpectrum)
-    // Wait - this is wrong! Forward FFT output is in complexTo (potentialSpectrum),
-    // but Poisson expects input in densitySpectrum. Need to check constructor wiring...
-    // Actually, let's wire it correctly: Poisson should read from complexTo
+    // Solve Poisson: inDensitySpectrum from KFFT complexTo → outPotentialSpectrum taken from KFFT complexFrom
     this.poissonKernel.inDensitySpectrum = this.fftKernel.complexTo;
+    this.fftKernel.complexTo = null;
+
+    this.poissonKernel.outPotentialSpectrum = this.fftKernel.complexFrom;
+    this.fftKernel.complexFrom = null;
+
     this.poissonKernel.run();
 
-    // Step 4: Compute gradient (reads potentialSpectrum, writes to forceSpectrum X/Y/Z)
+
+    // Gradient: potentialSpectrum from Poisson's outPotentialSpectrum → writes to its own forceSpectrum X/Y/Z
     this.gradientKernel.inPotentialSpectrum = this.poissonKernel.outPotentialSpectrum;
+    this.poissonKernel.outPotentialSpectrum = null;
+
     this.gradientKernel.run();
 
-    // Step 5: Inverse FFT for each force component
+
+
+    ///////////////////////////////////////////////////////////////////////////
+    // REVERSE
+
     this.fftKernel.inverse = true;
 
-    // 5a: Inverse FFT X (forceSpectrumX → real)
+    //  Inverse FFT/X: gradient's forceSpectrumX, plus gradient's inPotentialSpectrum that's now scratch → real
     this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumX;
+    this.gradientKernel.outForceSpectrumX = null;
+
+    this.fftKernel.complexTo = this.gradientKernel.inPotentialSpectrum;
+    this.gradientKernel.inPotentialSpectrum = null;
+
     this.fftKernel.real = this.forceGridXTexture;
     this.fftKernel.run();
 
-    // 5b: Inverse FFT Y (forceSpectrumY → real)
+    this.gradientKernel.outForceSpectrumX = this.fftKernel.complexFrom;
+    this.fftKernel.complexFrom = null; // returned
+
+    // Inverse FFT/Y: gradient's forceSpectrumY (scratch already there) → real
     this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumY;
+    this.gradientKernel.outForceSpectrumY = null;
+
     this.fftKernel.real = this.forceGridYTexture;
     this.fftKernel.run();
 
-    // 5c: Inverse FFT Z (forceSpectrumZ → real)
+    this.gradientKernel.outForceSpectrumY = this.fftKernel.complexFrom;
+    this.fftKernel.complexFrom = null; // returned
+
+    // Inverse FFT/Z: gradient's forceSpectrumZ (scratch already there) → real
     this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumZ;
+    this.gradientKernel.outForceSpectrumZ = null;
+
     this.fftKernel.real = this.forceGridZTexture;
     this.fftKernel.run();
 
-    // Restore original real texture for next frame
-    this.fftKernel.real = this.massGridTexture;
+    this.gradientKernel.outForceSpectrumZ = this.fftKernel.complexFrom;
+    this.fftKernel.complexFrom = this.poissonKernel.inDensitySpectrum; // finally reclaiming from Poisson
+    this.poissonKernel.inDensitySpectrum = null;
 
-    // Step 6: Sample forces at particle positions
+
+    // Sampling forces
     this.forceSampleKernel.inForceGridX = this.forceGridXTexture;
     this.forceSampleKernel.inForceGridY = this.forceGridYTexture;
     this.forceSampleKernel.inForceGridZ = this.forceGridZTexture;
