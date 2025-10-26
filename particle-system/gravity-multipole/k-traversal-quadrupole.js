@@ -137,6 +137,72 @@ export class KTraversalQuadrupole {
    * @param {{pixels?: boolean}} [options] - Capture options
    */
   valueOf({ pixels } = {}) {
+    const gl = this.gl;
+    
+    // Helper: Read a single layer from a texture array
+    /**
+     * @param {WebGLTexture|null} textureArray
+     * @param {number} layer
+     * @param {number} size
+     */
+    const readTextureArrayLayer = (textureArray, layer, size) => {
+      if (!textureArray) return null;
+      
+      const fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, textureArray, 0, layer);
+      
+      const buffer = new Float32Array(size * size * 4);
+      gl.readPixels(0, 0, size, size, gl.RGBA, gl.FLOAT, buffer);
+      
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(fb);
+      
+      // Compute statistics
+      let nonZeroCount = 0;
+      let maxMass = 0;
+      let totalMass = 0;
+      const masses = [];
+      
+      for (let i = 0; i < buffer.length; i += 4) {
+        const mass = buffer[i + 3];
+        if (mass > 1e-10) {
+          nonZeroCount++;
+          maxMass = Math.max(maxMass, mass);
+          totalMass += mass;
+          masses.push(mass);
+        }
+      }
+      
+      return {
+        size,
+        layer,
+        nonZeroCount,
+        maxMass,
+        totalMass,
+        avgMass: nonZeroCount > 0 ? totalMass / nonZeroCount : 0,
+        voxelCount: size * size * size,
+        toString: () => `Layer${layer} ${size}³: ${nonZeroCount}/${size * size * size} occupied, mass=[${maxMass.toFixed(3)}max ${(totalMass / nonZeroCount || 0).toFixed(3)}avg]`
+      };
+    };
+    
+    // Read all levels from texture arrays
+    /** @type {Array<ReturnType<typeof readTextureArrayLayer>>} */
+    const levelTextureArrayA0 = [];
+    /** @type {Array<ReturnType<typeof readTextureArrayLayer>>} */
+    const levelTextureArrayA1 = [];
+    /** @type {Array<ReturnType<typeof readTextureArrayLayer>>} */
+    const levelTextureArrayA2 = [];
+    
+    for (let i = 0; i < this.numLevels; i++) {
+      const config = this.levelConfigs[i];
+      if (!config) continue;
+      
+      levelTextureArrayA0[i] = readTextureArrayLayer(this.inLevelsA0, i, config.size);
+      levelTextureArrayA1[i] = readTextureArrayLayer(this.inLevelsA1, i, config.size);
+      levelTextureArrayA2[i] = readTextureArrayLayer(this.inLevelsA2, i, config.size);
+    }
+    
     const value = {
       position: this.inPosition && readLinear({
         gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
@@ -152,10 +218,9 @@ export class KTraversalQuadrupole {
         gl: this.gl, texture: this.inBounds, width: 2, height: 1, count: 2,
         channels: ['x', 'y', 'z', 'w'], pixels
       }),
-      hasLevelsA0: this.inLevelsA0 !== null,
-      hasLevelsA1: this.inLevelsA1 !== null,
-      hasLevelsA2: this.inLevelsA2 !== null,
-      hasOccupancy: this.inOccupancy !== null,
+      levelTextureArrayA0,
+      levelTextureArrayA1,
+      levelTextureArrayA2,
       particleTexWidth: this.particleTexWidth,
       particleTexHeight: this.particleTexHeight,
       numLevels: this.numLevels,
@@ -168,8 +233,14 @@ export class KTraversalQuadrupole {
     };
     
     // Compute total force magnitude
+    // @ts-ignore - dynamic properties from readLinear
     const totalForce = value.force?.fx ? 
+      // @ts-ignore
       Math.sqrt(value.force.fx.mean ** 2 + value.force.fy.mean ** 2 + value.force.fz.mean ** 2) : 0;
+    
+    // Format texture array layer summaries
+    /** @param {Array<ReturnType<typeof readTextureArrayLayer>>} arr */
+    const formatLevels = (arr) => arr.map(l => l ? l.toString() : 'null').join('\n  ');
     
     value.toString = () =>
 `KTraversalQuadrupole(${this.particleTexWidth}×${this.particleTexHeight}) theta=${this.theta} G=${this.gravityStrength} soft=${this.softening} levels=${this.numLevels} occupancy=${this.useOccupancyMasks} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
@@ -180,7 +251,14 @@ bounds: ${value.bounds}
 
 force: ${value.force ? `totalForceMag=${formatNumber(totalForce)} ` : ''}${value.force}
 
-levels: A0=${value.hasLevelsA0} A1=${value.hasLevelsA1} A2=${value.hasLevelsA2} occupancy=${value.hasOccupancy}`;
+levelTextureArrayA0 (monopole):
+  ${formatLevels(levelTextureArrayA0)}
+
+levelTextureArrayA1 (quadrupole xx,yy,zz,xy):
+  ${formatLevels(levelTextureArrayA1)}
+
+levelTextureArrayA2 (quadrupole xz,yz):
+  ${formatLevels(levelTextureArrayA2)}`;
     
     return value;
   }
@@ -489,17 +567,14 @@ void main() {
           vec3 r = myPos - com;
           float dist = length(r);
           
-          // MAC: use cell if far enough, OR if it's my own voxel (always refine)
-          bool farEnough = (cellSize / (dist + eps)) < u_theta;
+          // Skip if this is my own voxel (handled at finer levels or ignored)
           bool isMyVoxel = (testVoxel.x == myVoxel.x && testVoxel.y == myVoxel.y && testVoxel.z == myVoxel.z);
+          if (isMyVoxel) continue;
           
-          if (!farEnough && !isMyVoxel) {
+          // MAC: check if cell is far enough to use approximation
+          bool farEnough = (cellSize / (dist + eps)) < u_theta;
+          if (!farEnough) {
             // Too close for approximation, will be refined at next level
-            continue;
-          }
-          
-          if (isMyVoxel) {
-            // Skip self-voxel (handled at finer level or direct summation)
             continue;
           }
           

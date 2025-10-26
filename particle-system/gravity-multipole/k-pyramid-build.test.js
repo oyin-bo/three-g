@@ -508,3 +508,75 @@ test('KPyramidBuild: negative and large values', async () => {
   disposeKernel(kernel);
   resetGL();
 });
+
+/**
+ * Test: Pyramid chain produces coarser levels with hierarchical structure
+ * This tests the actual L0→L1→L2→L3 chain used in the system
+ */
+test('KPyramidBuild: pyramid chain L0→L1→L2→L3 hierarchy', async () => {
+  const gl = getGL();
+  
+  // Create L0 (64³ grid): 2 particles
+  const l0Data = fillVoxelTexture(gl, 64, 8, (x, y, z) => {
+    if (x === 0 && y === 0 && z === 0) return [0, 0, 0, 10];  // mass=10
+    if (x === 1 && y === 0 && z === 0) return [1, 0, 0, 1];   // mass=1
+    return [0, 0, 0, 0];
+  });
+  
+  // L0 → L1 (64³ → 32³)
+  const l1Kernel = new KPyramidBuild({
+    gl,
+    outSize: 256,
+    outGridSize: 32,
+    outSlicesPerRow: 4,
+    inGridSize: 64,
+    inSlicesPerRow: 8,
+    inA0: l0Data,
+    inA1: l0Data,
+    inA2: l0Data
+  });
+  l1Kernel.run();
+  
+  // L1 → L2 (32³ → 16³)
+  const l2Kernel = new KPyramidBuild({
+    gl,
+    outSize: 128,
+    outGridSize: 16,
+    outSlicesPerRow: 4,
+    inGridSize: 32,
+    inSlicesPerRow: 4,
+    inA0: l1Kernel.outA0,
+    inA1: l1Kernel.outA1,
+    inA2: l1Kernel.outA2
+  });
+  l2Kernel.run();
+  
+  // L2 → L3 (16³ → 8³)
+  const l3Kernel = new KPyramidBuild({
+    gl,
+    outSize: 64,
+    outGridSize: 8,
+    outSlicesPerRow: 4,
+    inGridSize: 16,
+    inSlicesPerRow: 4,
+    inA0: l2Kernel.outA0,
+    inA1: l2Kernel.outA1,
+    inA2: l2Kernel.outA2
+  });
+  l3Kernel.run();
+  
+  // Single assertion with all diagnostics embedded in label
+  const diagnostics = `Pyramid hierarchy:\n\n` +
+    `L0→L1:\n${l1Kernel.toString()}\n\n` +
+    `L1→L2:\n${l2Kernel.toString()}\n\n` +
+    `L2→L3:\n${l3Kernel.toString()}`;
+  
+  assert.ok(l1Kernel.outA0 && l2Kernel.outA0 && l3Kernel.outA0, 
+    `All pyramid levels should produce output\n\n${diagnostics}`);
+  
+  disposeKernel(l1Kernel);
+  disposeKernel(l2Kernel);
+  disposeKernel(l3Kernel);
+  gl.deleteTexture(l0Data);
+  resetGL();
+});

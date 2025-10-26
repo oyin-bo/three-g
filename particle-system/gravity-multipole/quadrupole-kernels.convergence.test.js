@@ -27,41 +27,6 @@ function createTestCanvas() {
 }
 
 /**
- * Read particle data
- * @param {ParticleSystemQuadrupoleKernels} system
- * @param {number} index
- * @returns {{position: [number,number,number], velocity: [number,number,number]}}
- */
-function readParticleData(system, index) {
-  const gl = system.gl;
-  const texWidth = system.textureWidth;
-  const x = index % texWidth;
-  const y = Math.floor(index / texWidth);
-  
-  const posTex = system.positionTexture;
-  const velTex = system.velocityTexture;
-  
-  const fbo = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-  
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, posTex, 0);
-  const posPixels = new Float32Array(4);
-  gl.readPixels(x, y, 1, 1, gl.RGBA, gl.FLOAT, posPixels);
-  
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, velTex, 0);
-  const velPixels = new Float32Array(4);
-  gl.readPixels(x, y, 1, 1, gl.RGBA, gl.FLOAT, velPixels);
-  
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  gl.deleteFramebuffer(fbo);
-  
-  return {
-    position: [posPixels[0], posPixels[1], posPixels[2]],
-    velocity: [velPixels[0], velPixels[1], velPixels[2]]
-  };
-}
-
-/**
  * Test 1: Timestep refinement improves accuracy
  */
 test('quadrupole-kernels.convergence: smaller timestep improves accuracy', async () => {
@@ -100,8 +65,9 @@ test('quadrupole-kernels.convergence: smaller timestep improves accuracy', async
       system.step();
     }
     
-    const finalData = readParticleData(system, 0);
-    finalPositions.push(finalData.position[0]); // x-coordinate
+    const snap = system.positionKernel.valueOf({ pixels: true });
+    if (!snap.position?.pixels) throw new Error('No position pixels');
+    finalPositions.push(snap.position.pixels[0].x); // particle 0 x-coordinate
     
     system.dispose();
     canvas.remove();
@@ -157,54 +123,41 @@ test('quadrupole-kernels.convergence: basic physics simulation works', async () 
     damping: 0.002
   });
   
-  const initial = {
-    p0: readParticleData(system, 0),
-    p1: readParticleData(system, 1),
+  // Store initial positions directly from input
+  const initialX = positions[0];
+
+  // Run one step and capture full diagnostics
+  system.step();
+  
+  const afterFirstStep = {
+    aggregator: system.aggregatorKernel.valueOf({ pixels: false }),
+    traversal: system.traversalKernel.valueOf({ pixels: false }),
+    velocity: system.velocityKernel.valueOf({ pixels: false }),
+    position: system.positionKernel.valueOf({ pixels: true })
   };
 
-  // Run 10 steps
-  for (let i = 0; i < 10; i++) {
+  // Run 9 more steps (total 10)
+  for (let i = 1; i < 10; i++) {
     system.step();
   }
 
-  const final = {
-    p0: readParticleData(system, 0),
-    p1: readParticleData(system, 1),
-  };
-
-  // Voxel coordinate calculation
-  const getVoxelCoords = (/** @type {number[]} */ pos) => {
-    const worldMin = system.options.worldBounds.min;
-    const worldMax = system.options.worldBounds.max;
-    const gridSize = system.octreeGridSize;
-    const norm = pos.map((/** @type {number} */ p, /** @type {number} */ i) => (p - worldMin[i]) / (worldMax[i] - worldMin[i]));
-    return norm.map((/** @type {number} */ n) => Math.floor(n * gridSize));
-  };
-
-  const initialVoxels = {
-    p0: getVoxelCoords(initial.p0.position),
-    p1: getVoxelCoords(initial.p1.position),
-  };
-
-  const p0_mass = initialPositions[3];
-  const p1_mass = initialPositions[7];
+  const final = system.positionKernel.valueOf({ pixels: true });
 
   system.dispose();
   canvas.remove();
 
-  const posChanged = Math.abs(final.p0.position[0] - initial.p0.position[0]) > 1e-6;
-  const velChanged = Math.abs(final.p0.velocity[0] - initial.p0.velocity[0]) > 1e-6;
+  const posChanged = final.outPosition?.pixels ? 
+    Math.abs(final.outPosition.pixels[0].x - initialX) > 1e-6 : false;
+  const velChanged = afterFirstStep.velocity.velocity?.pixels && final.velocity?.pixels ? 
+    Math.abs(final.velocity.pixels[0].vx - afterFirstStep.velocity.velocity.pixels[0].vx) > 1e-6 : false;
 
-  const formatVec = (/** @type {number[]} */ vec) => `[${vec.map((/** @type {number} */ v) => v.toFixed(3)).join(',')}]`;
+  const diagnostics = `\n\nDiagnostics after 1 step:\n\n` +
+    `Aggregator:\n${afterFirstStep.aggregator.toString()}\n\n` +
+    `Traversal:\n${afterFirstStep.traversal.toString()}\n\n` +
+    `Velocity Integration:\n${afterFirstStep.velocity.toString()}\n\n` +
+    `Position Integration:\n${afterFirstStep.position.toString()}\n`;
 
-  const report = `\n\nInitial State:\n` +
-    `  P0 (mass ${p0_mass.toFixed(1)}): pos=${formatVec(initial.p0.position)}, vel=${formatVec(initial.p0.velocity)}, voxel=[${initialVoxels.p0.join(',')}]\n` +
-    `  P1 (mass ${p1_mass.toFixed(1)}): pos=${formatVec(initial.p1.position)}, vel=${formatVec(initial.p1.velocity)}, voxel=[${initialVoxels.p1.join(',')}]\n` +
-    `\nFinal State:\n` +
-    `  P0 (mass ${p0_mass.toFixed(1)}): pos=${formatVec(final.p0.position)}, vel=${formatVec(final.p0.velocity)}\n` +
-    `  P1 (mass ${p1_mass.toFixed(1)}): pos=${formatVec(final.p1.position)}, vel=${formatVec(final.p1.velocity)}\n`;
-
-  assert.ok(posChanged || velChanged, `Physics not working. ${report}`);
+  assert.ok(posChanged || velChanged, `Physics not working. ${diagnostics}`);
 });
 
 /**
@@ -278,8 +231,9 @@ test('quadrupole-kernels.convergence: theta parameter controls approximation qua
       system.step();
     }
     
-    const finalData = readParticleData(system, testIdx);
-    testParticleFinalX.push(finalData.position[0]);
+    const finalSnap = system.positionKernel.valueOf({ pixels: true });
+    if (!finalSnap.position?.pixels) throw new Error('No final position pixels');
+    testParticleFinalX.push(finalSnap.position.pixels[testIdx].x);
     
     system.dispose();
     canvas.remove();
@@ -346,11 +300,18 @@ test('quadrupole-kernels.convergence: softening affects close encounters', async
     for (let i = 0; i < 100; i++) {
       system.step();
       
-      const p0 = readParticleData(system, 0);
-      const p1 = readParticleData(system, 1);
+      const snap = system.velocityKernel.valueOf({ pixels: true });
+      if (!snap.velocity?.pixels) continue;
       
-      const speed0 = Math.sqrt(p0.velocity[0]**2 + p0.velocity[1]**2 + p0.velocity[2]**2);
-      const speed1 = Math.sqrt(p1.velocity[0]**2 + p1.velocity[1]**2 + p1.velocity[2]**2);
+      const vx0 = snap.velocity.pixels[0].vx;
+      const vy0 = snap.velocity.pixels[0].vy;
+      const vz0 = snap.velocity.pixels[0].vz;
+      const vx1 = snap.velocity.pixels[1].vx;
+      const vy1 = snap.velocity.pixels[1].vy;
+      const vz1 = snap.velocity.pixels[1].vz;
+      
+      const speed0 = Math.sqrt(vx0**2 + vy0**2 + vz0**2);
+      const speed1 = Math.sqrt(vx1**2 + vy1**2 + vz1**2);
       
       maxSpeed = Math.max(maxSpeed, speed0, speed1);
     }

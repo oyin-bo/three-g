@@ -143,9 +143,10 @@ export class ParticleSystemQuadrupoleKernels {
     }
 
     // Create texture arrays for all pyramid levels (A0, A1, A2)
-    // This reduces texture unit usage from 12 (4 levels × 3 moments) to 3
+    // Each layer has its own size from levelConfigs. We allocate with the max size
+    // to ensure all layers fit, but we must copy only the appropriate region per layer.
     const gl = this.gl;
-    const maxSize = this.L0Size; // Use L0 size for all layers for simplicity
+    const maxSize = this.L0Size; // Maximum size for array allocation
     
     // Create A0 array (monopole moments: Σ(m·x), Σ(m·y), Σ(m·z), Σm)
     this.levelTextureArrayA0 = gl.createTexture();
@@ -334,7 +335,15 @@ export class ParticleSystemQuadrupoleKernels {
    */
   _copyToArrayLayer(layer, kernel) {
     const gl = this.gl;
-    const size = this.levelConfigs[layer].size;
+    const config = this.levelConfigs[layer];
+    
+    // Compute the actual texture dimensions used by the kernel
+    // based on gridSize and slicesPerRow (NOT the flattened size)
+    const gridSize = config.gridSize;
+    const slicesPerRow = config.slicesPerRow;
+    const width = gridSize * slicesPerRow;
+    const sliceRows = Math.ceil(gridSize / slicesPerRow);
+    const height = gridSize * sliceRows;
     
     // Bind the kernel's output framebuffer for reading
     gl.bindFramebuffer(gl.FRAMEBUFFER, kernel.outFramebuffer);
@@ -342,17 +351,17 @@ export class ParticleSystemQuadrupoleKernels {
     // Copy COLOR_ATTACHMENT0 -> levelTextureArrayA0[layer]
     gl.readBuffer(gl.COLOR_ATTACHMENT0);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA0);
-    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, size, size);
+    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, width, height);
     
     // Copy COLOR_ATTACHMENT1 -> levelTextureArrayA1[layer]
     gl.readBuffer(gl.COLOR_ATTACHMENT1);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA1);
-    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, size, size);
+    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, width, height);
     
     // Copy COLOR_ATTACHMENT2 -> levelTextureArrayA2[layer]
     gl.readBuffer(gl.COLOR_ATTACHMENT2);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.levelTextureArrayA2);
-    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, size, size);
+    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, width, height);
     
     // Reset read buffer and unbind
     gl.readBuffer(gl.COLOR_ATTACHMENT0);
