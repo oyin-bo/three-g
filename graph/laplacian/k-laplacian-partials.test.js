@@ -1,9 +1,10 @@
 // @ts-check
 
-import { test } from 'node:test';
 import assert from 'node:assert';
+import { test } from 'node:test';
+
+import { assertAllFinite, assertClose, createTestTexture, getGL, readTexture, resetGL } from '../../gravity/test-utils.js';
 import { KLaplacianPartials } from './k-laplacian-partials.js';
-import { getGL, createTestTexture, readTexture, assertClose, assertAllFinite, resetGL } from '../test-utils.js';
 
 /**
  * Helper: create a 1×1 shard texture entry.
@@ -83,9 +84,9 @@ test('KLaplacianPartials: creates outPartials when not provided', async () => {
   assert.ok(kernel.outPartials, 'Kernel should allocate outPartials texture');
 
   kernel.run();
-  
+
   const snapshot = kernel.valueOf({ pixels: false });
-  assert.ok(snapshot.partials, 
+  assert.ok(snapshot.partials,
     `Out partials should be finite\n\n${kernel.toString()}`);
 
   kernel.dispose();
@@ -125,16 +126,16 @@ test('KLaplacianPartials: accumulates weighted neighbor positions', async () => 
   });
 
   kernel.run();
-  
+
   const snapshot = kernel.valueOf({ pixels: true });
 
-  assertClose(snapshot.partials.pixels[0].sumx, 2 * 1 + 3 * 0, 1e-5, 
+  assertClose(snapshot.partials.pixels[0].sumx, 2 * 1 + 3 * 0, 1e-5,
     `sumx should match expected\n\n${kernel.toString()}`);
-  assertClose(snapshot.partials.pixels[0].sumy, 2 * 0 + 3 * 1, 1e-5, 
+  assertClose(snapshot.partials.pixels[0].sumy, 2 * 0 + 3 * 1, 1e-5,
     `sumy should match expected\n\n${kernel.toString()}`);
-  assertClose(snapshot.partials.pixels[0].sumz, 0, 1e-5, 
+  assertClose(snapshot.partials.pixels[0].sumz, 0, 1e-5,
     `sumz should match expected\n\n${kernel.toString()}`);
-  assertClose(snapshot.partials.pixels[0].w, 5, 1e-5, 
+  assertClose(snapshot.partials.pixels[0].w, 5, 1e-5,
     `weight sum should match expected\n\n${kernel.toString()}`);
 
   kernel.dispose();

@@ -1,5 +1,7 @@
 // @ts-check
 
+import { formatNumber, readLinear } from '../../gravity/diag.js';
+
 /**
  * KLaplacianFinish - final Laplacian force assembly pass.
  *
@@ -7,9 +9,6 @@
  * Uses additive blending by default so multiple force contributors may
  * accumulate into the same render target.
  */
-
-import { readLinear, formatNumber } from '../diag.js';
-
 export class KLaplacianFinish {
   /**
    * @param {{
@@ -81,7 +80,7 @@ export class KLaplacianFinish {
       /** @type {WebGLUniformLocation|null} */ uK: this.gl.getUniformLocation(this.program, 'uK')
     };
   }
-  
+
   /**
    * Capture complete computational state for debugging and testing
    * @param {{pixels?: boolean}} [options] - Capture options
@@ -114,13 +113,13 @@ export class KLaplacianFinish {
       enableBlend: this.enableBlend,
       renderCount: this.renderCount
     };
-    
+
     // Compute total force magnitude
-    const totalForce = value.force?.fx ? 
+    const totalForce = value.force?.fx ?
       Math.sqrt(value.force.fx.mean ** 2 + value.force.fy.mean ** 2 + value.force.fz.mean ** 2) : 0;
-    
+
     value.toString = () =>
-`KLaplacianFinish(${this.forceWidth}×${this.forceHeight}) springK=${formatNumber(this.springK)} blend=${this.enableBlend} #${this.renderCount}
+      `KLaplacianFinish(${this.forceWidth}×${this.forceHeight}) springK=${formatNumber(this.springK)} blend=${this.enableBlend} #${this.renderCount}
 
 ax: ${value.ax}
 
@@ -129,10 +128,10 @@ deg: ${value.deg}
 position: ${value.position}
 
 → force: ${value.force ? `totalForceMag=${formatNumber(totalForce)} ` : ''}${value.force}`;
-    
+
     return value;
   }
-  
+
   /**
    * Get human-readable string representation of kernel state
    * @returns {string} Compact summary
@@ -189,7 +188,7 @@ position: ${value.position}
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.disable(gl.BLEND);
-    
+
     this.renderCount = (this.renderCount || 0) + 1;
   }
 

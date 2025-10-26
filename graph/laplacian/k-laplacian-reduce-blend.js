@@ -1,5 +1,7 @@
 // @ts-check
 
+import { readLinear } from '../../gravity/diag.js';
+
 /**
  * KLaplacianReduceBlend - accumulate shard partials into per-particle totals.
  *
@@ -7,8 +9,6 @@
  * additive blending into the outAx texture. Implements the kernel contract
  * from docs/8-webgl-kernels.md.
  */
-
-import { readLinear, formatNumber } from '../diag.js';
 
 export class KLaplacianReduceBlend {
   /**
@@ -88,7 +88,7 @@ export class KLaplacianReduceBlend {
       /** @type {WebGLUniformLocation|null} */ uAxSize: this.gl.getUniformLocation(this.program, 'uAxSize')
     };
   }
-  
+
   /**
    * Capture complete computational state for debugging and testing
    * @param {{pixels?: boolean}} [options] - Capture options
@@ -115,19 +115,19 @@ export class KLaplacianReduceBlend {
       shardCount: this.shardCount,
       renderCount: this.renderCount
     };
-    
+
     value.toString = () =>
-`KLaplacianReduceBlend(${this.axWidth}×${this.axHeight}) shards=${this.shardCount} #${this.renderCount}
+      `KLaplacianReduceBlend(${this.axWidth}×${this.axHeight}) shards=${this.shardCount} #${this.renderCount}
 
 partials: ${value.partials}
 
 shards: ${value.shards}
 
 → ax: ${value.ax}`;
-    
+
     return value;
   }
-  
+
   /**
    * Get human-readable string representation of kernel state
    * @returns {string} Compact summary
@@ -175,7 +175,7 @@ shards: ${value.shards}
 
     gl.disable(gl.BLEND);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    
+
     this.renderCount = (this.renderCount || 0) + 1;
   }
 

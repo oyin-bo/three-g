@@ -1,9 +1,10 @@
 // @ts-check
 
-import { test } from 'node:test';
 import assert from 'node:assert';
+import { test } from 'node:test';
+
+import { assertAllFinite, assertClose, createTestTexture, getGL, readTexture, resetGL } from '../../gravity/test-utils.js';
 import { GraphLaplacian } from './graph-laplacian.js';
-import { getGL, createTestTexture, readTexture, assertClose, assertAllFinite, resetGL } from '../gravity/test-utils.js';
 
 /**
  * Helper: create RGBA32F texture storing vec3 data + w channel.

@@ -1,9 +1,10 @@
 // @ts-check
 
-import { test } from 'node:test';
 import assert from 'node:assert';
+import { test } from 'node:test';
+
+import { assertClose, createTestTexture, getGL, resetGL } from '../../gravity/test-utils.js';
 import { KLaplacianFinish } from './k-laplacian-finish.js';
-import { getGL, createTestTexture, readTexture, assertClose, assertAllFinite, resetGL } from '../test-utils.js';
 
 /**
  * Helper: create scalar data texture in R channel.
@@ -69,9 +70,9 @@ test('KLaplacianFinish: allocates outForce when not provided', async () => {
   assert.ok(kernel.outForceFramebuffer, 'Kernel should allocate framebuffer');
 
   kernel.run();
-  
+
   const snapshot = kernel.valueOf({ pixels: false });
-  assert.ok(snapshot.force, 
+  assert.ok(snapshot.force,
     `Force texture should be finite\n\n${kernel.toString()}`);
 
   kernel.dispose();
@@ -115,14 +116,14 @@ test('KLaplacianFinish: computes Laplacian force contribution', async () => {
   });
 
   kernel.run();
-  
+
   const snapshot = kernel.valueOf({ pixels: true });
 
-  assertClose(snapshot.force.pixels[0].fx, 0, 1e-5, 
+  assertClose(snapshot.force.pixels[0].fx, 0, 1e-5,
     `Force X should be computed correctly\n\n${kernel.toString()}`);
-  assertClose(snapshot.force.pixels[0].fy, 2, 1e-5, 
+  assertClose(snapshot.force.pixels[0].fy, 2, 1e-5,
     `Force Y should be computed correctly\n\n${kernel.toString()}`);
-  assertClose(snapshot.force.pixels[0].fz, 4, 1e-5, 
+  assertClose(snapshot.force.pixels[0].fz, 4, 1e-5,
     `Force Z should be computed correctly\n\n${kernel.toString()}`);
 
   kernel.dispose();

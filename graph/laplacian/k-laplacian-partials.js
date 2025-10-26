@@ -1,5 +1,7 @@
 // @ts-check
 
+import { formatNumber, readLinear } from '../../gravity/diag.js';
+
 /**
  * KLaplacianPartials - computes shard partial sums for Laplacian force assembly.
  *
@@ -7,9 +9,6 @@
  * Runs a fullscreen pass that gathers neighbor contributions for each shard
  * into an intermediate RGBA texture: RGB = weighted position sum, A = weight sum.
  */
-
-import { readLinear, formatNumber } from '../diag.js';
-
 export class KLaplacianPartials {
   /**
    * @param {{
@@ -90,7 +89,7 @@ export class KLaplacianPartials {
       /** @type {WebGLUniformLocation|null} */ uShardBlockSize: this.gl.getUniformLocation(this.program, 'uShardBlockSize')
     };
   }
-  
+
   /**
    * Capture complete computational state for debugging and testing
    * @param {{pixels?: boolean}} [options] - Capture options
@@ -127,9 +126,9 @@ export class KLaplacianPartials {
       shardBlockSize: this.shardBlockSize,
       renderCount: this.renderCount
     };
-    
+
     value.toString = () =>
-`KLaplacianPartials(${this.partialsWidth}×${this.partialsHeight}) shardBlock=${this.shardBlockSize} #${this.renderCount}
+      `KLaplacianPartials(${this.partialsWidth}×${this.partialsHeight}) shardBlock=${this.shardBlockSize} #${this.renderCount}
 
 shards: ${value.shards}
 
@@ -140,10 +139,10 @@ weight: ${value.weight}
 position: ${value.position}
 
 → partials: ${value.partials}`;
-    
+
     return value;
   }
-  
+
   /**
    * Get human-readable string representation of kernel state
    * @returns {string} Compact summary
@@ -184,21 +183,21 @@ position: ${value.position}
     if (this.uniforms.uShardSize)
       gl.uniform2i(
         this.uniforms.uShardSize,
-      this.shardTextureWidth,
-      this.shardTextureHeight
-    );
+        this.shardTextureWidth,
+        this.shardTextureHeight
+      );
     if (this.uniforms.uColIdxSize)
       gl.uniform2i(
         this.uniforms.uColIdxSize,
-      this.colTextureWidth,
-      this.colTextureHeight
-    );
+        this.colTextureWidth,
+        this.colTextureHeight
+      );
     if (this.uniforms.uPosSize)
       gl.uniform2i(
         this.uniforms.uPosSize,
-      this.positionTextureWidth,
-      this.positionTextureHeight
-    );
+        this.positionTextureWidth,
+        this.positionTextureHeight
+      );
     if (this.uniforms.uShardBlockSize)
       gl.uniform1i(this.uniforms.uShardBlockSize, this.shardBlockSize);
 
@@ -207,7 +206,7 @@ position: ${value.position}
     gl.bindVertexArray(null);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    
+
     this.renderCount = (this.renderCount || 0) + 1;
   }
 

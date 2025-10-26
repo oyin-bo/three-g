@@ -8,9 +8,9 @@
  * uploads textures, and wires kernel passes to accumulate spring forces.
  */
 
+import { KLaplacianFinish } from './k-laplacian-finish.js';
 import { KLaplacianPartials } from './k-laplacian-partials.js';
 import { KLaplacianReduceBlend } from './k-laplacian-reduce-blend.js';
-import { KLaplacianFinish } from './k-laplacian-finish.js';
 
 /**
  * @typedef {{from: number, to: number, strength: number}} LaplacianEdge

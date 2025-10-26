@@ -2,8 +2,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert';
+
 import { KLaplacianReduceBlend } from './k-laplacian-reduce-blend.js';
-import { getGL, createTestTexture, readTexture, assertAllFinite, resetGL } from '../test-utils.js';
+import { getGL, createTestTexture, resetGL } from '../../gravity/test-utils.js';
 
 /**
  * Helper: create shard metadata texture (RGBA32F) with entries [{nodeId, start, len, pad}, ...].
