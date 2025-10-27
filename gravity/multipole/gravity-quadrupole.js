@@ -58,7 +58,6 @@ export class GravityQuadrupole {
       useOccupancyMasks: options.useOccupancyMasks !== undefined ? options.useOccupancyMasks : false
     };
 
-    this.particleData = options.particleData;
     this.frameCount = 0;
 
     // Bounds update scheduling
@@ -106,7 +105,7 @@ export class GravityQuadrupole {
     this.velocityTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
 
     // Upload particle data
-    const { positions, velocities } = this.particleData;
+    const { positions, velocities } = options.particleData;
 
     const expectedLength = this.actualTextureSize * 4;
     if (positions.length !== expectedLength)

@@ -41,7 +41,7 @@ import { GravityMesh } from './mesh/gravity-mesh.js';
  *   }
  * }} options
  */
-export function particleSystemKernels(options) {
+export function particleSystem(options) {
   const {
     gl,
     particles,
@@ -217,7 +217,7 @@ export function unloadKernelParticleData({ system }) {
 
 /**
  * Convert particle objects into packed Float32Array/Uint8Array buffers ready for GPU upload.
- * @param {Pick<Parameters<typeof particleSystemKernels>[0], 'particles' | 'get'>} _
+ * @param {Pick<Parameters<typeof particleSystem>[0], 'particles' | 'get'>} _
  */
 function prepareParticleData({ particles, get }) {
   const particleCount = particles.length;

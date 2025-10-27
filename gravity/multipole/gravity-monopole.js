@@ -12,6 +12,7 @@ import { KIntegratePosition } from './k-integrate-position.js';
 import { KAggregatorMonopole } from './k-aggregator-monopole.js';
 import { KPyramidBuild } from './k-pyramid-build.js';
 import { KTraversal } from './k-traversal.js';
+import { KBoundsReduce } from './k-bounds-reduce.js';
 
 export class GravityMonopole {
   /**
@@ -37,9 +38,9 @@ export class GravityMonopole {
 
     const particleCount = options.particleData.positions.length / 4;
 
+    this.worldBounds = options.worldBounds || { min: [-4, -4, -4], max: [4, 4, 4] };
     this.options = {
       particleCount,
-      worldBounds: options.worldBounds || { min: [-4, -4, 0], max: [4, 4, 2] },
       theta: options.theta || 0.5,
       dt: options.dt || 1 / 60,
       gravityStrength: options.gravityStrength || 0.0003,
@@ -49,8 +50,11 @@ export class GravityMonopole {
       maxAccel: options.maxAccel || 1.0
     };
 
-    this.particleData = options.particleData;
     this.frameCount = 0;
+
+    // Bounds update scheduling
+    this.boundsUpdateInterval = 90;  // Update bounds every 90 frames (1.5 seconds at 60fps)
+    this.lastBoundsUpdateFrame = -this.boundsUpdateInterval;  // Force initial update
 
     // Calculate texture dimensions
     this.textureWidth = Math.ceil(Math.sqrt(particleCount));
@@ -91,7 +95,7 @@ export class GravityMonopole {
 
 
     // Upload particle data
-    const { positions, velocities } = this.particleData;
+    const { positions, velocities } = options.particleData;
 
     const expectedLength = this.actualTextureSize * 4;
     if (positions.length !== expectedLength) {
@@ -157,7 +161,7 @@ export class GravityMonopole {
       octreeSize: this.L0Size,
       gridSize: this.octreeGridSize,
       slicesPerRow: this.octreeSlicesPerRow,
-      worldBounds: this.options.worldBounds,
+      worldBounds: this.worldBounds,
       disableFloatBlend: this.disableFloatBlend
     });
 
@@ -192,7 +196,7 @@ export class GravityMonopole {
       particleTexHeight: this.textureHeight,
       numLevels: this.numLevels,
       levelConfigs: this.levelConfigs,
-      worldBounds: this.options.worldBounds,
+      worldBounds: this.worldBounds,
       theta: this.options.theta,
       gravityStrength: this.options.gravityStrength,
       softening: this.options.softening
@@ -224,12 +228,32 @@ export class GravityMonopole {
       height: this.textureHeight,
       dt: this.options.dt
     });
+
+    // Create bounds reduction kernel for GPU-resident dynamic bounds updates
+    this.boundsKernel = new KBoundsReduce({
+      gl: this.gl,
+      inPosition: null,  // set per-run
+      particleTexWidth: this.textureWidth,
+      particleTexHeight: this.textureHeight,
+      particleCount: this.options.particleCount
+    });
+
+    // Create reusable resources for bounds readback (hot path - no alloc/dealloc per frame)
+    this.boundsReadbackBuffer = new Float32Array(8);
+    this.boundsReadbackFBO = this.gl.createFramebuffer();
   }
 
   /**
    * Step the simulation forward one frame
    */
   step() {
+    // 0. Update world bounds (scheduled every N frames)
+    const framesSinceLastUpdate = this.frameCount - this.lastBoundsUpdateFrame;
+    if (framesSinceLastUpdate >= this.boundsUpdateInterval) {
+      this._updateBounds();
+      this.lastBoundsUpdateFrame = this.frameCount;
+    }
+
     // 1. Build octree
     this._buildOctree();
 
@@ -317,6 +341,38 @@ export class GravityMonopole {
     }
   }
 
+  /**
+   * Update world bounds from GPU reduction
+   * Runs every boundsUpdateInterval frames to prevent particle escape.
+   * Direct minimal readback: reads 2×1 RGBA32F texture (8 floats = 32 bytes)
+   * Reuses pre-allocated FBO and buffer (no hot-path allocations)
+   */
+  _updateBounds() {
+    if (!this.boundsKernel || !this.boundsKernel.outBounds) return;
+    if (!this.positionTexture) return;
+
+    // Run bounds reduction kernel
+    this.boundsKernel.inPosition = this.positionTexture;
+    this.boundsKernel.run();
+
+    // Reuse pre-allocated FBO
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.boundsReadbackFBO);
+    this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, this.boundsKernel.outBounds, 0);
+
+    // Direct readback: 2×1 pixels, RGBA32F into pre-allocated buffer
+    this.gl.readPixels(0, 0, 2, 1, this.gl.RGBA, this.gl.FLOAT, this.boundsReadbackBuffer);
+
+    // Unbind FBO
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+
+    this.worldBounds.min[0] = this.boundsReadbackBuffer[0];
+    this.worldBounds.min[1] = this.boundsReadbackBuffer[1];
+    this.worldBounds.min[2] = this.boundsReadbackBuffer[2];
+    this.worldBounds.max[0] = this.boundsReadbackBuffer[4];
+    this.worldBounds.max[1] = this.boundsReadbackBuffer[5];
+    this.worldBounds.max[2] = this.boundsReadbackBuffer[6];
+  }
+
   dispose() {
     // Dispose kernels
     if (this.aggregatorKernel) this.aggregatorKernel.dispose();
@@ -324,7 +380,12 @@ export class GravityMonopole {
     if (this.traversalKernel) this.traversalKernel.dispose();
     if (this.velocityKernel) this.velocityKernel.dispose();
     if (this.positionKernel) this.positionKernel.dispose();
+    if (this.boundsKernel) this.boundsKernel.dispose();
 
+    // Clean up bounds readback resources
+    if (this.boundsReadbackFBO) {
+      this.gl.deleteFramebuffer(this.boundsReadbackFBO);
+    }
   }
 }
 

@@ -3,7 +3,7 @@
 import * as THREE from "three";
 import { createScene } from "three-pop";
 import { massSpotMesh } from "./mass-spot-mesh.js";
-import { particleSystemKernels, unloadKernelParticleData } from "./gravity/gravity.js";
+import { particleSystem, unloadKernelParticleData } from "./gravity/gravity.js";
 import { GraphLaplacian } from "./graph/laplacian/graph-laplacian.js";
 import { generateSocialGraph } from "./gravity/monolithic/utils/social-graph-generator.js";
 
@@ -110,7 +110,7 @@ function encodeRGBFromBounds(x, y, z, worldBounds) {
   return ((r & 0xff) << 16) | ((g & 0xff) << 8) | (b & 0xff);
 }
 
-/** @type {ReturnType<typeof particleSystemKernels> | null} */
+/** @type {ReturnType<typeof particleSystem> | null} */
 let physics = null;
 /** @type {ReturnType<typeof massSpotMesh> | null} */
 let m = null;
@@ -593,7 +593,7 @@ function recreatePhysicsAndMesh() {
   let system;
 
   try {
-    const kernelOptions = /** @type {Parameters<typeof particleSystemKernels>[0]} */ ({
+    const kernelOptions = /** @type {Parameters<typeof particleSystem>[0]} */ ({
       gl,
       particles,
       method: /** @type {'monopole' | 'quadrupole' | 'spectral' | 'mesh'} */ (calculationMethod),
@@ -602,7 +602,7 @@ function recreatePhysicsAndMesh() {
       dt: 10 / 60,
       damping: 0.006,
       worldBounds,
-      get: /** @type {NonNullable<Parameters<typeof particleSystemKernels>[0]['get']>} */ ((spot, out) => {
+      get: /** @type {NonNullable<Parameters<typeof particleSystem>[0]['get']>} */ ((spot, out) => {
         const sx = spot?.x ?? 0;
         const sy = spot?.y ?? 0;
         const sz = spot?.z ?? 0;
@@ -621,7 +621,7 @@ function recreatePhysicsAndMesh() {
       kernelOptions.theta = 0.7;
     }
 
-    system = particleSystemKernels(kernelOptions);
+    system = particleSystem(kernelOptions);
     console.log(`[Demo Kernels] Created kernel system: ${calculationMethod}`);
     // Record logical particle count provided to the kernel creator so we can
     // match it during future readbacks/unloads.
