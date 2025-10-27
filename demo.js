@@ -3,7 +3,7 @@
 import * as THREE from "three";
 import { createScene } from "three-pop";
 import { massSpotMesh } from "./mass-spot-mesh.js";
-import { particleSystemKernels } from "./gravity/gravity.js";
+import { particleSystemKernels, unloadKernelParticleData } from "./gravity/gravity.js";
 import { GraphLaplacian } from "./graph/laplacian/graph-laplacian.js";
 import { generateSocialGraph } from "./gravity/monolithic/utils/social-graph-generator.js";
 
@@ -41,27 +41,10 @@ camera.position.y = 1.1;
 document.body.appendChild(container);
 
 // 2. Get UI elements
-const countInput = /** @type {HTMLInputElement} */ (
-  document.getElementById("count-input")
-);
-const graphForceCheckbox = /** @type {HTMLInputElement} */ (
-  document.getElementById("graph-force-checkbox")
-);
-const monopoleRadio = /** @type {HTMLInputElement} */ (
-  document.getElementById("monopole-radio")
-);
-const quadrupoleRadio = /** @type {HTMLInputElement} */ (
-  document.getElementById("quadrupole-radio")
-);
-const spectralRadio = /** @type {HTMLInputElement} */ (
-  document.getElementById("spectral-radio")
-);
-const meshRadio = /** @type {HTMLInputElement} */ (
-  document.getElementById("mesh-radio")
-);
-const statusDiv = /** @type {HTMLDivElement} */ (
-  document.getElementById("kernel-status")
-);
+const [countInput, graphForceCheckbox, monopoleRadio, quadrupoleRadio, spectralRadio, meshRadio] =
+  ['count-input', 'graph-force-checkbox', 'monopole-radio', 'quadrupole-radio', 'spectral-radio', 'mesh-radio'].map(
+    id => /** @type {HTMLInputElement} */ (document.getElementById(id)));
+const statusDiv = /** @type {HTMLDivElement} */ (document.getElementById("kernel-status"));
 
 // 3. Initialize state
 const gl = /** @type {WebGL2RenderingContext} */ (renderer.getContext());
@@ -466,8 +449,17 @@ function recreateAll() {
   // active position/velocity textures directly (no external helpers).
   if (physics) {
     try {
-      const snap = captureParticleState(physics);
-      if (snap) previousParticleSnapshot = snap;
+      const snap = unloadKernelParticleData({ system: physics });
+      if (snap) {
+        previousParticleSnapshot = {
+          positions: snap.positions,
+          velocities: snap.velocities,
+          masses: snap.masses,
+          logicalCount: physics.options?.particleCount || physics.textureWidth * physics.textureHeight,
+          textureWidth: physics.textureWidth,
+          textureHeight: physics.textureHeight
+        };
+      }
     } catch (err) {
       console.warn('[Demo Kernels] Failed to capture particle state:', err);
     }
@@ -816,89 +808,5 @@ function buildColorTexture(gl, particles, textureSize, worldBounds) {
   return texture;
 }
 
-// Read back GPU particle textures (position, velocity) directly into CPU arrays.
-// Returns arrays sized to the previous logical particle count when available.
-/** @param {any} system */
-function captureParticleState(system) {
-  if (!system || !system.gl) return null;
-  const glCtx = system.gl;
 
-  const texW = system.textureWidth || (system.getTextureSize && system.getTextureSize().width) || 0;
-  const texH = system.textureHeight || (system.getTextureSize && system.getTextureSize().height) || 0;
-  if (!texW || !texH) return null;
 
-  const totalTexels = texW * texH;
-  const posBuf = new Float32Array(totalTexels * 4);
-  const velBuf = new Float32Array(totalTexels * 4);
-
-  const prevFB = glCtx.getParameter(glCtx.FRAMEBUFFER_BINDING);
-  const fb = glCtx.createFramebuffer();
-  if (!fb) throw new Error('Failed to allocate framebuffer for particle readback');
-
-  try {
-    glCtx.bindFramebuffer(glCtx.FRAMEBUFFER, fb);
-
-    // Read positions
-    glCtx.framebufferTexture2D(glCtx.FRAMEBUFFER, glCtx.COLOR_ATTACHMENT0, glCtx.TEXTURE_2D, system.positionTexture, 0);
-    glCtx.readPixels(0, 0, texW, texH, glCtx.RGBA, glCtx.FLOAT, posBuf);
-
-    // Read velocities
-    glCtx.framebufferTexture2D(glCtx.FRAMEBUFFER, glCtx.COLOR_ATTACHMENT0, glCtx.TEXTURE_2D, system.velocityTexture, 0);
-    glCtx.readPixels(0, 0, texW, texH, glCtx.RGBA, glCtx.FLOAT, velBuf);
-  } finally {
-    glCtx.bindFramebuffer(glCtx.FRAMEBUFFER, prevFB);
-    glCtx.deleteFramebuffer(fb);
-  }
-
-  if (!system.positionTexture || !system.velocityTexture) return null;
-
-  const logicalCount = system['__logicalParticleCount'] || (system.options && system.options.particleCount) || totalTexels;
-
-  const positions = new Float32Array(logicalCount * 3);
-  const velocities = new Float32Array(logicalCount * 3);
-  const masses = new Float32Array(logicalCount);
-
-  for (let i = 0; i < logicalCount; i++) {
-    const s = i * 4;
-    const d = i * 3;
-    positions[d + 0] = posBuf[s + 0];
-    positions[d + 1] = posBuf[s + 1];
-    positions[d + 2] = posBuf[s + 2];
-    masses[i] = posBuf[s + 3];
-
-    velocities[d + 0] = velBuf[s + 0];
-    velocities[d + 1] = velBuf[s + 1];
-    velocities[d + 2] = velBuf[s + 2];
-  }
-
-  return { positions, velocities, masses, logicalCount, textureWidth: texW, textureHeight: texH };
-}
-
-/**
- * Read back a color texture (RGBA8) into a Uint8Array.
- * @param {WebGL2RenderingContext} glctx
- * @param {WebGLTexture} texture
- * @param {number} width
- * @param {number} height
- * @returns {Uint8Array|null}
- */
-function captureColorTexture(glctx, texture, width, height) {
-  if (!glctx || !texture || !width || !height) return null;
-  const total = width * height;
-  const buf = new Uint8Array(total * 4);
-
-  const prevFB = glctx.getParameter(glctx.FRAMEBUFFER_BINDING);
-  const fb = glctx.createFramebuffer();
-  if (!fb) throw new Error('Failed to allocate framebuffer for color readback');
-
-  try {
-    glctx.bindFramebuffer(glctx.FRAMEBUFFER, fb);
-    glctx.framebufferTexture2D(glctx.FRAMEBUFFER, glctx.COLOR_ATTACHMENT0, glctx.TEXTURE_2D, texture, 0);
-    glctx.readPixels(0, 0, width, height, glctx.RGBA, glctx.UNSIGNED_BYTE, buf);
-  } finally {
-    glctx.bindFramebuffer(glctx.FRAMEBUFFER, prevFB);
-    glctx.deleteFramebuffer(fb);
-  }
-
-  return buf;
-}
