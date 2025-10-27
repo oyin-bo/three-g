@@ -255,7 +255,7 @@ A2 (quadrupole xz,yz): ${value.a2}`;
 
     // Draw particles as points
     gl.bindVertexArray(this.particleVAO);
-    gl.drawArrays(gl.POINTS, 0, this.particleCount);
+    gl.drawArrays(gl.POINTS, 0, this.particleCount); // TODO: support a limit here
     gl.bindVertexArray(null);
 
     // Cleanup

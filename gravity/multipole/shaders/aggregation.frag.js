@@ -11,6 +11,11 @@ layout(location = 1) out vec4 fragA1;
 layout(location = 2) out vec4 fragA2;
 
 void main() {
+  // Discard invalid fragments: zero-mass or NaN
+  if (v_particleA0.w <= 0.0 || isnan(v_particleA0.w)) {
+    discard;
+  }
+  
   fragA0 = v_particleA0;
   fragA1 = v_particleA1;
   fragA2 = v_particleA2;

@@ -270,6 +270,10 @@ export class GravityMonopole {
     // Aggregate particles into L0
     this.aggregatorKernel.inPosition = this.positionTexture;
     this.aggregatorKernel.run();
+    let err = this.gl.getError();
+    if (err !== this.gl.NO_ERROR) {
+      console.error(`[Aggregator] GL error: ${err}`);
+    }
 
     // Wire and run pyramid kernels sequentially. Each pyramid kernel owns
     // its outputs (outA0/outA1/outA2). We pass the previous-level outputs
@@ -287,6 +291,10 @@ export class GravityMonopole {
       kernel.inA1 = prevOut.a1;
       kernel.inA2 = prevOut.a2;
       kernel.run();
+      err = this.gl.getError();
+      if (err !== this.gl.NO_ERROR) {
+        console.error(`[Pyramid ${i}] GL error: ${err}`);
+      }
       prevOut = { a0: kernel.outA0, a1: kernel.outA1, a2: kernel.outA2 };
     }
   }
@@ -304,6 +312,10 @@ export class GravityMonopole {
     this.traversalKernel.inPosition = this.positionTexture;
     this.traversalKernel.inLevelA0 = levelA0s;
     this.traversalKernel.run();
+    const err = this.gl.getError();
+    if (err !== this.gl.NO_ERROR) {
+      console.error(`[Traversal] GL error: ${err}`);
+    }
 
     // Wire traversal result into velocity integrator
     if (this.velocityKernel) {
