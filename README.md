@@ -1,10 +1,10 @@
-# THREE-g — Galaxy Primitives for THREE.js
+# 🍎Mavity — Galaxy Primitives for WebGL2
 
-GPU-accelerated particle rendering and Barnes-Hut N-body physics for THREE.js.
+GPU-accelerated particle rendering and Barnes-Hut N-body physics for WebGL2.
 
 ## Overview
 
-THREE-g is a dual-module library that brings astrophysical-scale particle simulation to the browser. At its heart lie two distinct yet harmoniously intertwined functional modules:
+🍎Mavity is a dual-module library that brings astrophysical-scale particle simulation to the browser. At its heart lie two distinct yet harmoniously intertwined functional modules:
 
 ### 1. **Mass Spot Mesh Renderer** (`massSpotMesh`)
 A high-performance particle visualization engine that transforms raw spatial data into luminous cosmic beauty. Whether fed from CPU arrays or GPU textures, it renders hundreds of thousands of glowing particles with atmospheric fog effects—all while maintaining silky-smooth frame rates.
@@ -37,7 +37,7 @@ These modules can operate independently or in concert. The **mass spot mesh** is
 ```javascript
 import * as THREE from 'three';
 import { createScene } from 'three-pop';
-import { massSpotMesh, particleSystem } from 'three-g';
+import { massSpotMesh, particleSystem } from 'mavity';
 
 const { scene, renderer } = createScene();
 
@@ -227,7 +227,7 @@ The algorithm constructs an octree (3D spatial hierarchy) where each node repres
 
 ### Computational Methods
 
-THREE-g implements three distinct approaches to N-body force computation, each with different accuracy/performance tradeoffs:
+🍎Mavity implements three distinct approaches to N-body force computation, each with different accuracy/performance tradeoffs:
 
 #### Monopole Method (1st-order Barnes-Hut)
 
@@ -334,7 +334,7 @@ The spectral particle-mesh approach, pioneered in the 1970s, became the foundati
 
 The hybrid TreePM method emerged in the 1990s as a practical reconciliation of these two paradigms. By splitting gravitational forces into smooth long-range (handled via FFT) and sharp short-range (handled via direct summation or tree codes) components, TreePM methods like those in GADGET-2 achieved the best of both worlds: FFT efficiency for large-scale structure and high-resolution accuracy for dense clusters. This split-force approach became the workhorse of modern cosmological simulations, enabling studies of galaxy formation from cosmic dawn to the present day.
 
-By bringing these techniques to the browser via GPU shaders, THREE-g democratizes computational approaches that once required supercomputers—now anyone can experiment with gravitational choreography in real-time, right in their web browser.
+By bringing these techniques to the browser via GPU shaders, 🍎Mavity democratizes computational approaches that once required supercomputers—now anyone can experiment with gravitational choreography in real-time, right in their web browser.
 
 The θ parameter controls the approximation threshold. Lower values mean tighter accuracy, higher GPU cost. The default of 0.65 for tree methods keeps systems up to ~200,000 particles physically coherent without dropping below 10 FPS on modern hardware. The quadrupole method achieves similar accuracy with higher θ values due to its improved force model.
 
