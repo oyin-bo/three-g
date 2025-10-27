@@ -17,7 +17,22 @@ void main() {
     fragColor = pos;
     return;
   }
+  
+  // Skip particles with NaN position or invalid mass
+  float mass = pos.w;
+  if (isnan(pos.x) || isnan(pos.y) || isnan(pos.z) || isnan(mass) || mass <= 0.0) {
+    fragColor = pos;  // Output unchanged for invalid particles
+    return;
+  }
+  
   vec3 vel = texelFetch(u_velocity, coord, 0).xyz;
+  
+  // Skip if velocity has NaN
+  if (isnan(vel.x) || isnan(vel.y) || isnan(vel.z)) {
+    fragColor = pos;
+    return;
+  }
+  
   vec3 newPos = pos.xyz + vel * u_dt;
   fragColor = vec4(newPos, pos.w);
 }`;

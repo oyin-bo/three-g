@@ -44,8 +44,10 @@ void main() {
   vec4 pos = texelFetch(u_positions, coord, 0);
   float mass = pos.a;
 
-  if (mass <= 0.0) {
-    // Cull zero-mass entries
+  // Skip particles with NaN in position or invalid mass
+  bool hasNaN = isnan(pos.x) || isnan(pos.y) || isnan(pos.z) || isnan(mass);
+  if (hasNaN || mass <= 0.0) {
+    // Cull invalid particles: NaN coordinates, zero-mass, or negative mass
     gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
     gl_PointSize = 0.0;
     v_particleA0 = vec4(0.0);

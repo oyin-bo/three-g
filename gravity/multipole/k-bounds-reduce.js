@@ -298,11 +298,14 @@ void main() {
       vec3 pos = texel.xyz;
       float mass = texel.w;
       
-      if (mass > 0.0) {
-        minBound = min(minBound, pos);
-        maxBound = max(maxBound, pos);
-        hasValidData = true;
+      // Skip particles with NaN coordinates, NaN mass, or non-positive mass
+      if (isnan(pos.x) || isnan(pos.y) || isnan(pos.z) || isnan(mass) || mass <= 0.0) {
+        continue;
       }
+      
+      minBound = min(minBound, pos);
+      maxBound = max(maxBound, pos);
+      hasValidData = true;
     }
   }
   

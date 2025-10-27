@@ -65,7 +65,16 @@ void main() {
   }
 
   vec2 myUV = (vec2(coord) + 0.5) / u_texSize;
-  vec3 myPos = texture(u_particlePositions, myUV).xyz;
+  vec4 myData = texture(u_particlePositions, myUV);
+  vec3 myPos = myData.xyz;
+  float myMass = myData.w;
+  
+  // Skip invalid particles: NaN in position, NaN mass, or non-positive mass
+  if (isnan(myPos.x) || isnan(myPos.y) || isnan(myPos.z) || isnan(myMass) || myMass <= 0.0) {
+    fragColor = vec4(0.0);
+    return;
+  }
+  
   vec3 totalForce = vec3(0.0);
 
   vec3 worldExtent = u_worldMax - u_worldMin;
@@ -81,20 +90,30 @@ void main() {
     if (gridSize == 1.0) {
       vec4 root = sampleLevel(level, ivec2(0, 0));
       float massSum = root.a;
-      if (massSum > 0.0) {
-        vec3 com = root.rgb / max(massSum, 1e-6);
-        vec3 delta = com - myPos;
-        float d = length(delta);
-        float s = cellSize;
-        // Always use root-level approximation if any mass exists (no theta check needed for root)
-        if (d > eps) {
-          // Only apply force if distance is non-zero (avoid singularity at exact self)
-          float dSq = d * d;
-          float softSq = eps * eps;
-          float denom = dSq + softSq;
-          float inv = 1.0 / (denom * sqrt(denom)); // 1 / (d² + eps²)^1.5
-          totalForce += delta * massSum * inv;
-        }
+      
+      // Skip invalid nodes: NaN mass or non-positive mass
+      if (isnan(massSum) || massSum <= 0.0) {
+        continue;
+      }
+      
+      vec3 com = root.rgb;
+      // Also check for NaN in center-of-mass
+      if (isnan(com.x) || isnan(com.y) || isnan(com.z)) {
+        continue;
+      }
+      
+      com = com / max(massSum, 1e-6);
+      vec3 delta = com - myPos;
+      float d = length(delta);
+      float s = cellSize;
+      // Always use root-level approximation if any mass exists (no theta check needed for root)
+      if (d > eps) {
+        // Only apply force if distance is non-zero (avoid singularity at exact self)
+        float dSq = d * d;
+        float softSq = eps * eps;
+        float denom = dSq + softSq;
+        float inv = 1.0 / (denom * sqrt(denom)); // 1 / (d² + eps²)^1.5
+        totalForce += delta * massSum * inv;
       }
       continue;
     }
@@ -131,7 +150,12 @@ void main() {
           ivec2 texCoord = voxelToTexel(neighborVoxel, gridSize, slicesPerRow);
           vec4 nodeData = sampleLevel(level, texCoord);
           float m = nodeData.a;
-          if (m <= 0.0) { continue; }
+          
+          // Skip invalid nodes: NaN mass or non-positive mass
+          if (isnan(m) || m <= 0.0) { continue; }
+          
+          // Skip if COM has NaN
+          if (isnan(nodeData.x) || isnan(nodeData.y) || isnan(nodeData.z)) { continue; }
           
           // Sub-voxel COM for smoother force field
           vec3 com = nodeData.rgb / max(m, 1e-6);
@@ -190,7 +214,12 @@ void main() {
           ivec2 texCoord = voxelToTexel(neighborVoxel, gridSize, slicesPerRow);
           vec4 nodeData = sampleLevel(0, texCoord); // Always sample L0 for near field
           float m = nodeData.a;
-          if (m <= 0.0) { continue; }
+          
+          // Skip invalid nodes: NaN mass or non-positive mass
+          if (isnan(m) || m <= 0.0) { continue; }
+          
+          // Skip if COM has NaN
+          if (isnan(nodeData.x) || isnan(nodeData.y) || isnan(nodeData.z)) { continue; }
 
           vec3 com = nodeData.rgb / max(m, 1e-6);
           vec3 delta = com - myPos;

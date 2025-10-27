@@ -40,6 +40,7 @@ precision highp float;
 
 uniform sampler2D u_velocity;
 uniform sampler2D u_force;
+uniform sampler2D u_position;
 uniform vec2 u_texSize;
 uniform float u_dt;
 uniform float u_damping;
@@ -51,9 +52,24 @@ out vec4 fragColor;
 void main() {
   ivec2 coord = ivec2(gl_FragCoord.xy);
   vec4 vel = texelFetch(u_velocity, coord, 0);
+  vec4 pos = texelFetch(u_position, coord, 0);
+  
+  // Skip particles with NaN in position/velocity or invalid mass
+  float mass = pos.w;
+  if (isnan(pos.x) || isnan(pos.y) || isnan(pos.z) || isnan(vel.x) || isnan(vel.y) || isnan(vel.z) || 
+      isnan(mass) || mass <= 0.0) {
+    fragColor = vel;  // Output unchanged for invalid particles
+    return;
+  }
   
   // Apply physics: force integration
   vec3 force = texelFetch(u_force, coord, 0).xyz;
+  
+  // Skip if force has NaN
+  if (isnan(force.x) || isnan(force.y) || isnan(force.z)) {
+    fragColor = vel;
+    return;
+  }
   
   // Clamp force to maxAccel
   float fmag = length(force);
