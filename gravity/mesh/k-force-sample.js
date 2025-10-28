@@ -1,16 +1,15 @@
 // @ts-check
 
+import { formatNumber, readGrid3D, readLinear } from '../diag.js';
+import forceSampleFrag from './shaders/force-sample.frag.js';
+import forceSampleVert from './shaders/force-sample.vert.js';
+
 /**
  * KForceSample - Samples force grids at particle positions
  * 
  * Interpolates forces from 3D grid to particle positions.
  * Follows the WebGL2 Kernel contract from docs/8-webgl-kernels.md.
  */
-
-import forceSampleVert from './shaders/force-sample.vert.js';
-import forceSampleFrag from './shaders/force-sample.frag.js';
-import { readLinear, readGrid3D, formatNumber } from '../diag.js';
-
 export class KForceSample {
   /**
    * @param {{
@@ -47,6 +46,8 @@ export class KForceSample {
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(this.gridSize));
+    // Packed 3D texture size (width=height=gridSize*slicesPerRow)
+    this.textureSize = this.gridSize * this.slicesPerRow;
 
     // World bounds
     this.worldBounds = options.worldBounds || {
@@ -283,7 +284,7 @@ forceGridZ: ${value.forceGridZ}
 
     this.renderCount = (this.renderCount || 0) + 1;
 
-    
+
   }
 
   dispose() {
