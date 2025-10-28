@@ -192,6 +192,19 @@ To migrate `gravity-quadrupole.js`, we should apply the same lessons:
 
 4.  **Remove Redundant Textures**: The internal `positionTextureWrite` and `velocityTextureWrite` fields in `GravityQuadrupole` will no longer be needed, as the ping-pong logic will be handled by swapping references to the textures owned by the `KIntegrateEuler` kernel.
 
+## Applying to `gravity-spectral.js`
+
+The `gravity-spectral.js` system follows the same legacy pattern and is also a prime candidate for migration.
+
+-   **Current State**: It uses a `particleData`-based constructor, manages its own ping-pong textures (`positionTextureWrite`, `velocityTextureWrite`), and uses separate, now-legacy kernels for physics integration.
+-   **Force Compatibility**: Its PM/FFT pipeline concludes with a `KForceSample` kernel that outputs forces in the standard `RGBA32F` format, which is directly compatible with `KIntegrateEuler`.
+-   **Migration Path**: The migration will be identical to the others:
+    1.  Refactor the constructor to the texture-first signature.
+    2.  Replace the two legacy integration kernels with a single `KIntegrateEuler` instance.
+    3.  Update `_integratePhysics` to use the new kernel and perform the standard ping-pong swap.
+
+Completing this migration will bring all major particle systems under the unified, modern architecture.
+
 ## Factory Adaptation (`gravity.js`)
 
 The factory function already demonstrates the texture-first pattern with `gravity-monopole.js`:

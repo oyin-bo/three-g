@@ -15,21 +15,23 @@
  * 6. Sample forces at particles (KForceSample)
  */
 
+import { KBoundsReduce } from '../multipole/k-bounds-reduce.js';
+import { KIntegrateEuler } from '../multipole/k-integrate-euler.js';
 import { KDeposit } from './k-deposit.js';
 import { KFFT } from './k-fft.js';
-import { KPoisson } from './k-poisson.js';
-import { KGradient } from './k-gradient.js';
 import { KForceSample } from './k-force-sample.js';
-import { KIntegrateVelocity } from './k-integrate-velocity.js';
-import { KIntegratePosition } from './k-integrate-position.js';
-import { KBoundsReduce } from './k-bounds-reduce.js';
+import { KGradient } from './k-gradient.js';
+import { KPoisson } from './k-poisson.js';
 
 export class GravitySpectral {
   /**
    * @param {{
    *   gl: WebGL2RenderingContext,
-   *   particleData: { positions: Float32Array, velocities?: Float32Array|null, colors?: Uint8Array|null },
+   *   textureWidth: number,
+   *   textureHeight: number,
    *   particleCount?: number,
+   *   positionMassTexture?: WebGLTexture,
+   *   velocityColorTexture?: WebGLTexture,
    *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
    *   dt?: number,
    *   gravityStrength?: number,
@@ -41,47 +43,62 @@ export class GravitySpectral {
    *   assignment?: 'NGP'|'CIC'
    * }} options
    */
-  constructor(options) {
-    this.gl = options.gl;
+  constructor({
+    gl,
+    textureWidth,
+    textureHeight,
+    particleCount,
+    positionMassTexture,
+    velocityColorTexture,
+    worldBounds,
+    dt,
+    gravityStrength,
+    softening,
+    damping,
+    maxSpeed,
+    maxAccel,
+    gridSize,
+    assignment
+  }) {
+    this.gl = gl;
 
     if (!(this.gl instanceof WebGL2RenderingContext)) {
       throw new Error('ParticleSystemSpectralKernels requires WebGL2RenderingContext');
     }
 
-    if (!options.particleData) {
-      throw new Error('ParticleSystemSpectralKernels requires particleData with positions');
-    }
+    if (!textureWidth || !textureHeight)
+      throw new Error('GravitySpectral requires textureWidth and textureHeight');
 
-    const particleCount = options.particleData.positions.length / 4;
+    this.positionMassTexture = positionMassTexture;
+    this.velocityColorTexture = velocityColorTexture;
 
-    // Infer bounds from particle positions if not provided
-    const inferredBounds = this._inferBounds(options.particleData.positions);
-
-    this.options = {
-      particleCount,
-      worldBounds: options.worldBounds || inferredBounds,
-      dt: options.dt || 1 / 60,
-      gravityStrength: options.gravityStrength || 0.0003,
-      softening: options.softening || 0.2,
-      damping: options.damping || 0.0,
-      maxSpeed: options.maxSpeed || 2.0,
-      maxAccel: options.maxAccel || 1.0,
-      gridSize: options.gridSize || 64,
-      assignment: options.assignment || 'CIC'
-    };
-
-    this.particleData = options.particleData;
-    this.frameCount = 0;
-
-    // Calculate texture dimensions
-    this.textureWidth = Math.ceil(Math.sqrt(particleCount));
-    this.textureHeight = Math.ceil(particleCount / this.textureWidth);
+    this.textureWidth = textureWidth;
+    this.textureHeight = textureHeight;
     this.actualTextureSize = this.textureWidth * this.textureHeight;
 
+    // Validate or derive particleCount
+    this.particleCount = particleCount !== undefined ? particleCount : this.actualTextureSize;
+    if (this.particleCount > this.actualTextureSize)
+      throw new Error(`particleCount ${this.particleCount} exceeds texture capacity ${this.actualTextureSize}`);
+
+    // Infer bounds from particle positions if not provided. NOTE: This is a placeholder.
+    // In the texture-first model, bounds should ideally be provided or computed on GPU.
+    // For now, we'll use a default if not provided.
+    this.worldBounds = worldBounds || { min: [-4, -4, -4], max: [4, 4, 4] };
+    this.dt = dt || 1 / 60;
+    this.gravityStrength = gravityStrength || 0.0003;
+    this.softening = softening || 0.2;
+    this.damping = damping || 0.0;
+    this.maxSpeed = maxSpeed || 2.0;
+    this.maxAccel = maxAccel || 1.0;
+    this.gridSize = gridSize || 64;
+    this.assignment = assignment || 'CIC';
+
+    this.frameCount = 0;
+
     // PM grid configuration
-    this.gridSize = this.options.gridSize;
     this.slicesPerRow = Math.ceil(Math.sqrt(this.gridSize));
-    
+
     // For spectral method, we pack 3D grid into 2D texture using Z-slice layout.
     // Mathematical property: when slicesPerRow = ceil(sqrt(gridSize)):
     //   sliceRows = ceil(gridSize / slicesPerRow) ≈ ceil(sqrt(gridSize)) ≈ slicesPerRow
@@ -105,56 +122,19 @@ export class GravitySpectral {
       console.warn('EXT_float_blend not supported: reduced accumulation accuracy');
     }
 
-    // Create position textures: public active texture and internal write target
-    this.positionTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-    this.positionTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-
-    // Create velocity textures: public active texture and internal write target
-    this.velocityTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-    this.velocityTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-
-    // Upload particle data
-    const { positions, velocities } = this.particleData;
-    const velDataVal = velocities || new Float32Array(positions.length);
-
-    const expectedLength = this.actualTextureSize * 4;
-    if (positions.length !== expectedLength) {
-      throw new Error(`Position data length mismatch: expected ${expectedLength}, got ${positions.length}`);
-    }
-
-    // Sanity checks to satisfy @ts-check and ensure textures were created
-    if (!this.positionTexture)
-      throw new Error('Position textures not initialized');
-    if (!this.velocityTexture)
-      throw new Error('Velocity textures not initialized');
-
-    // Upload positions into both active and write textures so first-frame reads are valid
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionTexture);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, positions);
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionTextureWrite);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, positions);
-
-    // Upload velocities into both active and write textures
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.velocityTexture);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, velDataVal);
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.velocityTextureWrite);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, velDataVal);
-
-    this.gl.bindTexture(this.gl.TEXTURE_2D, null);
-
     // Compute world size for kernels
-    const bounds = this.options.worldBounds;
+    const bounds = this.worldBounds;
     const worldSize = [
       bounds.max[0] - bounds.min[0],
       bounds.max[1] - bounds.min[1],
       bounds.max[2] - bounds.min[2]
     ];
-    const fourPiG = 4 * Math.PI * this.options.gravityStrength;
+    const fourPiG = 4 * Math.PI * this.gravityStrength;
 
     // Compute mass-to-density scaling: ΔV = (Lx·Ly·Lz) / N³
     // massToDensity = 1 / ΔV = N³ / (Lx·Ly·Lz)
-    const voxelVolume = (worldSize[0] * worldSize[1] * worldSize[2]) / 
-                        (this.gridSize * this.gridSize * this.gridSize);
+    const voxelVolume = (worldSize[0] * worldSize[1] * worldSize[2]) /
+      (this.gridSize * this.gridSize * this.gridSize);
     const massToDensity = 1.0 / voxelVolume;
 
     // Create shared texture objects to wire kernels together
@@ -176,17 +156,17 @@ export class GravitySpectral {
     // 1. Deposit kernel
     this.depositKernel = new KDeposit({
       gl: this.gl,
-      inPosition: this.positionTexture,
+      inPosition: this.positionMassTexture,
       outMassGrid: this.massGridTexture,
-      particleCount: this.options.particleCount,
+      particleCount: this.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-  textureWidth: this.textureWidth3D,
-  textureHeight: this.textureHeight3D,
-      worldBounds: /** @type {any} */ (this.options.worldBounds),
-      assignment: this.options.assignment,
+      textureWidth: this.textureWidth3D,
+      textureHeight: this.textureHeight3D,
+      worldBounds: /** @type {any} */ (this.worldBounds),
+      assignment: this.assignment,
       disableFloatBlend: this.disableFloatBlend
     });
 
@@ -198,8 +178,8 @@ export class GravitySpectral {
       complexTo: this.fftComplexTexture2,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-  textureWidth: this.textureWidth3D,
-  textureHeight: this.textureHeight3D,
+      textureWidth: this.textureWidth3D,
+      textureHeight: this.textureHeight3D,
       inverse: false,
       massToDensity: massToDensity
     });
@@ -215,11 +195,11 @@ export class GravitySpectral {
       outPotentialSpectrum: null,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-  textureWidth: this.textureWidth3D,
-  textureHeight: this.textureHeight3D,
+      textureWidth: this.textureWidth3D,
+      textureHeight: this.textureHeight3D,
       gravitationalConstant: fourPiG,
       worldSize: /** @type {[number, number, number]} */ (worldSize),
-      assignment: this.options.assignment,
+      assignment: this.assignment,
       treePMSigma: gaussianSigma,
       splitMode: 2 // enable Gaussian low-pass by default
     });
@@ -233,8 +213,8 @@ export class GravitySpectral {
       outForceSpectrumZ: this.forceSpectrumZTexture,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-  textureWidth: this.textureWidth3D,
-  textureHeight: this.textureHeight3D,
+      textureWidth: this.textureWidth3D,
+      textureHeight: this.textureHeight3D,
       worldSize: /** @type {[number, number, number]} */ (worldSize)
     });
 
@@ -249,79 +229,44 @@ export class GravitySpectral {
       inForceGridY: null,  // Will be set in _computePMForces
       inForceGridZ: null,  // Will be set in _computePMForces
       outForce: this.forceTextureOut,
-      particleCount: this.options.particleCount,
+      particleCount: this.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureWidth: this.textureWidth3D,
       textureHeight: this.textureHeight3D,
-      worldBounds: /** @type {any} */ (this.options.worldBounds)
+      worldBounds: /** @type {any} */ (this.worldBounds)
     });
 
     // 7. Integration kernels (reuse from monopole)
-    this.velocityKernel = new KIntegrateVelocity({
+    this.integrateEulerKernel = new KIntegrateEuler({
       gl: this.gl,
-      inVelocity: null,  // Will be set in _integratePhysics
-      inForce: null,  // Will be set in _integratePhysics
-      inPosition: null,  // Will be set in _integratePhysics
-      outVelocity: null,  // Will be set in _integratePhysics
+      inPosition: this.positionMassTexture,
+      inVelocity: this.velocityColorTexture,
+      inForce: null,
       width: this.textureWidth,
       height: this.textureHeight,
-      dt: this.options.dt,
-      damping: this.options.damping,
-      maxSpeed: this.options.maxSpeed,
-      maxAccel: this.options.maxAccel
+      dt: this.dt,
+      damping: this.damping,
+      maxSpeed: this.maxSpeed,
+      maxAccel: this.maxAccel
     });
 
-    this.positionKernel = new KIntegratePosition({
-      gl: this.gl,
-      inPosition: null,  // Will be set in _integratePhysics
-      inVelocity: null,  // Will be set in _integratePhysics
-      outPosition: null,  // Will be set in _integratePhysics
-      width: this.textureWidth,
-      height: this.textureHeight,
-      dt: this.options.dt
-    });
+    this.positionMassTexture = this.integrateEulerKernel.inPosition;
+    this.velocityColorTexture = this.integrateEulerKernel.inVelocity;
 
     // GPU bounds reduction kernel (cloned and reused locally)
     this.boundsReduce = new KBoundsReduce({
       gl: this.gl,
-      inPosition: this.positionTexture,
+      inPosition: this.positionMassTexture,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
-      particleCount: this.options.particleCount
+      particleCount: this.particleCount
     });
 
     // How often to run bounds reduction (frames)
     this.boundsInterval = 30;
-  }
-
-  /**
-   * Infer world bounds from particle positions
-   * @param {Float32Array} positions
-   */
-  _inferBounds(positions) {
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    for (let i = 0; i < positions.length; i += 4) {
-      const x = positions[i + 0];
-      const y = positions[i + 1];
-      const z = positions[i + 2];
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (z < minZ) minZ = z;
-      if (x > maxX) maxX = x;
-      if (y > maxY) maxY = y;
-      if (z > maxZ) maxZ = z;
-    }
-    const marginX = (maxX - minX) * 0.05;
-    const marginY = (maxY - minY) * 0.05;
-    const marginZ = (maxZ - minZ) * 0.05;
-    return /** @type {const} */ ({
-      min: [minX - marginX, minY - marginY, minZ - marginZ],
-      max: [maxX + marginX, maxY + marginY, maxZ + marginZ]
-    });
   }
 
   /**
@@ -339,8 +284,8 @@ export class GravitySpectral {
 
   _computePMForces() {
     // Set current position for deposit and force sample
-    this.depositKernel.inPosition = this.positionTexture;
-    this.forceSampleKernel.inPosition = this.positionTexture;
+    this.depositKernel.inPosition = this.positionMassTexture;
+    this.forceSampleKernel.inPosition = this.positionMassTexture;
 
     // Run PM/FFT pipeline
     this.depositKernel.run();           // Step 1: Deposit particles to grid
@@ -348,10 +293,10 @@ export class GravitySpectral {
     // Periodic GPU bounds check: run KBoundsReduce every boundsInterval frames
     try {
       if (this.boundsReduce && (this.frameCount % this.boundsInterval === 0)) {
-        this.boundsReduce.inPosition = this.positionTexture;
+        this.boundsReduce.inPosition = this.positionMassTexture;
         this.boundsReduce.particleTexWidth = this.textureWidth;
         this.boundsReduce.particleTexHeight = this.textureHeight;
-        this.boundsReduce.particleCount = this.options.particleCount;
+        this.boundsReduce.particleCount = this.particleCount;
         this.boundsReduce.run();
 
         // Read back 2x1 bounds texture (min, max)
@@ -366,7 +311,7 @@ export class GravitySpectral {
 
         const newMin = [pixels[0], pixels[1], pixels[2]];
         const newMax = [pixels[4], pixels[5], pixels[6]];
-        const cur = this.options.worldBounds;
+        const cur = this.worldBounds;
 
         // If any particle escaped outside current bounds, update worldBounds and derived uniforms
         let expanded = false;
@@ -377,80 +322,80 @@ export class GravitySpectral {
         if (expanded) {
           // Add small margin to avoid thrashing
           const marginFactor = 0.05;
-          const outMin = [0,0,0], outMax = [0,0,0];
+          const outMin = [0, 0, 0], outMax = [0, 0, 0];
           for (let i = 0; i < 3; i++) {
             const span = Math.max(1e-6, newMax[i] - newMin[i]);
             outMin[i] = newMin[i] - marginFactor * span;
             outMax[i] = newMax[i] + marginFactor * span;
           }
-          this.options.worldBounds = { min: outMin, max: outMax };
+          this.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
 
           const newWorldSize = [outMax[0] - outMin[0], outMax[1] - outMin[1], outMax[2] - outMin[2]];
           const voxelVolume = (newWorldSize[0] * newWorldSize[1] * newWorldSize[2]) / (this.gridSize * this.gridSize * this.gridSize);
           const massToDensity = 1.0 / voxelVolume;
 
           if (this.fftKernel) this.fftKernel.massToDensity = massToDensity;
-          if (this.poissonKernel) this.poissonKernel.worldSize = newWorldSize;
-          if (this.gradientKernel) this.gradientKernel.worldSize = newWorldSize;
-          if (this.forceSampleKernel) this.forceSampleKernel.worldBounds = { min: outMin, max: outMax };
+          if (this.poissonKernel) this.poissonKernel.worldSize = /** @type {[number,number,number]} */ (newWorldSize);
+          if (this.gradientKernel) this.gradientKernel.worldSize = /** @type {[number,number,number]} */ (newWorldSize);
+          if (this.forceSampleKernel) this.forceSampleKernel.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
         }
       }
     } catch (e) {
       // Non-fatal: bounds reduction failing should not stop simulation
-      console.warn('KBoundsReduce failed:', e && e.message ? e.message : e);
+      console.warn('KBoundsReduce failed:', e && /** @type {any} */(e).message ? /** @type {any} */(e).message : e);
     }
 
 
-/**
-
-Complex texture ownership
-==========================
-
-These complex textures may be swapped around, so we need a system to reason about it.
-
-Few ground rules:
-* KFFT holds on its complexFrom and complexTo textures
-* Poisson starts with nothing, then borrow its textures from KFFT but in the end returns them
-* Gradient holds on to its outForceSpectrumX/Y/Z textures although they may get swapped, but it gets exact same back anyway
-
-Forward Step: FFT, Poisson, Gradient
-------------------------------------------------
-
-1. KFFT reads real (massGridTexture), writes complexTo which it kinda owns. Its complexFrom is scratch buffer.
-   As part of FFT it swaps complexFrom and complexTo internally many times.
-   Doesn't matter they are interchangeable, KFFT keeps both.
-
-2. Poisson takes complexTo from KFFT as inDensitySpectrum, and takes KFFT's complexFrom as outPotentialSpectrum.
-    At that point we null out KFFT's references to those textures since Poisson now holds them.
-
-3. Gradient takes Poisson's outPotentialSpectrum as inPotentialSpectrum, and writes to its own outForceSpectrumX/Y/Z textures.
-   Again, we null out Poisson's reference to outPotentialSpectrum since Gradient now holds it as input.
-
-Reverse Step: Inverse FFT X/Y/Z
-------------------------------------------------
-
-1. KFFT needs actual input from Gradient's outForceSpectrumX texture.
-    Poisson now lost its output to Gradient's input, so KFFT takes it for its scratch buffer complexTo.
-    Note: Poisson still holds its useless input just for a little longer until the end of the reverse FFT steps.
-    This is an inverse FFT, so output is real, and complexTo is a scratch buffer.
-    During the FFT run, KFFT swaps complexFrom and complexTo internally many times.
-    And so at the end we return complexFrom to Gradient as its outForceSpectrumX texture:
-    it could be the same texture, or a different instance.
-
-2. Now KFFT takes input from Gradient's outForceSpectrumY texture as complexFrom.
-    KFFT already has complexTo as scratct buffer, no need to assign.
-    (Poisson still holds input texture for a time.)
-    At the end we return complexFrom to Gradient as its outForceSpectrumY texture
-    (potentially swapped).
-
-3. KFFT now takes input from Gradient's outForceSpectrumZ texture as complexFrom.
-    KFFT already has complexTo as scratch buffer again.
-    (Poisson still holds input texture for a time.)
-    At the end of this last inverse KFFT we return complexFrom to Gradient as its outForceSpectrumZ.
-    Now KFFT has a scratch complexTo, and it takes back Poisson's input texture for complexFrom
-    and nulls out Poison fully. We are ready to start again.
-
-*/
+    /**
+    
+    Complex texture ownership
+    ==========================
+    
+    These complex textures may be swapped around, so we need a system to reason about it.
+    
+    Few ground rules:
+    * KFFT holds on its complexFrom and complexTo textures
+    * Poisson starts with nothing, then borrow its textures from KFFT but in the end returns them
+    * Gradient holds on to its outForceSpectrumX/Y/Z textures although they may get swapped, but it gets exact same back anyway
+    
+    Forward Step: FFT, Poisson, Gradient
+    ------------------------------------------------
+    
+    1. KFFT reads real (massGridTexture), writes complexTo which it kinda owns. Its complexFrom is scratch buffer.
+       As part of FFT it swaps complexFrom and complexTo internally many times.
+       Doesn't matter they are interchangeable, KFFT keeps both.
+    
+    2. Poisson takes complexTo from KFFT as inDensitySpectrum, and takes KFFT's complexFrom as outPotentialSpectrum.
+        At that point we null out KFFT's references to those textures since Poisson now holds them.
+    
+    3. Gradient takes Poisson's outPotentialSpectrum as inPotentialSpectrum, and writes to its own outForceSpectrumX/Y/Z textures.
+       Again, we null out Poisson's reference to outPotentialSpectrum since Gradient now holds it as input.
+    
+    Reverse Step: Inverse FFT X/Y/Z
+    ------------------------------------------------
+    
+    1. KFFT needs actual input from Gradient's outForceSpectrumX texture.
+        Poisson now lost its output to Gradient's input, so KFFT takes it for its scratch buffer complexTo.
+        Note: Poisson still holds its useless input just for a little longer until the end of the reverse FFT steps.
+        This is an inverse FFT, so output is real, and complexTo is a scratch buffer.
+        During the FFT run, KFFT swaps complexFrom and complexTo internally many times.
+        And so at the end we return complexFrom to Gradient as its outForceSpectrumX texture:
+        it could be the same texture, or a different instance.
+    
+    2. Now KFFT takes input from Gradient's outForceSpectrumY texture as complexFrom.
+        KFFT already has complexTo as scratct buffer, no need to assign.
+        (Poisson still holds input texture for a time.)
+        At the end we return complexFrom to Gradient as its outForceSpectrumY texture
+        (potentially swapped).
+    
+    3. KFFT now takes input from Gradient's outForceSpectrumZ texture as complexFrom.
+        KFFT already has complexTo as scratch buffer again.
+        (Poisson still holds input texture for a time.)
+        At the end of this last inverse KFFT we return complexFrom to Gradient as its outForceSpectrumZ.
+        Now KFFT has a scratch complexTo, and it takes back Poisson's input texture for complexFrom
+        and nulls out Poison fully. We are ready to start again.
+    
+    */
 
     ///////////////////////////////////////////////////////////////////////////
     // FORWARD
@@ -489,6 +434,7 @@ Reverse Step: Inverse FFT X/Y/Z
     this.gradientKernel.outForceSpectrumX = null;
 
     this.fftKernel.complexTo = this.gradientKernel.inPotentialSpectrum;
+    if (!this.fftKernel.complexTo) throw new Error('FFT kernel complexTo texture is null');
     this.gradientKernel.inPotentialSpectrum = null;
 
     this.fftKernel.real = this.forceGridXTexture;
@@ -498,6 +444,7 @@ Reverse Step: Inverse FFT X/Y/Z
     this.fftKernel.complexFrom = null; // returned
 
     // Inverse FFT/Y: gradient's forceSpectrumY (scratch already there) → real
+    if (!this.gradientKernel.outForceSpectrumY) throw new Error('Gradient kernel outForceSpectrumY texture is null');
     this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumY;
     this.gradientKernel.outForceSpectrumY = null;
 
@@ -508,6 +455,7 @@ Reverse Step: Inverse FFT X/Y/Z
     this.fftKernel.complexFrom = null; // returned
 
     // Inverse FFT/Z: gradient's forceSpectrumZ (scratch already there) → real
+    if (!this.gradientKernel.outForceSpectrumZ) throw new Error('Gradient kernel outForceSpectrumZ texture is null');
     this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumZ;
     this.gradientKernel.outForceSpectrumZ = null;
 
@@ -515,6 +463,7 @@ Reverse Step: Inverse FFT X/Y/Z
     this.fftKernel.run();
 
     this.gradientKernel.outForceSpectrumZ = this.fftKernel.complexFrom;
+    if (!this.poissonKernel.inDensitySpectrum) throw new Error('Poisson kernel inDensitySpectrum texture is null');
     this.fftKernel.complexFrom = this.poissonKernel.inDensitySpectrum; // finally reclaiming from Poisson
     this.poissonKernel.inDensitySpectrum = null;
 
@@ -527,37 +476,20 @@ Reverse Step: Inverse FFT X/Y/Z
   }
 
   _integratePhysics() {
-    // Update velocities
-    if (!this.velocityKernel) throw new Error('Velocity kernel missing');
-    if (!this.velocityTexture || !this.positionTexture) throw new Error('Textures missing');
+    // allow external inputs
+    this.integrateEulerKernel.inVelocity = this.velocityColorTexture;
+    this.integrateEulerKernel.inPosition = this.positionMassTexture;
+    this.integrateEulerKernel.inForce = this.forceSampleKernel.outForce;
+    this.integrateEulerKernel.run();
 
-    this.velocityKernel.inVelocity = this.velocityTexture;
-    this.velocityKernel.inPosition = this.positionTexture;
-    this.velocityKernel.inForce = this.forceSampleKernel.outForce;
-    this.velocityKernel.outVelocity = this.velocityTextureWrite;
-    this.velocityKernel.run();
+    // swap and leave updated textures in system properties
+    this.positionMassTexture = this.integrateEulerKernel.outPosition;
+    this.velocityColorTexture = this.integrateEulerKernel.outVelocity;
 
-    // Swap velocity textures
-    {
-      const tmp = this.velocityTexture;
-      this.velocityTexture = this.velocityTextureWrite;
-      this.velocityTextureWrite = tmp;
-    }
-
-    // Update positions
-    if (!this.positionKernel) throw new Error('Position kernel missing');
-
-    this.positionKernel.inPosition = this.positionTexture;
-    this.positionKernel.inVelocity = this.velocityTexture;
-    this.positionKernel.outPosition = this.positionTextureWrite;
-    this.positionKernel.run();
-
-    // Swap position textures
-    {
-      const tmp = this.positionTexture;
-      this.positionTexture = this.positionTextureWrite;
-      this.positionTextureWrite = tmp;
-    }
+    this.integrateEulerKernel.outPosition = this.integrateEulerKernel.inPosition;
+    this.integrateEulerKernel.outVelocity = this.integrateEulerKernel.inVelocity;
+    this.integrateEulerKernel.inPosition = this.positionMassTexture;
+    this.integrateEulerKernel.inVelocity = this.velocityColorTexture;
   }
 
   /**
@@ -568,46 +500,44 @@ Reverse Step: Inverse FFT X/Y/Z
   valueOf(options) {
     const snapshot = {
       frameCount: this.frameCount,
-      particleCount: this.options.particleCount,
+      particleCount: this.particleCount,
       gridSize: this.gridSize,
-      dt: this.options.dt,
-      gravityStrength: this.options.gravityStrength,
-      softening: this.options.softening,
-      damping: this.options.damping,
-      
+      dt: this.dt,
+      gravityStrength: this.gravityStrength,
+      softening: this.softening,
+      damping: this.damping,
+
       // Kernel snapshots
       deposit: this.depositKernel ? this.depositKernel.valueOf(options) : null,
       fft: this.fftKernel ? this.fftKernel.valueOf(options) : null,
       poisson: this.poissonKernel ? this.poissonKernel.valueOf(options) : null,
       gradient: this.gradientKernel ? this.gradientKernel.valueOf(options) : null,
       forceSample: this.forceSampleKernel ? this.forceSampleKernel.valueOf(options) : null,
-      velocity: this.velocityKernel ? this.velocityKernel.valueOf(options) : null,
-      position: this.positionKernel ? this.positionKernel.valueOf(options) : null,
+      integrate: this.integrateEulerKernel ? this.integrateEulerKernel.valueOf(options) : null,
     };
     // always capture to materialise at a point in time
     const snapshotStr = this._formatSnapshot(snapshot);
     snapshot.toString = () => snapshotStr;
-    
+
     return snapshot;
   }
 
   /**
    * Format snapshot as compact readable string
-   * @param {object} snapshot
+   * @param {any} snapshot
    * @returns {string}
    */
   _formatSnapshot(snapshot) {
     let output = `\nParticleSystemSpectralKernels(${snapshot.particleCount}p grid=${snapshot.gridSize}³) frame=${snapshot.frameCount}\n`;
     output += `  dt=${snapshot.dt.toExponential(2)} G=${snapshot.gravityStrength.toExponential(2)} soft=${snapshot.softening.toFixed(2)} damp=${snapshot.damping.toFixed(2)}\n`;
-    
-    if (snapshot.deposit) output += '\n' + snapshot.deposit.toString().split('\n').map(l => '  ' + l).join('\n');
-    if (snapshot.poisson) output += '\n' + snapshot.poisson.toString().split('\n').map(l => '  ' + l).join('\n');
-    if (snapshot.gradient) output += '\n' + snapshot.gradient.toString().split('\n').map(l => '  ' + l).join('\n');
-    if (snapshot.fft) output += '\n' + snapshot.fft.toString().split('\n').map(l => '  ' + l).join('\n');
-    if (snapshot.forceSample) output += '\n' + snapshot.forceSample.toString().split('\n').map(l => '  ' + l).join('\n');
-    if (snapshot.velocity) output += '\n' + snapshot.velocity.toString().split('\n').map(l => '  ' + l).join('\n');
-    if (snapshot.position) output += '\n' + snapshot.position.toString().split('\n').map(l => '  ' + l).join('\n');
-    
+
+    if (snapshot.deposit) output += '\n' + snapshot.deposit.toString().split('\n').map((l/**@type{string}*/) => '  ' + l).join('\n');
+    if (snapshot.poisson) output += '\n' + snapshot.poisson.toString().split('\n').map((l/**@type{string}*/) => '  ' + l).join('\n');
+    if (snapshot.gradient) output += '\n' + snapshot.gradient.toString().split('\n').map((l/**@type{string}*/) => '  ' + l).join('\n');
+    if (snapshot.fft) output += '\n' + snapshot.fft.toString().split('\n').map((l/**@type{string}*/) => '  ' + l).join('\n');
+    if (snapshot.forceSample) output += '\n' + snapshot.forceSample.toString().split('\n').map((l/**@type{string}*/) => '  ' + l).join('\n');
+    if (snapshot.integrate) output += '\n' + snapshot.integrate.toString().split('\n').map((l/**@type{string}*/) => '  ' + l).join('\n');
+
     return output;
   }
 
@@ -626,8 +556,8 @@ Reverse Step: Inverse FFT X/Y/Z
     if (this.poissonKernel) this.poissonKernel.dispose();
     if (this.gradientKernel) this.gradientKernel.dispose();
     if (this.forceSampleKernel) this.forceSampleKernel.dispose();
-    if (this.velocityKernel) this.velocityKernel.dispose();
-    if (this.positionKernel) this.positionKernel.dispose();
+    if (this.integrateEulerKernel) this.integrateEulerKernel.dispose();
+    if (this.boundsReduce) this.boundsReduce.dispose();
   }
 }
 

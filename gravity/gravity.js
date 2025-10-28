@@ -1,9 +1,9 @@
 // @ts-check
 
+import { GravityMesh } from './mesh/gravity-mesh.js';
 import { GravityMonopole } from './multipole/gravity-monopole.js';
 import { GravityQuadrupole } from './multipole/gravity-quadrupole.js';
 import { GravitySpectral } from './spectral/gravity-spectral.js';
-import { GravityMesh } from './mesh/gravity-mesh.js';
 
 /**
  * Create a kernel-based particle system instance.
@@ -67,7 +67,7 @@ export function particleSystem(options) {
   const particleData = prepareParticleData({ particles, get });
 
   let system;
-  
+
   switch (method) {
     case 'mesh':
       system = new GravityMesh({
@@ -84,19 +84,34 @@ export function particleSystem(options) {
       });
       break;
 
-    case 'spectral':
+    case 'spectral': {
+      const { textureWidth, textureHeight, positions, velocities } = particleData;
+      const particleCount = particles.length;
+
       system = new GravitySpectral({
         gl,
-        particleData,
+        textureWidth,
+        textureHeight,
+        particleCount,
         worldBounds,
         dt,
         gravityStrength,
         softening,
         damping,
         maxSpeed,
-        maxAccel
+        maxAccel,
+        gridSize: meshConfig?.gridSize,
+        assignment: /** @type {'NGP' | 'CIC' | undefined} */ (meshConfig?.assignment?.toUpperCase())
       });
+
+      // Upload particle data into allocated textures
+      gl.bindTexture(gl.TEXTURE_2D, system.positionMassTexture);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, positions);
+      gl.bindTexture(gl.TEXTURE_2D, system.velocityColorTexture);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, velocities);
+      gl.bindTexture(gl.TEXTURE_2D, null);
       break;
+    }
 
     case 'monopole': {
       const { textureWidth, textureHeight, positions, velocities } = particleData;
@@ -156,7 +171,7 @@ export function particleSystem(options) {
       break;
     }
   }
-  
+
   // Return the system directly - it already has all the methods we added
   return system;
 }
