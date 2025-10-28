@@ -1,5 +1,7 @@
 # Lowering the Level: Particle Systems as Texture Abstractions
 
+SEE MANDATORY NOTES AT BOTTOM
+
 ## Problem Statement
 
 Particle systems currently mix high-level concerns (CPU particle data, validation) with low-level concerns (GPU simulation, kernel orchestration). This creates:
@@ -39,6 +41,8 @@ constructor(options: {
 **No `particleCount`** Computed from `textureWidth * textureHeight`. Provides redundancy check during validation.
 
 ## Texture Lifetime & Ping-Pong Contract
+
+SEE MANDATORY NOTES AT BOTTOM
 
 ### After Construction
 - Both `positionMassTexture` and `velocityColorTexture` contain initial particle state
@@ -81,26 +85,28 @@ The factory (`gravity.js`) becomes the single source of truth for particle data 
 
 ```javascript
 export function particleSystem(options) {
-  // High-level: delegate data prep to factory
-  const { positionMassTexture, velocityColorTexture, textureWidth, textureHeight } =
-    uploadParticlesToTextures(...);
-  
-  // Low-level: pass textures to system
+  // create respective particle system
   const system = new GravityQuadrupole({
     gl,
     textureWidth,
     textureHeight,
-    positionMassTexture,
-    velocityColorTexture,
     // ... physics options
   });
-  
+  ...
+  // upload initial positions to textures
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, positions);
+  ...
+  // upload initial velocities to textures
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, velocities);
+
   return system;
 }
 ```
 
 
 ## Key Design Decisions
+
+SEE MANDATORY NOTES AT BOTTOM
 
 ### Decision 1: Mass Packing (Status: Resolved)
 **Keep mass in position.w**
@@ -149,3 +155,9 @@ This is a **breaking change** warranting a version bump:
 - Direct instantiation pattern changes
 
 However, factory function `particleSystem()` remains convenient for common use case.
+
+# Mandatory Notes
+
+* DO NOT implement legacy or backwards compatibility paths in particle systems. The old particleData MUST be removed and salted.
+* UPDATE particle system constructors to use parameter destructuring instead of options object.
+* AVOID temporary variables in the constructor that are the same as object fields. Fold them into object fields directly.

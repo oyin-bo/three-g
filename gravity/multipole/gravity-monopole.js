@@ -3,23 +3,26 @@
 /**
  * ParticleSystemMonopoleKernels - Kernel-based monopole particle system
  * 
- * Reimplementation using WebGL2 Kernel architecture from docs/8.1-multipole-migration.md.
+ * Texture-first architecture per docs/11-lowering-level.md.
+ * Operates purely on GPU textures; no CPU particle data handling.
  * Uses composition of small, testable kernels instead of monolithic pipeline.
  */
 
-import { KIntegrateVelocity } from './k-integrate-velocity.js';
-import { KIntegratePosition } from './k-integrate-position.js';
 import { KAggregatorMonopole } from './k-aggregator-monopole.js';
+import { KBoundsReduce } from './k-bounds-reduce.js';
+import { KIntegrateEuler } from './k-integrate-euler.js';
 import { KPyramidBuild } from './k-pyramid-build.js';
 import { KTraversal } from './k-traversal.js';
-import { KBoundsReduce } from './k-bounds-reduce.js';
 
 export class GravityMonopole {
   /**
    * @param {{
    *   gl: WebGL2RenderingContext,
-   *   particleData: { positions: Float32Array, velocities?: Float32Array|null },
+   *   textureWidth: number,
+   *   textureHeight: number,
    *   particleCount?: number,
+   *   positionMassTexture?: WebGLTexture,
+   *   velocityColorTexture?: WebGLTexture,
    *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
    *   theta?: number,
    *   dt?: number,
@@ -30,36 +33,54 @@ export class GravityMonopole {
    *   maxAccel?: number
    * }} options
    */
-  constructor(options) {
-    this.gl = options.gl;
+  constructor({
+    gl,
+    textureWidth,
+    textureHeight,
+    particleCount,
+    positionMassTexture,
+    velocityColorTexture,
+    worldBounds,
+    theta,
+    dt,
+    gravityStrength,
+    softening,
+    damping,
+    maxSpeed,
+    maxAccel
+  }) {
+    this.gl = gl;
 
-    if (!options.particleData)
-      throw new Error('ParticleSystemMonopoleKernels requires particleData with positions');
+    if (!textureWidth || !textureHeight)
+      throw new Error('GravityMonopole requires textureWidth and textureHeight');
 
-    const particleCount = options.particleData.positions.length / 4;
+    this.positionMassTexture = positionMassTexture;
+    this.velocityColorTexture = velocityColorTexture;
 
-    this.worldBounds = options.worldBounds || { min: [-4, -4, -4], max: [4, 4, 4] };
-    this.options = {
-      particleCount,
-      theta: options.theta || 0.5,
-      dt: options.dt || 1 / 60,
-      gravityStrength: options.gravityStrength || 0.0003,
-      softening: options.softening || 0.2,
-      damping: options.damping || 0.0,
-      maxSpeed: options.maxSpeed || 2.0,
-      maxAccel: options.maxAccel || 1.0
-    };
+    this.textureWidth = textureWidth;
+    this.textureHeight = textureHeight;
+    this.actualTextureSize = textureWidth * textureHeight;
+
+    // Validate or derive particleCount
+    this.particleCount = particleCount !== undefined ? particleCount : this.actualTextureSize;
+    if (this.particleCount > this.actualTextureSize)
+      throw new Error(`particleCount ${this.particleCount} exceeds texture capacity ${this.actualTextureSize}`);
+
+    this.worldBounds = worldBounds || { min: [-4, -4, -4], max: [4, 4, 4] };
+
+    this.theta = theta !== undefined ? theta : 0.5;
+    this.dt = dt !== undefined ? dt : 1 / 60;
+    this.gravityStrength = gravityStrength !== undefined ? gravityStrength : 0.0003;
+    this.softening = softening !== undefined ? softening : 0.2;
+    this.damping = damping !== undefined ? damping : 0.0;
+    this.maxSpeed = maxSpeed !== undefined ? maxSpeed : 2.0;
+    this.maxAccel = maxAccel !== undefined ? maxAccel : 1.0;
 
     this.frameCount = 0;
 
     // Bounds update scheduling
     this.boundsUpdateInterval = 90;  // Update bounds every 90 frames (1.5 seconds at 60fps)
     this.lastBoundsUpdateFrame = -this.boundsUpdateInterval;  // Force initial update
-
-    // Calculate texture dimensions
-    this.textureWidth = Math.ceil(Math.sqrt(particleCount));
-    this.textureHeight = Math.ceil(particleCount / this.textureWidth);
-    this.actualTextureSize = this.textureWidth * this.textureHeight;
 
     // Octree configuration
     this.numLevels = 7;
@@ -76,53 +97,6 @@ export class GravityMonopole {
     this.disableFloatBlend = !floatBlend;
     if (!floatBlend)
       console.warn('EXT_float_blend not supported: reduced accumulation accuracy');
-
-    // Create textures:
-
-    // Create position textures: public active texture and internal write target
-    this.positionTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-    this.positionTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-
-    // Create velocity textures: public active texture and internal write target
-    this.velocityTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-    this.velocityTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-
-    // Note: We intentionally do NOT create forceTexture or level textures here.
-    // Kernels (aggregator/pyramid/traversal) are responsible for allocating
-    // any internal textures or FBOs they need. The particle system only owns
-    // the particle ping-pong textures (position/velocity) and the color
-    // texture used for rendering.
-
-
-    // Upload particle data
-    const { positions, velocities } = options.particleData;
-
-    const expectedLength = this.actualTextureSize * 4;
-    if (positions.length !== expectedLength) {
-      throw new Error(`Position data length mismatch: expected ${expectedLength}, got ${positions.length}`);
-    }
-
-    const velData = velocities || new Float32Array(expectedLength);
-
-    // Sanity checks to satisfy @ts-check and ensure textures were created
-    if (!this.positionTexture)
-      throw new Error('Position textures not initialized');
-    if (!this.velocityTexture)
-      throw new Error('Velocity textures not initialized');
-
-    // Upload positions into both active and write textures so first-frame reads are valid
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionTexture);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, positions);
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionTextureWrite);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, positions);
-
-    // Upload velocities into both active and write textures
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.velocityTexture);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, velData);
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.velocityTextureWrite);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, velData);
-
-    this.gl.bindTexture(this.gl.TEXTURE_2D, null);
 
     // Kernels are allowed to create and own their internal textures/FBOs unless
     // an explicit texture is passed in the options.
@@ -155,7 +129,7 @@ export class GravityMonopole {
       gl: this.gl,
       inPosition: null,  // set per-frame before run
       // outA0/outA1/outA2 omitted - kernel will create them
-      particleCount: this.options.particleCount,
+      particleCount: this.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
       octreeSize: this.L0Size,
@@ -197,37 +171,29 @@ export class GravityMonopole {
       numLevels: this.numLevels,
       levelConfigs: this.levelConfigs,
       worldBounds: this.worldBounds,
-      theta: this.options.theta,
-      gravityStrength: this.options.gravityStrength,
-      softening: this.options.softening
+      theta: this.theta,
+      gravityStrength: this.gravityStrength,
+      softening: this.softening
     });
 
     // Create integrator kernels. These kernels will accept external ping-pong
     // textures (positions/velocities) each frame and write to targets; we do
     // not force them to own the system-level ping-pong textures.
-    this.velocityKernel = new KIntegrateVelocity({
+    this.integrateEulerKernel = new KIntegrateEuler({
       gl: this.gl,
-      inVelocity: null,
+      inPosition: this.positionMassTexture,
+      inVelocity: this.velocityColorTexture,
       inForce: null,
-      inPosition: null,
-      outVelocity: null,
       width: this.textureWidth,
       height: this.textureHeight,
-      dt: this.options.dt,
-      damping: this.options.damping,
-      maxSpeed: this.options.maxSpeed,
-      maxAccel: this.options.maxAccel
+      dt: this.dt,
+      damping: this.damping,
+      maxSpeed: this.maxSpeed,
+      maxAccel: this.maxAccel
     });
 
-    this.positionKernel = new KIntegratePosition({
-      gl: this.gl,
-      inPosition: null,
-      inVelocity: null,
-      outPosition: null,
-      width: this.textureWidth,
-      height: this.textureHeight,
-      dt: this.options.dt
-    });
+    this.positionMassTexture = this.integrateEulerKernel.inPosition;
+    this.velocityColorTexture = this.integrateEulerKernel.inVelocity;
 
     // Create bounds reduction kernel for GPU-resident dynamic bounds updates
     this.boundsKernel = new KBoundsReduce({
@@ -235,7 +201,7 @@ export class GravityMonopole {
       inPosition: null,  // set per-run
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
-      particleCount: this.options.particleCount
+      particleCount: this.particleCount
     });
 
     // Create reusable resources for bounds readback (hot path - no alloc/dealloc per frame)
@@ -268,7 +234,7 @@ export class GravityMonopole {
 
   _buildOctree() {
     // Aggregate particles into L0
-    this.aggregatorKernel.inPosition = this.positionTexture;
+    this.aggregatorKernel.inPosition = this.positionMassTexture;
     this.aggregatorKernel.run();
     let err = this.gl.getError();
     if (err !== this.gl.NO_ERROR) {
@@ -309,48 +275,30 @@ export class GravityMonopole {
       if (k && k.outA0) levelA0s.push(k.outA0);
     }
 
-    this.traversalKernel.inPosition = this.positionTexture;
+    this.traversalKernel.inPosition = this.positionMassTexture;
     this.traversalKernel.inLevelA0 = levelA0s;
     this.traversalKernel.run();
     const err = this.gl.getError();
-    if (err !== this.gl.NO_ERROR) {
-      console.error(`[Traversal] GL error: ${err}`);
-    }
+    if (err !== this.gl.NO_ERROR) console.error(`[Traversal] GL error: ${err}`);
 
     // Wire traversal result into velocity integrator
-    if (this.velocityKernel) {
-      this.velocityKernel.inForce = this.traversalKernel.outForce || null;
-    }
+    this.integrateEulerKernel.inForce = this.traversalKernel.outForce;
   }
 
   _integratePhysics() {
-    // Update velocities
-    this.velocityKernel.inVelocity = this.velocityTexture;
-    this.velocityKernel.inPosition = this.positionTexture;
-    this.velocityKernel.outVelocity = this.velocityTextureWrite;
-    this.velocityKernel.run();
+    // allow external inputs
+    this.integrateEulerKernel.inVelocity = this.velocityColorTexture;
+    this.integrateEulerKernel.inPosition = this.positionMassTexture;
+    this.integrateEulerKernel.run();
 
-    // Swap velocity textures: write becomes active
-    {
-      const tmp = this.velocityTexture;
-      this.velocityTexture = this.velocityTextureWrite;
-      this.velocityTextureWrite = tmp;
-    }
+    // swap and leave updated textures in system properties
+    this.positionMassTexture = this.integrateEulerKernel.outPosition;
+    this.velocityColorTexture = this.integrateEulerKernel.outVelocity;
 
-    // Update positions
-    if (!this.positionKernel) throw new Error('Position kernel missing');
-
-    this.positionKernel.inPosition = this.positionTexture;
-    this.positionKernel.inVelocity = this.velocityTexture;
-    this.positionKernel.outPosition = this.positionTextureWrite;
-    this.positionKernel.run();
-
-    // Swap position textures: write becomes active
-    {
-      const tmp = this.positionTexture;
-      this.positionTexture = this.positionTextureWrite;
-      this.positionTextureWrite = tmp;
-    }
+    this.integrateEulerKernel.outPosition = this.integrateEulerKernel.inPosition;
+    this.integrateEulerKernel.outVelocity = this.integrateEulerKernel.inVelocity;
+    this.integrateEulerKernel.inPosition = this.positionMassTexture;
+    this.integrateEulerKernel.inVelocity = this.velocityColorTexture;
   }
 
   /**
@@ -361,10 +309,10 @@ export class GravityMonopole {
    */
   _updateBounds() {
     if (!this.boundsKernel || !this.boundsKernel.outBounds) return;
-    if (!this.positionTexture) return;
+    if (!this.positionMassTexture) return;
 
     // Run bounds reduction kernel
-    this.boundsKernel.inPosition = this.positionTexture;
+    this.boundsKernel.inPosition = this.positionMassTexture;
     this.boundsKernel.run();
 
     // Reuse pre-allocated FBO
@@ -387,41 +335,13 @@ export class GravityMonopole {
 
   dispose() {
     // Dispose kernels
-    if (this.aggregatorKernel) this.aggregatorKernel.dispose();
-    if (this.pyramidKernels) this.pyramidKernels.forEach(k => k.dispose());
-    if (this.traversalKernel) this.traversalKernel.dispose();
-    if (this.velocityKernel) this.velocityKernel.dispose();
-    if (this.positionKernel) this.positionKernel.dispose();
-    if (this.boundsKernel) this.boundsKernel.dispose();
+    this.aggregatorKernel?.dispose();
+    this.pyramidKernels?.forEach(k => k.dispose());
+    this.traversalKernel?.dispose();
+    this.integrateEulerKernel?.dispose();
+    this.boundsKernel?.dispose();
 
     // Clean up bounds readback resources
-    if (this.boundsReadbackFBO) {
-      this.gl.deleteFramebuffer(this.boundsReadbackFBO);
-    }
+    if (this.boundsReadbackFBO) this.gl.deleteFramebuffer(this.boundsReadbackFBO);
   }
-}
-
-/**
- * @param {WebGL2RenderingContext} gl
- * @param {number} width
- * @param {number} height
- * @param {number} [internalFormat]
- * @param {number} [type]
- */
-function createTexture2D(gl, width, height, internalFormat, type) {
-  const fmt = internalFormat || gl.RGBA32F;
-  const tp = type || gl.FLOAT;
-
-  const texture = gl.createTexture();
-  if (!texture) throw new Error('Failed to create texture');
-
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0, gl.RGBA, tp, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.bindTexture(gl.TEXTURE_2D, null);
-
-  return texture;
 }

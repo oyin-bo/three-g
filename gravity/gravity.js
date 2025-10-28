@@ -98,10 +98,16 @@ export function particleSystem(options) {
       });
       break;
 
-    case 'monopole':
+    case 'monopole': {
+      const { textureWidth, textureHeight, positions, velocities } = particleData;
+      const particleCount = particles.length;
+
+      // Let GravityMonopole create textures (pass undefined)
       system = new GravityMonopole({
         gl,
-        particleData,
+        textureWidth,
+        textureHeight,
+        particleCount,
         worldBounds,
         theta: theta !== undefined ? theta : 0.65,
         gravityStrength,
@@ -111,7 +117,15 @@ export function particleSystem(options) {
         maxSpeed,
         maxAccel
       });
+
+      // Upload particle data into allocated textures
+      gl.bindTexture(gl.TEXTURE_2D, system.positionMassTexture);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, positions);
+      gl.bindTexture(gl.TEXTURE_2D, system.velocityColorTexture);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, velocities);
+      gl.bindTexture(gl.TEXTURE_2D, null);
       break;
+    }
 
     case 'quadrupole':
     default:

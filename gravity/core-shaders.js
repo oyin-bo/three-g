@@ -89,5 +89,7 @@ void main() {
     newVel = newVel / vmag * u_maxSpeed;
   }
   
-  fragColor = vec4(newVel, 0.0);
+  // Preserve W component (color/metadata) from input velocity
+  fragColor = vec4(newVel, vel.w);
 }`;
+

@@ -245,7 +245,7 @@ outcome.animate = () => {
   }
 
   if (!isInitialized) {
-    const positionTexture = physics.positionTexture;
+    const positionTexture = physics.positionTexture || physics.positionMassTexture;
     positionTextureWrapper = new THREE.ExternalTexture(positionTexture);
 
     // Use pre-loaded global color texture
@@ -638,7 +638,6 @@ function recreatePhysicsAndMesh() {
   }
 
   const textureSize = { width: system.textureWidth, height: system.textureHeight };
-  const positionTexture = system.positionTexture;
 
   const colorTexture = buildColorTexture(gl, particles, textureSize, worldBounds);
   colorTexGlobal = colorTexture;
@@ -648,7 +647,7 @@ function recreatePhysicsAndMesh() {
     particleCount,
     textures: {
       // positionTexture is always defined here
-      position: /** @type {WebGLTexture} */ (positionTexture),
+      position: /** @type {WebGLTexture} */ (system.positionTexture || system.positionMassTexture),
       color: colorTexture,
       size: [textureSize.width, textureSize.height],
     },
