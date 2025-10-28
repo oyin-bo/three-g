@@ -128,10 +128,15 @@ export function particleSystem(options) {
     }
 
     case 'quadrupole':
-    default:
+    default: {
+      const { textureWidth, textureHeight, positions, velocities } = particleData;
+      const particleCount = particles.length;
+
       system = new GravityQuadrupole({
         gl,
-        particleData,
+        textureWidth,
+        textureHeight,
+        particleCount,
         worldBounds,
         theta: theta !== undefined ? theta : 0.65,
         gravityStrength,
@@ -141,7 +146,15 @@ export function particleSystem(options) {
         maxSpeed,
         maxAccel
       });
+
+      // Upload particle data into allocated textures
+      gl.bindTexture(gl.TEXTURE_2D, system.positionMassTexture);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, positions);
+      gl.bindTexture(gl.TEXTURE_2D, system.velocityColorTexture);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, velocities);
+      gl.bindTexture(gl.TEXTURE_2D, null);
       break;
+    }
   }
   
   // Return the system directly - it already has all the methods we added
@@ -154,10 +167,11 @@ export function particleSystem(options) {
  * @param {{
  *   system: {
  *     gl?: WebGL2RenderingContext,
- *     positionTexture?: WebGLTexture | null,
- *     velocityTexture?: WebGLTexture | null,
+ *     positionMassTexture?: WebGLTexture | null,
+ *     velocityColorTexture?: WebGLTexture | null,
  *     textureWidth?: number,
  *     textureHeight?: number,
+ *     particleCount?: number,
  *     options?: { particleCount?: number }
  *   }
  * }} payload
@@ -170,21 +184,22 @@ export function particleSystem(options) {
 export function unloadKernelParticleData({ system }) {
   if (!system) throw new Error('unloadKernelParticleData requires a system');
 
-  const { gl, positionTexture, velocityTexture, textureWidth, textureHeight, options } = system;
+  // @ts-ignore
+  const { gl, positionMassTexture, velocityColorTexture, textureWidth, textureHeight, particleCount, options } = system;
   if (!(gl instanceof WebGL2RenderingContext)) {
     throw new Error('System does not expose a WebGL2RenderingContext');
   }
 
-  if (!positionTexture || !velocityTexture) {
+  if (!positionMassTexture || !velocityColorTexture) {
     throw new Error('System is missing position or velocity textures');
   }
 
-  if (!textureWidth || !textureHeight || !options?.particleCount) {
+  const count = particleCount || options?.particleCount;
+  if (!textureWidth || !textureHeight || !count) {
     throw new Error('System is missing texture dimensions or particle count');
   }
 
   const totalTexels = textureWidth * textureHeight;
-  const particleCount = options.particleCount;
 
   const positionData = new Float32Array(totalTexels * 4);
   const velocityData = new Float32Array(totalTexels * 4);
@@ -198,21 +213,21 @@ export function unloadKernelParticleData({ system }) {
   try {
     gl.bindFramebuffer(gl.FRAMEBUFFER, tempFramebuffer);
 
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, positionTexture, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, positionMassTexture, 0);
     gl.readPixels(0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, positionData);
 
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, velocityTexture, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, velocityColorTexture, 0);
     gl.readPixels(0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, velocityData);
   } finally {
     gl.bindFramebuffer(gl.FRAMEBUFFER, previousFramebuffer);
     gl.deleteFramebuffer(tempFramebuffer);
   }
 
-  const positions = new Float32Array(particleCount * 3);
-  const velocities = new Float32Array(particleCount * 3);
-  const masses = new Float32Array(particleCount);
+  const positions = new Float32Array(count * 3);
+  const velocities = new Float32Array(count * 3);
+  const masses = new Float32Array(count);
 
-  for (let i = 0; i < particleCount; i++) {
+  for (let i = 0; i < count; i++) {
     const src = i * 4;
     const dst = i * 3;
 

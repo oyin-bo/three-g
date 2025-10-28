@@ -161,3 +161,67 @@ However, factory function `particleSystem()` remains convenient for common use c
 * DO NOT implement legacy or backwards compatibility paths in particle systems. The old particleData MUST be removed and salted.
 * UPDATE particle system constructors to use parameter destructuring instead of options object.
 * AVOID temporary variables in the constructor that are the same as object fields. Fold them into object fields directly.
+
+# Migration Analysis: Lessons from `gravity-monopole.js`
+
+The successful migration of `gravity-monopole.js` to the texture-first architecture provides a clear template for other particle systems. The key lessons are:
+
+1.  **Unified Integration Kernel**: Replacing separate `KIntegrateVelocity` and `KIntegratePosition` kernels with a single `KIntegrateEuler` kernel using Multiple Render Targets (MRT) was highly effective. This halves the number of integration passes, reduces GL state changes, and simplifies the system's `step()` logic.
+
+2.  **Kernel-Owned Ping-Pong Buffers**: The integration kernel now owns its ping-pong textures internally. The particle system only tracks references to the current `positionMassTexture` and `velocityColorTexture`, swapping the kernel's internal buffers after each run. This removes `...Write` textures from the system class, creating a cleaner, higher-level abstraction.
+
+3.  **Constructor-Driven Texture Management**: The pattern of allowing kernels to create their own textures if none are provided, and then having the system adopt those textures, works well. `GravityMonopole` passes its `positionMassTexture` to `KIntegrateEuler`, but if it was `undefined`, the kernel would create it, and the system would then use the kernel's newly created texture. This centralizes texture allocation logic within the kernels while giving the system final authority.
+
+4.  **Simplified API**: The public API is cleaner. The system exposes `positionMassTexture` and `velocityColorTexture` as the always-current state, hiding the internal write-buffers and ping-pong complexity from the caller.
+
+## Applying to `gravity-quadrupole.js`
+
+To migrate `gravity-quadrupole.js`, we should apply the same lessons:
+
+1.  **Adopt `KIntegrateEuler`**: Replace the separate `velocityKernel` (`KIntegrateVelocity`) and `positionKernel` (`KIntegratePosition`) with a single instance of `KIntegrateEuler`. This will unify the integration step. **Note**: `KIntegrateEuler` is compatible with all force calculation methods (monopole tree traversal, quadrupole tree traversal, PM/FFT mesh, and spectral). All systems output forces in the same RGBA32F format (xyz=force, w=unused), so `gravity-mesh.js` and `gravity-spectral.js` can also migrate to `KIntegrateEuler` using this same pattern.
+
+2.  **Refactor Constructor**:
+    *   Change the constructor signature to accept `textureWidth`, `textureHeight`, `positionMassTexture`, and `velocityColorTexture`, removing the old `particleData` parameter.
+    *   Remove the manual creation and uploading of `positionTexture` and `velocityTexture`. The factory or caller will be responsible for this.
+    *   Instantiate `KIntegrateEuler` and let it manage the creation of position/velocity textures if they are not provided.
+
+3.  **Update `_integratePhysics`**:
+    *   Remove the two separate kernel calls for velocity and position integration.
+    *   Replace them with a single call to `integrateEulerKernel.run()`.
+    *   Implement the same ping-pong swap logic as in `gravity-monopole.js` to cycle the input and output textures for the next frame.
+
+4.  **Remove Redundant Textures**: The internal `positionTextureWrite` and `velocityTextureWrite` fields in `GravityQuadrupole` will no longer be needed, as the ping-pong logic will be handled by swapping references to the textures owned by the `KIntegrateEuler` kernel.
+
+## Factory Adaptation (`gravity.js`)
+
+The factory function already demonstrates the texture-first pattern with `gravity-monopole.js`:
+
+```javascript
+case 'monopole': {
+  const { textureWidth, textureHeight, positions, velocities } = particleData;
+  
+  // Let GravityMonopole create textures (pass undefined)
+  system = new GravityMonopole({
+    gl,
+    textureWidth,
+    textureHeight,
+    particleCount,
+    // ... physics options, no particleData
+  });
+
+  // Upload particle data into allocated textures
+  gl.bindTexture(gl.TEXTURE_2D, system.positionMassTexture);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, positions);
+  gl.bindTexture(gl.TEXTURE_2D, system.velocityColorTexture);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, velocities);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  break;
+}
+```
+
+**Key points:**
+1. **System creates textures**: Constructor receives `undefined` for position/velocity textures, triggering kernel allocation
+2. **Factory uploads data**: After construction, factory uploads CPU particle data via `texSubImage2D`
+3. **Clean separation**: System handles GPU architecture, factory handles CPU→GPU conversion
+
+When migrating `gravity-quadrupole.js`, `gravity-mesh.js`, and `gravity-spectral.js`, the factory must adopt this same pattern, replacing the current `particleData`-based approach.

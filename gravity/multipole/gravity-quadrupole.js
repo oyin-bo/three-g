@@ -10,17 +10,19 @@
 
 import { KAggregatorQuadrupole } from './k-aggregator-quadrupole.js';
 import { KBoundsReduce } from './k-bounds-reduce.js';
-import { KIntegratePosition } from './k-integrate-position.js';
-import { KIntegrateVelocity } from './k-integrate-velocity.js';
+import { KIntegrateEuler } from './k-integrate-euler.js';
 import { KPyramidBuild } from './k-pyramid-build.js';
 import { KTraversalQuadrupole } from './k-traversal-quadrupole.js';
 
 export class GravityQuadrupole {
   /**
    * @param {{
-   *  gl: WebGL2RenderingContext,
-   *   particleData: { positions: Float32Array, velocities?: Float32Array|null, colors?: Uint8Array|null },
+   *   gl: WebGL2RenderingContext,
+   *   textureWidth: number,
+   *   textureHeight: number,
    *   particleCount?: number,
+   *   positionMassTexture?: WebGLTexture,
+   *   velocityColorTexture?: WebGLTexture,
    *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
    *   theta?: number,
    *   dt?: number,
@@ -32,42 +34,56 @@ export class GravityQuadrupole {
    *   useOccupancyMasks?: boolean
    * }} options
    */
-  constructor(options) {
-    this.gl = options.gl;
+  constructor({
+    gl,
+    textureWidth,
+    textureHeight,
+    particleCount,
+    positionMassTexture,
+    velocityColorTexture,
+    worldBounds,
+    theta,
+    dt,
+    gravityStrength,
+    softening,
+    damping,
+    maxSpeed,
+    maxAccel,
+    useOccupancyMasks
+  }) {
+    this.gl = gl;
 
     if (!(this.gl instanceof WebGL2RenderingContext)) {
       throw new Error('ParticleSystemQuadrupoleKernels requires WebGL2RenderingContext');
     }
 
-    if (!options.particleData) {
-      throw new Error('ParticleSystemQuadrupoleKernels requires particleData with positions');
-    }
+    if (!textureWidth || !textureHeight)
+      throw new Error('GravityQuadrupole requires textureWidth and textureHeight');
 
-    const particleCount = options.particleData.positions.length / 4;
+    this.textureWidth = textureWidth;
+    this.textureHeight = textureHeight;
+    this.actualTextureSize = this.textureWidth * this.textureHeight;
 
-    this.options = {
-      particleCount,
-      worldBounds: options.worldBounds || { min: [-4, -4, 0], max: [4, 4, 2] },
-      theta: options.theta || 0.5,
-      dt: options.dt || 1 / 60,
-      gravityStrength: options.gravityStrength || 0.0003,
-      softening: options.softening || 0.2,
-      damping: options.damping || 0.0,
-      maxSpeed: options.maxSpeed || 2.0,
-      maxAccel: options.maxAccel || 1.0,
-      useOccupancyMasks: options.useOccupancyMasks !== undefined ? options.useOccupancyMasks : false
-    };
+    // Validate or derive particleCount
+    this.particleCount = particleCount !== undefined ? particleCount : this.actualTextureSize;
+    if (this.particleCount > this.actualTextureSize)
+      throw new Error(`particleCount ${this.particleCount} exceeds texture capacity ${this.actualTextureSize}`);
+
+    this.worldBounds = worldBounds || { min: [-4, -4, 0], max: [4, 4, 2] };
+    this.theta = theta !== undefined ? theta : 0.5;
+    this.dt = dt !== undefined ? dt : 1 / 60;
+    this.gravityStrength = gravityStrength !== undefined ? gravityStrength : 0.0003;
+    this.softening = softening !== undefined ? softening : 0.2;
+    this.damping = damping !== undefined ? damping : 0.0;
+    this.maxSpeed = maxSpeed !== undefined ? maxSpeed : 2.0;
+    this.maxAccel = maxAccel !== undefined ? maxAccel : 1.0;
+    this.useOccupancyMasks = useOccupancyMasks !== undefined ? useOccupancyMasks : false;
 
     this.frameCount = 0;
 
     // Bounds update scheduling
     this.boundsUpdateInterval = 90;  // Update bounds every 90 frames (1.5 seconds at 60fps)
     this.lastBoundsUpdateFrame = -this.boundsUpdateInterval;  // Force initial update
-
-    // Calculate texture dimensions
-    this.textureWidth = Math.ceil(Math.sqrt(particleCount));
-    this.textureHeight = Math.ceil(particleCount / this.textureWidth);
-    this.actualTextureSize = this.textureWidth * this.textureHeight;
 
     // Octree configuration
     // CRITICAL: Limited to 4 levels due to WebGL2 texture unit constraint (16 max)
@@ -87,51 +103,13 @@ export class GravityQuadrupole {
     if (!floatBlend)
       console.warn('EXT_float_blend not supported: reduced accumulation accuracy');
 
-  // Declare texture slots (nullable for lifecycle)
-  /** @type {WebGLTexture|null} */ this.positionTexture = null;
-  /** @type {WebGLTexture|null} */ this.positionTextureWrite = null;
-  /** @type {WebGLTexture|null} */ this.velocityTexture = null;
-  /** @type {WebGLTexture|null} */ this.velocityTextureWrite = null;
-  /** @type {WebGLTexture|null} */ this.levelTextureArrayA0 = null;
-  /** @type {WebGLTexture|null} */ this.levelTextureArrayA1 = null;
-  /** @type {WebGLTexture|null} */ this.levelTextureArrayA2 = null;
+    // The system owns the texture arrays, but not the particle data textures
+    this.positionMassTexture = positionMassTexture;
+    this.velocityColorTexture = velocityColorTexture;
 
-    // Create position textures: public active texture and internal write target
-    this.positionTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-    this.positionTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-
-    // Create velocity textures: public active texture and internal write target
-    this.velocityTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-    this.velocityTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-
-    // Upload particle data
-    const { positions, velocities } = options.particleData;
-
-    const expectedLength = this.actualTextureSize * 4;
-    if (positions.length !== expectedLength)
-      throw new Error(`Position data length mismatch: expected ${expectedLength}, got ${positions.length}`);
-
-    const velData = velocities || new Float32Array(expectedLength);
-
-    // Sanity checks to satisfy @ts-check and ensure textures were created
-    if (!this.positionTexture)
-      throw new Error('Position textures not initialized');
-    if (!this.velocityTexture)
-      throw new Error('Velocity textures not initialized');
-
-    // Upload positions into both active and write textures so first-frame reads are valid
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionTexture);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, positions);
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionTextureWrite);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, positions);
-
-    // Upload velocities into both active and write textures
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.velocityTexture);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, velData);
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.velocityTextureWrite);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, velData);
-
-    this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+    /** @type {WebGLTexture|null} */ this.levelTextureArrayA0 = null;
+    /** @type {WebGLTexture|null} */ this.levelTextureArrayA1 = null;
+    /** @type {WebGLTexture|null} */ this.levelTextureArrayA2 = null;
 
     // Prepare levelConfigs (sizes for each pyramid level)
     this.levelConfigs = [];
@@ -153,7 +131,6 @@ export class GravityQuadrupole {
     // Create texture arrays for all pyramid levels (A0, A1, A2)
     // Each layer has its own size from levelConfigs. We allocate with the max size
     // to ensure all layers fit, but we must copy only the appropriate region per layer.
-    const gl = this.gl;
     const maxSize = this.L0Size; // Maximum size for array allocation
 
     // Create A0 array (monopole moments: Σ(m·x), Σ(m·y), Σ(m·z), Σm)
@@ -190,13 +167,13 @@ export class GravityQuadrupole {
     this.aggregatorKernel = new KAggregatorQuadrupole({
       gl: this.gl,
       inPosition: null,  // set per-frame before run
-      particleCount: this.options.particleCount,
+      particleCount: this.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
       octreeSize: this.L0Size,
       gridSize: this.octreeGridSize,
       slicesPerRow: this.octreeSlicesPerRow,
-      worldBounds: this.options.worldBounds,
+      worldBounds: this.worldBounds,
       disableFloatBlend: this.disableFloatBlend
     });
 
@@ -232,39 +209,31 @@ export class GravityQuadrupole {
       particleTexHeight: this.textureHeight,
       numLevels: this.numLevels,
       levelConfigs: this.levelConfigs,
-      worldBounds: this.options.worldBounds,
-      theta: this.options.theta,
-      gravityStrength: this.options.gravityStrength,
-      softening: this.options.softening,
-      useOccupancyMasks: this.options.useOccupancyMasks
+      worldBounds: this.worldBounds,
+      theta: this.theta,
+      gravityStrength: this.gravityStrength,
+      softening: this.softening,
+      useOccupancyMasks: this.useOccupancyMasks
     });
 
-    // Create integrator kernels. These kernels will accept external ping-pong
-    // textures (positions/velocities) each frame and write to targets; we do
-    // not force them to own the system-level ping-pong textures.
-    this.velocityKernel = new KIntegrateVelocity({
+    // Create integrator kernel. This kernel will accept external ping-pong
+    // textures (positions/velocities) each frame and write to targets.
+    this.integrateEulerKernel = new KIntegrateEuler({
       gl: this.gl,
-      inVelocity: null,
-      inForce: null,
-      inPosition: null,
-      outVelocity: null,
+      inPosition: this.positionMassTexture,
+      inVelocity: this.velocityColorTexture,
+      inForce: null, // wired from traversal
       width: this.textureWidth,
       height: this.textureHeight,
-      dt: this.options.dt,
-      damping: this.options.damping,
-      maxSpeed: this.options.maxSpeed,
-      maxAccel: this.options.maxAccel
+      dt: this.dt,
+      damping: this.damping,
+      maxSpeed: this.maxSpeed,
+      maxAccel: this.maxAccel
     });
 
-    this.positionKernel = new KIntegratePosition({
-      gl: this.gl,
-      inPosition: null,
-      inVelocity: null,
-      outPosition: null,
-      width: this.textureWidth,
-      height: this.textureHeight,
-      dt: this.options.dt
-    });
+    // Adopt textures created by the kernel if none were provided
+    this.positionMassTexture = this.integrateEulerKernel.inPosition;
+    this.velocityColorTexture = this.integrateEulerKernel.inVelocity;
 
     // Create bounds reduction kernel for GPU-resident dynamic bounds updates
     this.boundsKernel = new KBoundsReduce({
@@ -272,7 +241,7 @@ export class GravityQuadrupole {
       inPosition: null,  // set per-run
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
-      particleCount: this.options.particleCount
+      particleCount: this.particleCount
     });
   }
 
@@ -302,9 +271,9 @@ export class GravityQuadrupole {
   _buildOctree() {
     // Aggregate particles into L0
     if (!this.aggregatorKernel) throw new Error('Aggregator kernel missing');
-    if (!this.positionTexture) throw new Error('Position texture missing');
+    if (!this.positionMassTexture) throw new Error('Position texture missing');
 
-    this.aggregatorKernel.inPosition = this.positionTexture;
+    this.aggregatorKernel.inPosition = this.positionMassTexture;
     // Wire bounds texture if available (after first bounds update)
     if (this.boundsKernel?.outBounds) {
       this.aggregatorKernel.inBounds = this.boundsKernel.outBounds;
@@ -397,10 +366,10 @@ export class GravityQuadrupole {
   _calculateForces() {
     // Run tree traversal to compute forces using quadrupole moments
     if (!this.traversalKernel) throw new Error('Traversal kernel missing');
-    if (!this.positionTexture) throw new Error('Position texture missing');
+    if (!this.positionMassTexture) throw new Error('Position texture missing');
 
     // Wire texture arrays to traversal (all levels in 3 arrays)
-    this.traversalKernel.inPosition = this.positionTexture;
+    this.traversalKernel.inPosition = this.positionMassTexture;
     this.traversalKernel.inLevelsA0 = this.levelTextureArrayA0;
     this.traversalKernel.inLevelsA1 = this.levelTextureArrayA1;
     this.traversalKernel.inLevelsA2 = this.levelTextureArrayA2;
@@ -411,49 +380,32 @@ export class GravityQuadrupole {
     }
 
     // Wire occupancy from aggregator L0 (only L0 occupancy needed for traversal)
-    if (this.options.useOccupancyMasks && this.aggregatorKernel?.outOccupancy) {
+    if (this.useOccupancyMasks && this.aggregatorKernel?.outOccupancy) {
       this.traversalKernel.inOccupancy = this.aggregatorKernel.outOccupancy;
     }
 
     this.traversalKernel.run();
 
     // Wire traversal result into velocity integrator
-    if (this.velocityKernel) {
-      this.velocityKernel.inForce = this.traversalKernel.outForce || null;
+    if (this.integrateEulerKernel) {
+      this.integrateEulerKernel.inForce = this.traversalKernel.outForce || null;
     }
   }
 
   _integratePhysics() {
-    // Update velocities
-    if (!this.velocityKernel) throw new Error('Velocity kernel missing');
-    if (!this.velocityTexture || !this.positionTexture) throw new Error('Textures missing');
+    // allow external inputs
+    this.integrateEulerKernel.inVelocity = this.velocityColorTexture;
+    this.integrateEulerKernel.inPosition = this.positionMassTexture;
+    this.integrateEulerKernel.run();
 
-    this.velocityKernel.inVelocity = this.velocityTexture;
-    this.velocityKernel.inPosition = this.positionTexture;
-    this.velocityKernel.outVelocity = this.velocityTextureWrite;
-    this.velocityKernel.run();
+    // swap and leave updated textures in system properties
+    this.positionMassTexture = this.integrateEulerKernel.outPosition;
+    this.velocityColorTexture = this.integrateEulerKernel.outVelocity;
 
-    // Swap velocity textures: write becomes active
-    {
-      const tmp = this.velocityTexture;
-      this.velocityTexture = this.velocityTextureWrite;
-      this.velocityTextureWrite = tmp;
-    }
-
-    // Update positions
-    if (!this.positionKernel) throw new Error('Position kernel missing');
-
-    this.positionKernel.inPosition = this.positionTexture;
-    this.positionKernel.inVelocity = this.velocityTexture;
-    this.positionKernel.outPosition = this.positionTextureWrite;
-    this.positionKernel.run();
-
-    // Swap position textures: write becomes active
-    {
-      const tmp = this.positionTexture;
-      this.positionTexture = this.positionTextureWrite;
-      this.positionTextureWrite = tmp;
-    }
+    this.integrateEulerKernel.outPosition = this.integrateEulerKernel.inPosition;
+    this.integrateEulerKernel.outVelocity = this.integrateEulerKernel.inVelocity;
+    this.integrateEulerKernel.inPosition = this.positionMassTexture;
+    this.integrateEulerKernel.inVelocity = this.velocityColorTexture;
   }
 
   /**
@@ -463,10 +415,10 @@ export class GravityQuadrupole {
    * No CPU readback - kernels sample the texture directly.
    */
   _updateBounds() {
-    if (!this.boundsKernel || !this.positionTexture) return;
+    if (!this.boundsKernel || !this.positionMassTexture) return;
 
     // Run GPU reduction to compute bounds (stays GPU-resident in boundsKernel.outBounds)
-    this.boundsKernel.inPosition = this.positionTexture;
+    this.boundsKernel.inPosition = this.positionMassTexture;
     this.boundsKernel.run();
 
     // Bounds texture is now updated and ready for kernels to sample
@@ -480,27 +432,8 @@ export class GravityQuadrupole {
     if (this.aggregatorKernel) this.aggregatorKernel.dispose();
     if (this.pyramidKernels) this.pyramidKernels.forEach(k => k.dispose());
     if (this.traversalKernel) this.traversalKernel.dispose();
-    if (this.velocityKernel) this.velocityKernel.dispose();
-    if (this.positionKernel) this.positionKernel.dispose();
+    if (this.integrateEulerKernel) this.integrateEulerKernel.dispose();
     if (this.boundsKernel) this.boundsKernel.dispose();
-
-    // Clean up textures
-    if (this.positionTexture) {
-      gl.deleteTexture(this.positionTexture);
-      this.positionTexture = null;
-    }
-    if (this.positionTextureWrite) {
-      gl.deleteTexture(this.positionTextureWrite);
-      this.positionTextureWrite = null;
-    }
-    if (this.velocityTexture) {
-      gl.deleteTexture(this.velocityTexture);
-      this.velocityTexture = null;
-    }
-    if (this.velocityTextureWrite) {
-      gl.deleteTexture(this.velocityTextureWrite);
-      this.velocityTextureWrite = null;
-    }
 
     // Clean up texture arrays
     if (this.levelTextureArrayA0) {
