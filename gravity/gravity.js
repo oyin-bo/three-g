@@ -69,10 +69,15 @@ export function particleSystem(options) {
   let system;
 
   switch (method) {
-    case 'mesh':
+    case 'mesh': {
+      const { textureWidth, textureHeight, positions, velocities } = particleData;
+      const particleCount = particles.length;
+
       system = new GravityMesh({
         gl,
-        particleData,
+        textureWidth,
+        textureHeight,
+        particleCount,
         worldBounds,
         dt,
         gravityStrength,
@@ -82,7 +87,18 @@ export function particleSystem(options) {
         maxAccel,
         mesh: meshConfig || undefined
       });
+
+      // Upload particle data into allocated textures
+      if (!system.positionMassTexture || !system.velocityColorTexture) {
+        throw new Error('Mesh system did not create textures');
+      }
+      gl.bindTexture(gl.TEXTURE_2D, system.positionMassTexture);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, positions);
+      gl.bindTexture(gl.TEXTURE_2D, system.velocityColorTexture);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, gl.RGBA, gl.FLOAT, velocities);
+      gl.bindTexture(gl.TEXTURE_2D, null);
       break;
+    }
 
     case 'spectral': {
       const { textureWidth, textureHeight, positions, velocities } = particleData;

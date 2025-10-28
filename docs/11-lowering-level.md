@@ -205,6 +205,16 @@ The `gravity-spectral.js` system follows the same legacy pattern and is also a p
 
 Completing this migration will bring all major particle systems under the unified, modern architecture.
 
+## Applying to `gravity-mesh.js`
+
+The `gravity-mesh.js` system is the final one to be migrated. It follows the same legacy patterns and is a straightforward candidate for the update.
+
+-   **Current State**: It uses a `particleData`-based constructor, manually creates and manages ping-pong textures, and uses separate integration kernels.
+-   **Force Compatibility**: The force calculation is a hybrid Particle-Mesh (PM) method, combining a long-range force from an FFT-based solver with a short-range direct-summation correction. The final accumulated force is stored in a standard `RGBA32F` texture, which is fully compatible with `KIntegrateEuler`.
+-   **Migration Path**: The plan is identical to the previous migrations: refactor the constructor, replace the two integration kernels with `KIntegrateEuler`, and update the `_integratePhysics` method to use the new unified kernel.
+
+With this final change, all particle systems will be aligned with the texture-first architecture.
+
 ## Factory Adaptation (`gravity.js`)
 
 The factory function already demonstrates the texture-first pattern with `gravity-monopole.js`:

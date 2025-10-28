@@ -13,15 +13,17 @@ import { KPoisson } from './k-poisson.js';
 import { KGradient } from './k-gradient.js';
 import { KForceSample } from './k-force-sample.js';
 import { KNearField } from './k-near-field.js';
-import { KIntegrateVelocity } from './k-integrate-velocity.js';
-import { KIntegratePosition } from './k-integrate-position.js';
+import { KIntegrateEuler } from '../multipole/k-integrate-euler.js';
 
 export class GravityMesh {
   /**
    * @param {{
    *   gl: WebGL2RenderingContext,
-   *   particleData: { positions: Float32Array, velocities?: Float32Array|null, colors?: Uint8Array|null },
+   *   textureWidth: number,
+   *   textureHeight: number,
    *   particleCount?: number,
+   *   positionMassTexture?: WebGLTexture,
+   *   velocityColorTexture?: WebGLTexture,
    *   worldBounds?: { min: [number,number,number], max: [number,number,number] },
    *   dt?: number,
    *   gravityStrength?: number,
@@ -39,32 +41,49 @@ export class GravityMesh {
    *   }
    * }} options
    */
-  constructor(options) {
-    this.gl = options.gl;
+  constructor({
+    gl,
+    textureWidth,
+    textureHeight,
+    particleCount,
+    positionMassTexture,
+    velocityColorTexture,
+    worldBounds,
+    dt,
+    gravityStrength,
+    softening,
+    damping,
+    maxSpeed,
+    maxAccel,
+    mesh: meshConfig
+  }) {
+    this.gl = gl;
 
     if (!(this.gl instanceof WebGL2RenderingContext)) {
       throw new Error('ParticleSystemMeshKernels requires WebGL2RenderingContext');
     }
     
-    if (!options.particleData) {
-      throw new Error('ParticleSystemMeshKernels requires particleData with positions');
-    }
-    
-    const particleCount = options.particleData.positions.length / 4;
-    
-    this.options = {
-      particleCount,
-      worldBounds: options.worldBounds || { min: [-4, -4, -4], max: [4, 4, 4] },
-      dt: options.dt || 1 / 60,
-      gravityStrength: options.gravityStrength || 0.0003,
-      softening: options.softening || 0.15,
-      damping: options.damping || 0.0,
-      maxSpeed: options.maxSpeed || 2.0,
-      maxAccel: options.maxAccel || 1.5
-    };
+    if (!textureWidth || !textureHeight)
+      throw new Error('GravityMesh requires textureWidth and textureHeight');
+
+    this.textureWidth = textureWidth;
+    this.textureHeight = textureHeight;
+    this.actualTextureSize = this.textureWidth * this.textureHeight;
+
+    this.particleCount = particleCount !== undefined ? particleCount : this.actualTextureSize;
+    if (this.particleCount > this.actualTextureSize)
+      throw new Error(`particleCount ${this.particleCount} exceeds texture capacity ${this.actualTextureSize}`);
+
+    this.worldBounds = worldBounds || { min: [-4, -4, -4], max: [4, 4, 4] };
+    this.dt = dt || 1 / 60;
+    this.gravityStrength = gravityStrength || 0.0003;
+    this.softening = softening || 0.15;
+    this.damping = damping || 0.0;
+    this.maxSpeed = maxSpeed || 2.0;
+    this.maxAccel = maxAccel || 1.5;
     
     // Mesh configuration
-    const meshOptions = options.mesh || {};
+    const meshOptions = meshConfig || {};
     this.meshConfig = {
       assignment: meshOptions.assignment || 'ngp',
       gridSize: meshOptions.gridSize || 64,
@@ -74,13 +93,7 @@ export class GravityMesh {
       nearFieldRadius: Math.max(1, Math.floor(meshOptions.nearFieldRadius ?? 2))
     };
     
-    this.particleData = options.particleData;
     this.frameCount = 0;
-    
-    // Calculate texture dimensions
-    this.textureWidth = Math.ceil(Math.sqrt(particleCount));
-    this.textureHeight = Math.ceil(particleCount / this.textureWidth);
-    this.actualTextureSize = this.textureWidth * this.textureHeight;
     
     // Grid configuration
     this.gridTextureSize = this.meshConfig.gridSize * this.meshConfig.slicesPerRow;
@@ -97,48 +110,14 @@ export class GravityMesh {
       console.warn('EXT_float_blend not supported: reduced accumulation accuracy');
     }
 
-    // Create position textures: public active texture and internal write target
-    this.positionTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-    this.positionTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-
-    // Create velocity textures: public active texture and internal write target
-    this.velocityTexture = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
-    this.velocityTextureWrite = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
+    this.positionMassTexture = positionMassTexture;
+    this.velocityColorTexture = velocityColorTexture;
 
     // Create force grid textures for mesh method (R32F grid textures for inverse FFT output)
     const gridTextureSize = this.meshConfig.gridSize * this.meshConfig.slicesPerRow;
     this.forceGridX = createTexture2D(this.gl, gridTextureSize, gridTextureSize, this.gl.R32F);
     this.forceGridY = createTexture2D(this.gl, gridTextureSize, gridTextureSize, this.gl.R32F);
     this.forceGridZ = createTexture2D(this.gl, gridTextureSize, gridTextureSize, this.gl.R32F);
-
-    // Upload particle data
-    const { positions, velocities } = this.particleData;
-    const velDataVal = velocities || new Float32Array(positions.length);
-
-    const expectedLength = this.actualTextureSize * 4;
-    if (positions.length !== expectedLength) {
-      throw new Error(`Position data length mismatch: expected ${expectedLength}, got ${positions.length}`);
-    }
-
-    // Sanity checks to satisfy @ts-check and ensure textures were created
-    if (!this.positionTexture)
-      throw new Error('Position textures not initialized');
-    if (!this.velocityTexture)
-      throw new Error('Velocity textures not initialized');
-
-    // Upload positions into both active and write textures so first-frame reads are valid
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionTexture);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, positions);
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionTextureWrite);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, positions);
-
-    // Upload velocities into both active and write textures
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.velocityTexture);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, velDataVal);
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.velocityTextureWrite);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.textureWidth, this.textureHeight, this.gl.RGBA, this.gl.FLOAT, velDataVal);
-
-    this.gl.bindTexture(this.gl.TEXTURE_2D, null);
 
     // Create shared quad VAO
     const vao = this.gl.createVertexArray();
@@ -158,7 +137,7 @@ export class GravityMesh {
     this.quadVAO = vao;
 
     // Calculate cell volume for FFT
-    const bounds = this.options.worldBounds;
+    const bounds = this.worldBounds;
     const boxSize = Math.max(
       bounds.max[0] - bounds.min[0],
       bounds.max[1] - bounds.min[1],
@@ -179,12 +158,12 @@ export class GravityMesh {
     this.depositKernel = new KDeposit({
       gl: this.gl,
       inPosition: null,
-      particleCount: this.options.particleCount,
+      particleCount: this.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
-      worldBounds: this.options.worldBounds,
+      worldBounds: this.worldBounds,
       assignment: this.meshConfig.assignment,
       disableFloatBlend: this.disableFloatBlend
     });
@@ -207,7 +186,7 @@ export class GravityMesh {
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
       worldSize: /** @type {[number, number, number]} */ (this.worldSize),
-      gravityStrength: this.options.gravityStrength,
+      gravityStrength: this.gravityStrength,
       splitMode: this.meshConfig.splitSigma > 0 ? 2 : this.meshConfig.kCut > 0 ? 1 : 0,
       kCut: this.meshConfig.kCut,
       gaussianSigma: this.meshConfig.splitSigma,
@@ -238,12 +217,12 @@ export class GravityMesh {
     // Force sampling kernel
     this.forceSampleKernel = new KForceSample({
       gl: this.gl,
-      particleCount: this.options.particleCount,
+      particleCount: this.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
-      worldBounds: this.options.worldBounds,
+      worldBounds: this.worldBounds,
       accumulate: false
     });
     
@@ -253,41 +232,39 @@ export class GravityMesh {
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureSize: this.gridTextureSize,
-      worldBounds: this.options.worldBounds,
-      softening: this.options.softening,
-      gravityStrength: this.options.gravityStrength,
+      worldBounds: this.worldBounds,
+      softening: this.softening,
+      gravityStrength: this.gravityStrength,
       nearFieldRadius: this.meshConfig.nearFieldRadius
     });
     
     // Near-field force sampling kernel (accumulate mode)
     this.nearFieldSampleKernel = new KForceSample({
       gl: this.gl,
-      particleCount: this.options.particleCount,
+      particleCount: this.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
-      worldBounds: this.options.worldBounds,
+      worldBounds: this.worldBounds,
       accumulate: true
     });
 
     // Create velocity and position integrator kernels
-    this.velocityKernel = new KIntegrateVelocity({
+    this.integrateEulerKernel = new KIntegrateEuler({
       gl: this.gl,
+      inPosition: this.positionMassTexture,
+      inVelocity: this.velocityColorTexture,
       width: this.textureWidth,
       height: this.textureHeight,
-      dt: this.options.dt,
-      damping: this.options.damping,
-      maxSpeed: this.options.maxSpeed,
-      maxAccel: this.options.maxAccel
+      dt: this.dt,
+      damping: this.damping,
+      maxSpeed: this.maxSpeed,
+      maxAccel: this.maxAccel
     });
 
-    this.positionKernel = new KIntegratePosition({
-      gl: this.gl,
-      width: this.textureWidth,
-      height: this.textureHeight,
-      dt: this.options.dt
-    });
+    this.positionMassTexture = this.integrateEulerKernel.inPosition;
+    this.velocityColorTexture = this.integrateEulerKernel.inVelocity;
   }
 
   /**
@@ -314,9 +291,9 @@ export class GravityMesh {
   
   _depositMass() {
   if (!this.depositKernel) throw new Error('Deposit kernel missing');
-  if (!this.positionTexture) throw new Error('Position textures missing');
+  if (!this.positionMassTexture) throw new Error('Position textures missing');
 
-  this.depositKernel.inPosition = this.positionTexture;
+  this.depositKernel.inPosition = this.positionMassTexture;
     this.depositKernel.run();
   }
   
@@ -354,10 +331,10 @@ export class GravityMesh {
   
   _sampleForces() {
     if (!this.forceSampleKernel) throw new Error('Force sample kernel missing');
-    if (!this.positionTexture) throw new Error('Position textures missing');
+    if (!this.positionMassTexture) throw new Error('Position textures missing');
     
     // Sample far-field forces at particle positions
-  this.forceSampleKernel.inPosition = this.positionTexture;
+  this.forceSampleKernel.inPosition = this.positionMassTexture;
     this.forceSampleKernel.inForceGridX = this.forceGridX;
     this.forceSampleKernel.inForceGridY = this.forceGridY;
     this.forceSampleKernel.inForceGridZ = this.forceGridZ;
@@ -368,14 +345,14 @@ export class GravityMesh {
     if (!this.nearFieldKernel || !this.nearFieldSampleKernel) {
       throw new Error('Near-field kernels missing');
     }
-    if (!this.positionTexture) throw new Error('Position textures missing');
+    if (!this.positionMassTexture) throw new Error('Position textures missing');
     
     // Compute near-field correction per voxel
     this.nearFieldKernel.inMassGrid = this.depositKernel.outGrid;
     this.nearFieldKernel.run();
     
     // Sample near-field forces and accumulate
-  this.nearFieldSampleKernel.inPosition = this.positionTexture;
+  this.nearFieldSampleKernel.inPosition = this.positionMassTexture;
     this.nearFieldSampleKernel.inForceGridX = this.nearFieldKernel.outForceX;
     this.nearFieldSampleKernel.inForceGridY = this.nearFieldKernel.outForceY;
     this.nearFieldSampleKernel.inForceGridZ = this.nearFieldKernel.outForceZ;
@@ -384,37 +361,23 @@ export class GravityMesh {
   }
   
   _integratePhysics() {
-    // Update velocities
-    if (!this.velocityKernel) throw new Error('Velocity kernel missing');
-    if (!this.velocityTexture || !this.positionTexture) throw new Error('Textures missing');
+    if (!this.integrateEulerKernel) throw new Error('Integrate Euler kernel missing');
+    if (!this.velocityColorTexture || !this.positionMassTexture) throw new Error('Textures missing');
 
-    this.velocityKernel.inVelocity = this.velocityTexture;
-    this.velocityKernel.inPosition = this.positionTexture;
-    this.velocityKernel.inForce = this.forceSampleKernel.outForce;
-    this.velocityKernel.outVelocity = this.velocityTextureWrite;
-    this.velocityKernel.run();
+    // allow external inputs
+    this.integrateEulerKernel.inVelocity = this.velocityColorTexture;
+    this.integrateEulerKernel.inPosition = this.positionMassTexture;
+    this.integrateEulerKernel.inForce = this.forceSampleKernel.outForce;
+    this.integrateEulerKernel.run();
 
-    // Swap velocity textures
-    {
-      const tmp = this.velocityTexture;
-      this.velocityTexture = this.velocityTextureWrite;
-      this.velocityTextureWrite = tmp;
-    }
+    // swap and leave updated textures in system properties
+    this.positionMassTexture = this.integrateEulerKernel.outPosition;
+    this.velocityColorTexture = this.integrateEulerKernel.outVelocity;
 
-    // Update positions
-    if (!this.positionKernel) throw new Error('Position kernel missing');
-
-    this.positionKernel.inPosition = this.positionTexture;
-    this.positionKernel.inVelocity = this.velocityTexture;
-    this.positionKernel.outPosition = this.positionTextureWrite;
-    this.positionKernel.run();
-
-    // Swap position textures
-    {
-      const tmp = this.positionTexture;
-      this.positionTexture = this.positionTextureWrite;
-      this.positionTextureWrite = tmp;
-    }
+    this.integrateEulerKernel.outPosition = this.integrateEulerKernel.inPosition;
+    this.integrateEulerKernel.outVelocity = this.integrateEulerKernel.inVelocity;
+    this.integrateEulerKernel.inPosition = this.positionMassTexture;
+    this.integrateEulerKernel.inVelocity = this.velocityColorTexture;
   }
   
 
@@ -431,40 +394,21 @@ export class GravityMesh {
     if (this.forceSampleKernel) this.forceSampleKernel.dispose();
     if (this.nearFieldKernel) this.nearFieldKernel.dispose();
     if (this.nearFieldSampleKernel) this.nearFieldSampleKernel.dispose();
+    if (this.integrateEulerKernel) this.integrateEulerKernel.dispose();
     
     // Clean up textures
-    if (this.positionTexture) {
-      gl.deleteTexture(this.positionTexture);
-      this.positionTexture = null;
-    }
-    if (this.positionTextureWrite) {
-      gl.deleteTexture(this.positionTextureWrite);
-      this.positionTextureWrite = null;
-    }
-    if (this.velocityTexture) {
-      gl.deleteTexture(this.velocityTexture);
-      this.velocityTexture = null;
-    }
-    if (this.velocityTextureWrite) {
-      gl.deleteTexture(this.velocityTextureWrite);
-      this.velocityTextureWrite = null;
-    }
     if (this.forceGridX) {
       gl.deleteTexture(this.forceGridX);
-      this.forceGridX = null;
     }
     if (this.forceGridY) {
       gl.deleteTexture(this.forceGridY);
-      this.forceGridY = null;
     }
     if (this.forceGridZ) {
       gl.deleteTexture(this.forceGridZ);
-      this.forceGridZ = null;
     }
     
     if (this.quadVAO) {
       gl.deleteVertexArray(this.quadVAO);
-      this.quadVAO = null;
     }
   }
 }
