@@ -361,9 +361,6 @@ export class GravityMesh {
   }
   
   _integratePhysics() {
-    if (!this.integrateEulerKernel) throw new Error('Integrate Euler kernel missing');
-    if (!this.velocityColorTexture || !this.positionMassTexture) throw new Error('Textures missing');
-
     // allow external inputs
     this.integrateEulerKernel.inVelocity = this.velocityColorTexture;
     this.integrateEulerKernel.inPosition = this.positionMassTexture;
@@ -428,7 +425,8 @@ function createTexture2D(gl, width, height, internalFormat, type) {
   if (!texture) throw new Error('Failed to create texture');
 
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0, gl.RGBA, tp, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0,
+    fmt === gl.R32F ? gl.RED : gl.RGBA, tp, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
