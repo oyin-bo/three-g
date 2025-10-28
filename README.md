@@ -2,6 +2,8 @@
 
 GPU-accelerated particle rendering and Barnes-Hut N-body physics for WebGL2.
 
+![Newton](./newton-smoking-smooth.png)
+
 ## Overview
 
 🍎Mavity is a dual-module library that brings astrophysical-scale particle simulation to the browser. At its heart lie two distinct yet harmoniously intertwined functional modules:
