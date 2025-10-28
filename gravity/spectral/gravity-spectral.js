@@ -338,6 +338,7 @@ export class GravitySpectral {
           if (this.poissonKernel) this.poissonKernel.worldSize = /** @type {[number,number,number]} */ (newWorldSize);
           if (this.gradientKernel) this.gradientKernel.worldSize = /** @type {[number,number,number]} */ (newWorldSize);
           if (this.forceSampleKernel) this.forceSampleKernel.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
+          if (this.depositKernel) this.depositKernel.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
         }
       }
     } catch (e) {
