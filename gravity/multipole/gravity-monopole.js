@@ -199,8 +199,8 @@ export class GravityMonopole {
     this.boundsKernel = new KBoundsReduce({
       gl: this.gl,
       inPosition: null,  // set per-run
-      particleTexWidth: this.textureWidth,
-      particleTexHeight: this.textureHeight,
+      particleTextureWidth: this.textureWidth,
+      particleTextureHeight: this.textureHeight,
       particleCount: this.particleCount
     });
 

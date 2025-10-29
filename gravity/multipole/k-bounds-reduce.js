@@ -1,46 +1,41 @@
 // @ts-check
 
-/**
- * BoundsReduceKernel - GPU-resident hierarchical bounds reduction
- * 
- * Reduces N particle positions to a single bounding box (min, max) using 
- * recursive min/max reduction passes. Output is a 2×1 texture containing
- * (minX, minY, minZ, _) and (maxX, maxY, maxZ, _).
- * 
- * This eliminates CPU readback and enables dynamic world bounds updates.
- * Follows the WebGL2 Kernel contract from docs/8-webgl-kernels.md.
- */
 
 import { fsQuadVert } from '../core-shaders.js';
 import { formatNumber, readLinear } from '../diag.js';
 
+/**
+ * BoundsReduceKernel2 - GPU-resident hierarchical bounds reduction (8×8 tiles)
+ * 
+ * Reduces N particle positions to a single bounding box (min, max) using 
+ * 8×8 tile reduction passes. Output is a 2×1 texture containing
+ * (minX, minY, minZ, _) and (maxX, maxY, maxZ, _).
+ * 
+ * Uses at most 2 intermediate textures, reusing them via ping-pong.
+ * Follows the WebGL2 Kernel contract from docs/8-webgl-kernels.md.
+ */
 export class KBoundsReduce {
   /**
    * @param {{
    *   gl: WebGL2RenderingContext,
    *   inPosition?: WebGLTexture|null,
    *   outBounds?: WebGLTexture|null,
-   *   particleTexWidth?: number,
-   *   particleTexHeight?: number,
+   *   particleTextureWidth: number,
+   *   particleTextureHeight: number,
    *   particleCount?: number
    * }} options
    */
-  constructor(options) {
-    this.gl = options.gl;
+  constructor({ gl, inPosition, outBounds, particleTextureWidth, particleTextureHeight, particleCount }) {
+    this.gl = gl;
 
     // Resource slots - follow kernel contract
-    this.inPosition = (options.inPosition || options.inPosition === null)
-      ? options.inPosition
-      : null;
-
-    this.outBounds = (options.outBounds || options.outBounds === null)
-      ? options.outBounds
-      : createBoundsTexture(this.gl);
+    this.inPosition = (inPosition || inPosition === null) ? inPosition : createPositionTexture(this.gl, particleTextureWidth, particleTextureHeight);
+    this.outBounds = (outBounds || outBounds === null) ? outBounds : createBoundsTexture(this.gl);
 
     // Texture dimensions
-    this.particleTexWidth = options.particleTexWidth || 0;
-    this.particleTexHeight = options.particleTexHeight || 0;
-    this.particleCount = options.particleCount || 0;
+    this.particleTextureWidth = particleTextureWidth;
+    this.particleTextureHeight = particleTextureHeight;
+    this.particleCount = particleCount || 0;
 
     // Create shader program
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
@@ -90,39 +85,41 @@ export class KBoundsReduce {
     this.gl.bindVertexArray(null);
     this.quadVAO = quadVAO;
 
-    // Allocate intermediate reduction textures (pyramid of reductions)
-    // Algorithm: reduce NxM → 2×1 (min, max) output in steps of 4×4 sampling
-    // For small inputs (≤4×4), we need only one intermediate level
-    // For larger inputs, we build a pyramid
-    this.reductionLevels = [];
-    let currentWidth = this.particleTexWidth;
-    let currentHeight = this.particleTexHeight;
-
-    // Build reduction pyramid until we can reduce to 2×1 in final pass
-    // The final pass will always render to 2×1, so intermediate levels
-    // help reduce large inputs step-by-step
-    while (currentWidth > 4 || currentHeight > 4) {
-      // Reduce dimensions by 4× via 4×4 sampling
-      currentWidth = Math.max(2, Math.ceil(currentWidth / 4));
-      currentHeight = Math.max(1, Math.ceil(currentHeight / 4));
-
-      // Intermediate levels are 2D (not constrained to 2×1)
-      // to allow flexibility in pyramid structure
-      const levelWidth = currentWidth;
-      const levelHeight = currentHeight;
-      const tex = createReductionTexture(this.gl, levelWidth, levelHeight);
-      const fbo = this.gl.createFramebuffer();
-      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, fbo);
-      this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, tex, 0);
-      this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0]);
-      const status = this.gl.checkFramebufferStatus(this.gl.FRAMEBUFFER);
-      if (status !== this.gl.FRAMEBUFFER_COMPLETE) {
-        throw new Error(`Reduction framebuffer incomplete: ${status}`);
-      }
-      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
-
-      this.reductionLevels.push({ texture: tex, framebuffer: fbo, width: levelWidth, height: levelHeight });
+    // Calculate how many reduction passes we need (8× reduction per pass)
+    let width = this.particleTextureWidth;
+    let height = this.particleTextureHeight;
+    const sizes = [];
+    
+    while (width > 8 || height > 8) {
+      width = Math.max(1, Math.ceil(width / 8));
+      height = Math.max(1, Math.ceil(height / 8));
+      sizes.push({ width, height });
     }
+
+    // Allocate intermediate textures based on number of passes needed
+    // 0 passes: input → output (no intermediates)
+    // 1 pass: input → small → output (1 intermediate)
+    // 2+ passes: input → small → smaller → small → smaller... → output (2 intermediates, ping-pong)
+    
+    this.smallTexture = null;
+    this.smallerTexture = null;
+    this.smallFBO = null;
+    this.smallerFBO = null;
+    
+    if (sizes.length >= 1) {
+      const firstSize = sizes[0];
+      this.smallTexture = createReductionTexture(this.gl, firstSize.width, firstSize.height);
+      this.smallFBO = this.gl.createFramebuffer();
+    }
+    
+    if (sizes.length >= 2) {
+      const secondSize = sizes[1];
+      this.smallerTexture = createReductionTexture(this.gl, secondSize.width, secondSize.height);
+      this.smallerFBO = this.gl.createFramebuffer();
+    }
+
+    // Store reduction sizes for run()
+    this.reductionSizes = sizes;
 
     // Create final framebuffer for outBounds
     this.outFramebuffer = this.gl.createFramebuffer();
@@ -135,18 +132,18 @@ export class KBoundsReduce {
   valueOf({ pixels } = {}) {
     const value = {
       position: this.inPosition && readLinear({
-        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
-        height: this.particleTexHeight, count: this.particleCount,
+        gl: this.gl, texture: this.inPosition, width: this.particleTextureWidth,
+        height: this.particleTextureHeight, count: this.particleCount,
         channels: ['x', 'y', 'z', 'mass'], pixels
       }),
       bounds: this.outBounds && readLinear({
         gl: this.gl, texture: this.outBounds, width: 2, height: 1, count: 2,
         channels: ['x', 'y', 'z', 'w'], pixels
       }),
-      particleTexWidth: this.particleTexWidth,
-      particleTexHeight: this.particleTexHeight,
+      particleTextureWidth: this.particleTextureWidth,
+      particleTextureHeight: this.particleTextureHeight,
       particleCount: this.particleCount,
-      reductionLevels: this.reductionLevels.length,
+      reductionPasses: this.reductionSizes.length,
       renderCount: this.renderCount
     };
 
@@ -157,7 +154,7 @@ export class KBoundsReduce {
       [value.bounds.pixels[1].x, value.bounds.pixels[1].y, value.bounds.pixels[1].z] : null;
 
     value.toString = () =>
-      `KBoundsReduce(${this.particleCount} particles) ${this.particleTexWidth}×${this.particleTexHeight} levels=${this.reductionLevels.length} #${this.renderCount}
+      `KBoundsReduce2(${this.particleCount} particles) ${this.particleTextureWidth}×${this.particleTextureHeight} passes=${this.reductionSizes.length} #${this.renderCount}
 
 position: ${value.position}
 
@@ -182,7 +179,7 @@ bounds: ${value.bounds}${boundsMin && boundsMax ? `
     const gl = this.gl;
 
     if (!this.inPosition || !this.outBounds) {
-      throw new Error('KBoundsReduce: missing required textures');
+      throw new Error('KBoundsReduce2: missing required textures');
     }
 
     gl.useProgram(this.program);
@@ -193,36 +190,57 @@ bounds: ${value.bounds}${boundsMin && boundsMax ? `
     gl.disable(gl.SCISSOR_TEST);
     gl.colorMask(true, true, true, true);
 
-    // First pass: reduce particle positions → first level
     let inputTex = this.inPosition;
-    let inputWidth = this.particleTexWidth;
-    let inputHeight = this.particleTexHeight;
+    let inputWidth = this.particleTextureWidth;
+    let inputHeight = this.particleTextureHeight;
 
-    for (let i = 0; i < this.reductionLevels.length; i++) {
-      const level = this.reductionLevels[i];
+    // Execute reduction passes
+    for (let i = 0; i < this.reductionSizes.length; i++) {
+      const size = this.reductionSizes[i];
+      
+      // Determine output texture and FBO for this pass
+      let outputTex, outputFBO;
+      if (i === 0) {
+        // First pass always goes to smallTexture
+        outputTex = this.smallTexture;
+        outputFBO = this.smallFBO;
+      } else if (i === 1) {
+        // Second pass goes to smallerTexture
+        outputTex = this.smallerTexture;
+        outputFBO = this.smallerFBO;
+      } else {
+        // Subsequent passes ping-pong between small and smaller
+        // If previous was smaller, output to small; if previous was small, output to smaller
+        if (i % 2 === 0) {
+          outputTex = this.smallTexture;
+          outputFBO = this.smallFBO;
+        } else {
+          outputTex = this.smallerTexture;
+          outputFBO = this.smallerFBO;
+        }
+      }
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, level.framebuffer);
-      gl.viewport(0, 0, level.width, level.height);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, outputFBO);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outputTex, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+      gl.viewport(0, 0, size.width, size.height);
 
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, inputTex);
       gl.uniform1i(gl.getUniformLocation(this.program, 'u_inputTex'), 0);
-
       gl.uniform2f(gl.getUniformLocation(this.program, 'u_inputSize'), inputWidth, inputHeight);
-      gl.uniform1i(gl.getUniformLocation(this.program, 'u_particleCount'),
-        i === 0 ? this.particleCount : (inputWidth * inputHeight));
 
       gl.bindVertexArray(this.quadVAO);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       gl.bindVertexArray(null);
 
-      // Next iteration uses this level's output as input
-      inputTex = level.texture;
-      inputWidth = level.width;
-      inputHeight = level.height;
+      // Next iteration uses this pass's output as input
+      inputTex = /** @type {WebGLTexture} */ (outputTex);
+      inputWidth = size.width;
+      inputHeight = size.height;
     }
 
-    // Final pass: reduce last level → 2×1 output
+    // Final pass: reduce to 2×1 output
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outBounds, 0);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
@@ -232,7 +250,6 @@ bounds: ${value.bounds}${boundsMin && boundsMax ? `
     gl.bindTexture(gl.TEXTURE_2D, inputTex);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_inputTex'), 0);
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_inputSize'), inputWidth, inputHeight);
-    gl.uniform1i(gl.getUniformLocation(this.program, 'u_particleCount'), inputWidth * inputHeight);
 
     gl.bindVertexArray(this.quadVAO);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -247,27 +264,25 @@ bounds: ${value.bounds}${boundsMin && boundsMax ? `
   }
 
   dispose() {
-    const gl = this.gl;
+    if (this.program) this.gl.deleteProgram(this.program);
+    if (this.quadVAO) this.gl.deleteVertexArray(this.quadVAO);
+    if (this.outFramebuffer) this.gl.deleteFramebuffer(this.outFramebuffer);
 
-    if (this.program) gl.deleteProgram(this.program);
-    if (this.quadVAO) gl.deleteVertexArray(this.quadVAO);
-    if (this.outFramebuffer) gl.deleteFramebuffer(this.outFramebuffer);
+    if (this.smallTexture) this.gl.deleteTexture(this.smallTexture);
+    if (this.smallerTexture) this.gl.deleteTexture(this.smallerTexture);
+    if (this.smallFBO) this.gl.deleteFramebuffer(this.smallFBO);
+    if (this.smallerFBO) this.gl.deleteFramebuffer(this.smallerFBO);
 
-    for (const level of this.reductionLevels) {
-      if (level.texture) gl.deleteTexture(level.texture);
-      if (level.framebuffer) gl.deleteFramebuffer(level.framebuffer);
-    }
-
-    if (this.inPosition) gl.deleteTexture(this.inPosition);
-    if (this.outBounds) gl.deleteTexture(this.outBounds);
+    if (this.inPosition) this.gl.deleteTexture(this.inPosition);
+    if (this.outBounds) this.gl.deleteTexture(this.outBounds);
   }
 }
 
 /**
- * Bounds reduction shader - hierarchical min/max
+ * Bounds reduction shader - 8×8 tile reduction
  * 
- * All reduction levels output 2×1 format: pixel 0 = min, pixel 1 = max
- * Uses proper hierarchical reduction via 4×4 sampling.
+ * Each output pixel samples an 8×8 region from the input texture.
+ * Output format: pixel at x=0 contains min, pixel at x=1 contains max.
  */
 function boundsReduceShader() {
   return `#version 300 es
@@ -275,7 +290,6 @@ precision highp float;
 
 uniform sampler2D u_inputTex;
 uniform vec2 u_inputSize;
-uniform int u_particleCount;
 
 out vec4 fragColor;
 
@@ -286,14 +300,19 @@ void main() {
   vec3 maxBound = vec3(-1e20);
   bool hasValidData = false;
   
-  // Both fragments scan the entire texture to find global min/max
-  // This ensures both pixels have complete information regardless of layout
-  int width = int(u_inputSize.x);
-  int height = int(u_inputSize.y);
+  // Calculate base input coordinate for this output pixel's 8×8 tile
+  ivec2 baseCoord = outCoord * 8;
   
-  for (int y = 0; y < height; y++) {
-    for (int x = 0; x < width; x++) {
-      ivec2 coord = ivec2(x, y);
+  // Sample 8×8 region
+  for (int dy = 0; dy < 8; dy++) {
+    for (int dx = 0; dx < 8; dx++) {
+      ivec2 coord = baseCoord + ivec2(dx, dy);
+      
+      // Bounds check - skip if outside input texture
+      if (coord.x >= int(u_inputSize.x) || coord.y >= int(u_inputSize.y)) {
+        continue;
+      }
+      
       vec4 texel = texelFetch(u_inputTex, coord, 0);
       vec3 pos = texel.xyz;
       float mass = texel.w;
@@ -357,3 +376,21 @@ function createReductionTexture(gl, width, height) {
   return texture;
 }
 
+/**
+ * Create position texture
+ * @param {WebGL2RenderingContext} gl
+ * @param {number} width
+ * @param {number} height
+ */
+function createPositionTexture(gl, width, height) {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create position texture');
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
+}
