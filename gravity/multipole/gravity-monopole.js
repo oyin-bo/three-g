@@ -308,9 +308,6 @@ export class GravityMonopole {
    * Reuses pre-allocated FBO and buffer (no hot-path allocations)
    */
   _updateBounds() {
-    if (!this.boundsKernel || !this.boundsKernel.outBounds) return;
-    if (!this.positionMassTexture) return;
-
     // Run bounds reduction kernel
     this.boundsKernel.inPosition = this.positionMassTexture;
     this.boundsKernel.run();
@@ -325,12 +322,18 @@ export class GravityMonopole {
     // Unbind FBO
     this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
 
+    // DEBUG: Log bounds readback
+    console.log('[DEBUG Monopole _updateBounds] boundsReadbackBuffer:', Array.from(this.boundsReadbackBuffer));
+    console.log('[DEBUG Monopole _updateBounds] frameCount:', this.frameCount);
+    
     this.worldBounds.min[0] = this.boundsReadbackBuffer[0];
     this.worldBounds.min[1] = this.boundsReadbackBuffer[1];
     this.worldBounds.min[2] = this.boundsReadbackBuffer[2];
     this.worldBounds.max[0] = this.boundsReadbackBuffer[4];
     this.worldBounds.max[1] = this.boundsReadbackBuffer[5];
     this.worldBounds.max[2] = this.boundsReadbackBuffer[6];
+    
+    console.log('[DEBUG Monopole _updateBounds] Updated worldBounds:', {min: this.worldBounds.min, max: this.worldBounds.max});
   }
 
   dispose() {
