@@ -13,30 +13,28 @@ import fftFrag from './shaders/fft.frag.js';
 
 export class KFFT {
   /**
-   * @param {{
-   *   gl: WebGL2RenderingContext,
-   *   grid?: WebGLTexture|null,
-   *   spectrum?: WebGLTexture|null,
-   *   quadVAO?: WebGLVertexArrayObject|null,
-   *   gridSize?: number,
-   *   slicesPerRow?: number,
-   *   textureSize?: number,
-   *   inverse?: boolean,
-   *   cellVolume?: number
-   * }} options
+  * @param {any} options
    */
   constructor(options) {
     this.gl = options.gl;
 
     // Resource slots
-    this.grid = (options.grid || options.grid === null) ? options.grid : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
-    this.spectrum = (options.spectrum || options.spectrum === null) ? options.spectrum : createComplexTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    const inferredTexSize = (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)));
+    // Primary names (aligned with Spectral)
+    this.real = (options.real !== undefined) ? options.real
+      : ((options.grid !== undefined) ? options.grid : createGridTexture(this.gl, inferredTexSize));
+    this.complexFrom = (options.complexFrom !== undefined) ? options.complexFrom : createComplexTexture(this.gl, inferredTexSize);
+    this.complexTo = (options.complexTo !== undefined) ? options.complexTo
+      : ((options.spectrum !== undefined) ? options.spectrum : createComplexTexture(this.gl, inferredTexSize));
+    // Back-compat accessors will map grid<->real and spectrum<->complexTo below
     this.quadVAO = (options.quadVAO || options.quadVAO === null) ? options.quadVAO : createQuadVAO(this.gl);
 
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(this.gridSize));
     this.textureSize = options.textureSize || (this.gridSize * this.slicesPerRow);
+    this.textureWidth = options.textureWidth || this.textureSize;
+    this.textureHeight = options.textureHeight || this.textureSize;
 
     // Transform direction
     this.inverse = options.inverse !== undefined ? options.inverse : false;
@@ -234,19 +232,19 @@ export class KFFT {
   _convertRealToComplex() {
     const gl = this.gl;
 
-    if (!this.grid) {
+    if (!this.real) {
       throw new Error('KFFT: grid not set for real-to-complex conversion');
     }
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.spectrum, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.complexTo, 0);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
 
-    gl.viewport(0, 0, this.textureSize, this.textureSize);
+    gl.viewport(0, 0, this.textureWidth, this.textureHeight);
     gl.useProgram(this.realToComplexProgram);
 
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.grid);
+    gl.bindTexture(gl.TEXTURE_2D, this.real);
     gl.uniform1i(gl.getUniformLocation(this.realToComplexProgram, 'u_massGrid'), 0);
     gl.uniform1f(gl.getUniformLocation(this.realToComplexProgram, 'u_cellVolume'), this.cellVolume);
 
@@ -265,7 +263,7 @@ export class KFFT {
     const numStages = Math.log2(this.gridSize) | 0;
 
     gl.useProgram(this.fftProgram);
-    gl.viewport(0, 0, this.textureSize, this.textureSize);
+    gl.viewport(0, 0, this.textureWidth, this.textureHeight);
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
 
@@ -289,8 +287,8 @@ export class KFFT {
         gl.uniform1i(uStage, stage);
 
         const readFromPrimary = (stage % 2 === 0);
-        const readTex = readFromPrimary ? this.spectrum : this.pingPongTexture;
-        const writeTex = readFromPrimary ? this.pingPongTexture : this.spectrum;
+        const readTex = readFromPrimary ? this.complexTo : this.pingPongTexture;
+        const writeTex = readFromPrimary ? this.pingPongTexture : this.complexTo;
         const writeFBO = readFromPrimary ? this.pingPongFBO : this.framebuffer;
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, writeFBO);
@@ -308,13 +306,16 @@ export class KFFT {
 
       // If odd number of stages, result is in ping-pong, copy to primary
       if (numStages % 2 === 1) {
-        this._copyTexture(this.pingPongTexture, this.spectrum);
+        this._copyTexture(this.pingPongTexture, this.complexTo);
       }
     }
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
+  /**
+   * @param {WebGLTexture} outputTexture
+   */
   _extractRealPart(outputTexture) {
     const gl = this.gl;
 
@@ -324,7 +325,7 @@ export class KFFT {
     // Make sure we render to COLOR_ATTACHMENT0 on this FBO
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
 
-    gl.viewport(0, 0, this.textureSize, this.textureSize);
+    gl.viewport(0, 0, this.textureWidth, this.textureHeight);
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
 
@@ -332,9 +333,9 @@ export class KFFT {
 
     // Avoid sampling from the same texture that is currently bound as the draw target
     // If outputTexture === spectrum, copy spectrum into pingPongTexture and sample from it
-    let sourceTex = this.spectrum;
-    if (outputTexture === this.spectrum) {
-      this._copyTexture(this.spectrum, this.pingPongTexture);
+    let sourceTex = this.complexTo;
+    if (outputTexture === this.complexTo) {
+      this._copyTexture(this.complexTo, this.pingPongTexture);
       sourceTex = this.pingPongTexture;
     }
 
@@ -342,7 +343,7 @@ export class KFFT {
     gl.bindTexture(gl.TEXTURE_2D, sourceTex);
     gl.uniform1i(gl.getUniformLocation(this.complexToRealProgram, 'u_complexTexture'), 0);
 
-    const normalizationFactor = 1.0 / (this.gridSize * this.gridSize * this.gridSize);
+  const normalizationFactor = 1.0 / (this.gridSize * this.gridSize * this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.complexToRealProgram, 'u_normalizeInverse'), normalizationFactor);
 
     gl.bindVertexArray(this.quadVAO);
@@ -353,15 +354,25 @@ export class KFFT {
     gl.deleteFramebuffer(tempFBO);
   }
 
+  /**
+   * @param {WebGLTexture} src
+   * @param {WebGLTexture} dst
+   */
   _copyTexture(src, dst) {
+    /** @type {WebGLTexture} */
+    // @ts-ignore
+    const _src = src;
+    /** @type {WebGLTexture} */
+    // @ts-ignore
+    const _dst = dst;
     const gl = this.gl;
 
     const fbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, src, 0);
+    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, _src, 0);
 
-    gl.bindTexture(gl.TEXTURE_2D, dst);
-    gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, this.textureSize, this.textureSize);
+    gl.bindTexture(gl.TEXTURE_2D, _dst);
+  gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, this.textureWidth, this.textureHeight);
 
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
     gl.deleteFramebuffer(fbo);
@@ -373,24 +384,24 @@ export class KFFT {
    */
   valueOf({ pixels } = {}) {
     const value = {
-      inReal: this.inReal && readGrid3D({
-        gl: this.gl, texture: this.inReal, width: this.textureSize,
-        height: this.textureSize, gridSize: this.gridSize,
+      inReal: this.real && readGrid3D({
+        gl: this.gl, texture: this.real, width: this.textureWidth,
+        height: this.textureHeight, gridSize: this.gridSize,
         channels: ['real'], pixels, format: this.gl.R32F
       }),
-      inComplex: this.inComplex && readLinear({
-        gl: this.gl, texture: this.inComplex, width: this.textureSize,
-        height: this.textureSize, count: this.textureSize * this.textureSize,
+      inComplex: this.complexFrom && readLinear({
+        gl: this.gl, texture: this.complexFrom, width: this.textureWidth,
+        height: this.textureHeight, count: this.textureWidth * this.textureHeight,
         channels: ['real', 'imag'], pixels, format: this.gl.RG32F
       }),
-      outComplex: this.outComplex && readLinear({
-        gl: this.gl, texture: this.outComplex, width: this.textureSize,
-        height: this.textureSize, count: this.textureSize * this.textureSize,
+      outComplex: this.complexTo && readLinear({
+        gl: this.gl, texture: this.complexTo, width: this.textureWidth,
+        height: this.textureHeight, count: this.textureWidth * this.textureHeight,
         channels: ['real', 'imag'], pixels, format: this.gl.RG32F
       }),
-      outReal: this.outReal && readGrid3D({
-        gl: this.gl, texture: this.outReal, width: this.textureSize,
-        height: this.textureSize, gridSize: this.gridSize,
+      outReal: this.real && readGrid3D({
+        gl: this.gl, texture: this.real, width: this.textureWidth,
+        height: this.textureHeight, gridSize: this.gridSize,
         channels: ['real'], pixels, format: this.gl.R32F
       }),
       gridSize: this.gridSize,
@@ -425,10 +436,10 @@ inComplex: ${value.inComplex}
   run() {
     const gl = this.gl;
 
-    if (!this.grid && !this.inverse) {
+    if (!this.real && !this.inverse) {
       throw new Error('KFFT: grid texture not set for forward transform');
     }
-    if (!this.spectrum) {
+    if (!this.complexTo) {
       throw new Error('KFFT: spectrum texture not set');
     }
 
@@ -449,7 +460,7 @@ inComplex: ${value.inComplex}
 
     if (this.inverse) {
       // Inverse FFT: extract real part from spectrum back to grid
-      this._extractRealPart(this.grid);
+      this._extractRealPart(this.real);
     }
 
     gl.activeTexture(gl.TEXTURE0);
@@ -497,9 +508,13 @@ inComplex: ${value.inComplex}
       this.pingPongTexture = null;
     }
 
-    if (this.spectrum) {
-      gl.deleteTexture(this.spectrum);
-      this.spectrum = null;
+    if (this.complexFrom) {
+      gl.deleteTexture(this.complexFrom);
+      this.complexFrom = null;
+    }
+    if (this.complexTo) {
+      gl.deleteTexture(this.complexTo);
+      this.complexTo = null;
     }
 
     if (this.quadVAO) {
@@ -508,6 +523,8 @@ inComplex: ${value.inComplex}
     }
   }
 }
+
+// No backward-compat accessors: callers use .real / .complexFrom / .complexTo explicitly
 
 /**
  * Helper: Create a grid texture (R32F for density)

@@ -49,8 +49,13 @@ export class KFFT {
 
     // Lean texture architecture: exactly 3 textures (use provided or create with real dims)
     this.real = options.real || createTextureR32F(this.gl, this.textureWidth, this.textureHeight);
-    this.complexFrom = options.complexFrom || createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
-    this.complexTo = options.complexTo || createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.complexFrom =
+      this.inPosition = (options.complexFrom || options.complexFrom === null) ?
+        options.complexFrom :
+        createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.complexTo = (options.complexTo || options.complexTo === null) ?
+      options.complexTo :
+      createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
 
     // FFT direction
     this.inverse = options.inverse || false;

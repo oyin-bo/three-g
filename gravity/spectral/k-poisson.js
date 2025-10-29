@@ -14,19 +14,20 @@ import poissonFrag from './shaders/poisson.frag.js';
 export class KPoisson {
   /**
   * @param {{
-   *   gl: WebGL2RenderingContext,
-   *   inDensitySpectrum?: WebGLTexture|null,
-   *   outPotentialSpectrum?: WebGLTexture|null,
-   *   gridSize?: number,
-   *   slicesPerRow?: number,
+   *  gl: WebGL2RenderingContext,
+   *  inDensitySpectrum?: WebGLTexture|null,
+   *  outPotentialSpectrum?: WebGLTexture|null,
+   *  gridSize?: number,
+   *  slicesPerRow?: number,
   *   textureSize?: number,
   *   textureWidth?: number,
   *   textureHeight?: number,
-   *   gravitationalConstant?: number,
-   *   worldSize?: [number, number, number],
-   *   assignment?: 'NGP'|'CIC'|'TSC',
-   *   poissonUseDiscrete?: boolean,
-   *   treePMSigma?: number
+   *  gravitationalConstant?: number,
+   *  worldSize?: [number, number, number],
+   *  assignment?: 'NGP'|'CIC'|'TSC',
+   *  poissonUseDiscrete?: boolean,
+   *  treePMSigma?: number,
+   *  splitMode?: 0 | 1 | 2
    * }} options
    */
   constructor(options) {
@@ -49,9 +50,9 @@ export class KPoisson {
     this.assignment = options.assignment || 'CIC';
     this.poissonUseDiscrete = options.poissonUseDiscrete !== undefined ? options.poissonUseDiscrete : false;
     this.treePMSigma = options.treePMSigma || 0.0;
-  // Spectral split/filter options
-  this.kCut = options.kCut || 0.0;
-  this.splitMode = options.splitMode || 0; // 0 = none, 1 = hard cutoff, 2 = gaussian
+    // Spectral split/filter options
+    this.kCut = options.kCut || 0.0;
+    this.splitMode = options.splitMode || 0; // 0 = none, 1 = hard cutoff, 2 = gaussian
 
     // Compile and link shader program
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
@@ -212,8 +213,8 @@ densitySpectrum: ${value.densitySpectrum}
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gaussianSigma'), this.treePMSigma);
 
     // Set missing uniforms with defaults
-  gl.uniform1i(gl.getUniformLocation(this.program, 'u_splitMode'), this.splitMode);
-  gl.uniform1f(gl.getUniformLocation(this.program, 'u_kCut'), this.kCut);
+    gl.uniform1i(gl.getUniformLocation(this.program, 'u_splitMode'), this.splitMode);
+    gl.uniform1f(gl.getUniformLocation(this.program, 'u_kCut'), this.kCut);
 
     // Draw fullscreen quad
     gl.bindVertexArray(this.quadVAO);

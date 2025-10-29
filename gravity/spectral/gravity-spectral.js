@@ -141,23 +141,26 @@ export class GravitySpectral {
     // These prevent auto-creation of textures inside kernels
     // Textures are square: (gridSize×slicesPerRow) × (gridSize×sliceRows)
     // where sliceRows ≈ slicesPerRow due to sqrt formula
-    this.massGridTexture = createTextureR32F(this.gl, this.textureWidth3D, this.textureHeight3D);
-    this.fftComplexTexture1 = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
-    this.fftComplexTexture2 = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
-    this.potentialSpectrumTexture = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
-    this.forceSpectrumXTexture = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
-    this.forceSpectrumYTexture = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
-    this.forceSpectrumZTexture = createComplexTexture(this.gl, this.textureWidth3D, this.textureHeight3D);
-    this.forceGridXTexture = createTextureR32F(this.gl, this.textureWidth3D, this.textureHeight3D);
-    this.forceGridYTexture = createTextureR32F(this.gl, this.textureWidth3D, this.textureHeight3D);
-    this.forceGridZTexture = createTextureR32F(this.gl, this.textureWidth3D, this.textureHeight3D);
-    this.forceTextureOut = createTexture2D(this.gl, this.textureWidth, this.textureHeight);
 
-    // 1. Deposit kernel
+    this.integrateEulerKernel = new KIntegrateEuler({
+      gl: this.gl,
+      inPosition: this.positionMassTexture,
+      inVelocity: this.velocityColorTexture,
+      inForce: null,
+      width: this.textureWidth,
+      height: this.textureHeight,
+      dt: this.dt,
+      damping: this.damping,
+      maxSpeed: this.maxSpeed,
+      maxAccel: this.maxAccel
+    });
+
+    this.positionMassTexture = this.integrateEulerKernel.inPosition;
+    this.velocityColorTexture = this.integrateEulerKernel.inVelocity;
+
     this.depositKernel = new KDeposit({
       gl: this.gl,
       inPosition: this.positionMassTexture,
-      outMassGrid: this.massGridTexture,
       particleCount: this.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
@@ -170,12 +173,9 @@ export class GravitySpectral {
       disableFloatBlend: this.disableFloatBlend
     });
 
-    // 2. FFT kernel
     this.fftKernel = new KFFT({
       gl: this.gl,
-      real: this.massGridTexture,
-      complexFrom: this.fftComplexTexture1,
-      complexTo: this.fftComplexTexture2,
+      real: null, // will be set to outMassGrid
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureWidth: this.textureWidth3D,
@@ -184,7 +184,6 @@ export class GravitySpectral {
       massToDensity: massToDensity
     });
 
-    // 3. Poisson solver kernel    
     // Choose a small Gaussian smoothing sigma (fraction of average extent) to damp high-k noise
     const avgExtent = (worldSize[0] + worldSize[1] + worldSize[2]) / 3.0;
     const gaussianSigma = avgExtent * 0.02; // 2% of average box size
@@ -204,13 +203,9 @@ export class GravitySpectral {
       splitMode: 2 // enable Gaussian low-pass by default
     });
 
-    // 4. Gradient kernel
     this.gradientKernel = new KGradient({
       gl: this.gl,
       inPotentialSpectrum: null,
-      outForceSpectrumX: this.forceSpectrumXTexture,
-      outForceSpectrumY: this.forceSpectrumYTexture,
-      outForceSpectrumZ: this.forceSpectrumZTexture,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureWidth: this.textureWidth3D,
@@ -221,14 +216,9 @@ export class GravitySpectral {
     // Note: We reuse the single fftKernel for inverse transforms by toggling the inverse flag
     // The three inverse FFTs are executed sequentially with different input textures
 
-    // 6. Force sampling kernel
     this.forceSampleKernel = new KForceSample({
       gl: this.gl,
-      inPosition: null,  // Will be set in _computePMForces
-      inForceGridX: null,  // Will be set in _computePMForces
-      inForceGridY: null,  // Will be set in _computePMForces
-      inForceGridZ: null,  // Will be set in _computePMForces
-      outForce: this.forceTextureOut,
+      inPosition: null,  // Will be ultimately propagated from positionMassTexture
       particleCount: this.particleCount,
       particleTexWidth: this.textureWidth,
       particleTexHeight: this.textureHeight,
@@ -238,23 +228,6 @@ export class GravitySpectral {
       textureHeight: this.textureHeight3D,
       worldBounds: /** @type {any} */ (this.worldBounds)
     });
-
-    // 7. Integration kernels (reuse from monopole)
-    this.integrateEulerKernel = new KIntegrateEuler({
-      gl: this.gl,
-      inPosition: this.positionMassTexture,
-      inVelocity: this.velocityColorTexture,
-      inForce: null,
-      width: this.textureWidth,
-      height: this.textureHeight,
-      dt: this.dt,
-      damping: this.damping,
-      maxSpeed: this.maxSpeed,
-      maxAccel: this.maxAccel
-    });
-
-    this.positionMassTexture = this.integrateEulerKernel.inPosition;
-    this.velocityColorTexture = this.integrateEulerKernel.inVelocity;
 
     // GPU bounds reduction kernel (cloned and reused locally)
     this.boundsReduce = new KBoundsReduce({
@@ -267,6 +240,10 @@ export class GravitySpectral {
 
     // How often to run bounds reduction (frames)
     this.boundsInterval = 30;
+
+    // Create reusable resources for bounds readback (hot path - no alloc/dealloc per frame)
+    this.boundsReadbackBuffer = new Float32Array(8);
+    this.boundsReadbackFBO = this.gl.createFramebuffer();
   }
 
   /**
@@ -291,59 +268,42 @@ export class GravitySpectral {
     this.depositKernel.run();           // Step 1: Deposit particles to grid
 
     // Periodic GPU bounds check: run KBoundsReduce every boundsInterval frames
-    try {
-      if (this.boundsReduce && (this.frameCount % this.boundsInterval === 0)) {
-        this.boundsReduce.inPosition = this.positionMassTexture;
-        this.boundsReduce.particleTexWidth = this.textureWidth;
-        this.boundsReduce.particleTexHeight = this.textureHeight;
-        this.boundsReduce.particleCount = this.particleCount;
-        this.boundsReduce.run();
+    if (this.boundsReduce && (this.frameCount % this.boundsInterval === 0)) {
+      this.boundsReduce.inPosition = this.positionMassTexture;
+      this.boundsReduce.particleTexWidth = this.textureWidth;
+      this.boundsReduce.particleTexHeight = this.textureHeight;
+      this.boundsReduce.particleCount = this.particleCount;
+      this.boundsReduce.run();
 
-        // Read back 2x1 bounds texture (min, max)
-        const gl = this.gl;
-        const fb = gl.createFramebuffer();
-        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.boundsReduce.outBounds, 0);
-        const pixels = new Float32Array(8);
-        gl.readPixels(0, 0, 2, 1, gl.RGBA, gl.FLOAT, pixels);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.deleteFramebuffer(fb);
+      // Read back 2x1 bounds texture (min, max) using pre-allocated resources
+      const gl = this.gl;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.boundsReadbackFBO);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.boundsReduce.outBounds, 0);
+      gl.readPixels(0, 0, 2, 1, gl.RGBA, gl.FLOAT, this.boundsReadbackBuffer);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-        const newMin = [pixels[0], pixels[1], pixels[2]];
-        const newMax = [pixels[4], pixels[5], pixels[6]];
-        const cur = this.worldBounds;
+      const newMin = [this.boundsReadbackBuffer[0], this.boundsReadbackBuffer[1], this.boundsReadbackBuffer[2]];
+      const newMax = [this.boundsReadbackBuffer[4], this.boundsReadbackBuffer[5], this.boundsReadbackBuffer[6]];
 
-        // If any particle escaped outside current bounds, update worldBounds and derived uniforms
-        let expanded = false;
-        for (let i = 0; i < 3; i++) {
-          if (newMin[i] < cur.min[i] || newMax[i] > cur.max[i]) { expanded = true; break; }
-        }
-
-        if (expanded) {
-          // Add small margin to avoid thrashing
-          const marginFactor = 0.05;
-          const outMin = [0, 0, 0], outMax = [0, 0, 0];
-          for (let i = 0; i < 3; i++) {
-            const span = Math.max(1e-6, newMax[i] - newMin[i]);
-            outMin[i] = newMin[i] - marginFactor * span;
-            outMax[i] = newMax[i] + marginFactor * span;
-          }
-          this.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
-
-          const newWorldSize = [outMax[0] - outMin[0], outMax[1] - outMin[1], outMax[2] - outMin[2]];
-          const voxelVolume = (newWorldSize[0] * newWorldSize[1] * newWorldSize[2]) / (this.gridSize * this.gridSize * this.gridSize);
-          const massToDensity = 1.0 / voxelVolume;
-
-          if (this.fftKernel) this.fftKernel.massToDensity = massToDensity;
-          if (this.poissonKernel) this.poissonKernel.worldSize = /** @type {[number,number,number]} */ (newWorldSize);
-          if (this.gradientKernel) this.gradientKernel.worldSize = /** @type {[number,number,number]} */ (newWorldSize);
-          if (this.forceSampleKernel) this.forceSampleKernel.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
-          if (this.depositKernel) this.depositKernel.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
-        }
+      // Add small margin to avoid thrashing
+      const marginFactor = 0.05;
+      const outMin = [0, 0, 0], outMax = [0, 0, 0];
+      for (let i = 0; i < 3; i++) {
+        const span = Math.max(1e-6, newMax[i] - newMin[i]);
+        outMin[i] = newMin[i] - marginFactor * span;
+        outMax[i] = newMax[i] + marginFactor * span;
       }
-    } catch (e) {
-      // Non-fatal: bounds reduction failing should not stop simulation
-      console.warn('KBoundsReduce failed:', e && /** @type {any} */(e).message ? /** @type {any} */(e).message : e);
+      this.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
+
+      const newWorldSize = [outMax[0] - outMin[0], outMax[1] - outMin[1], outMax[2] - outMin[2]];
+      const voxelVolume = (newWorldSize[0] * newWorldSize[1] * newWorldSize[2]) / (this.gridSize * this.gridSize * this.gridSize);
+      const massToDensity = 1.0 / voxelVolume;
+
+      if (this.fftKernel) this.fftKernel.massToDensity = massToDensity;
+      if (this.poissonKernel) this.poissonKernel.worldSize = /** @type {[number,number,number]} */ (newWorldSize);
+      if (this.gradientKernel) this.gradientKernel.worldSize = /** @type {[number,number,number]} */ (newWorldSize);
+      if (this.forceSampleKernel) this.forceSampleKernel.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
+      if (this.depositKernel) this.depositKernel.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
     }
 
 
@@ -403,7 +363,7 @@ export class GravitySpectral {
 
 
     // Forward FFT: real → complexFrom scratch + complexTo
-    this.fftKernel.real = this.massGridTexture;
+    this.fftKernel.real = this.depositKernel.outMassGrid;
     this.fftKernel.inverse = false;
     this.fftKernel.run();
 
@@ -438,7 +398,7 @@ export class GravitySpectral {
     if (!this.fftKernel.complexTo) throw new Error('FFT kernel complexTo texture is null');
     this.gradientKernel.inPotentialSpectrum = null;
 
-    this.fftKernel.real = this.forceGridXTexture;
+    this.fftKernel.real = this.forceSampleKernel.inForceGridX;
     this.fftKernel.run();
 
     this.gradientKernel.outForceSpectrumX = this.fftKernel.complexFrom;
@@ -449,7 +409,7 @@ export class GravitySpectral {
     this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumY;
     this.gradientKernel.outForceSpectrumY = null;
 
-    this.fftKernel.real = this.forceGridYTexture;
+    this.fftKernel.real = this.forceSampleKernel.inForceGridY;
     this.fftKernel.run();
 
     this.gradientKernel.outForceSpectrumY = this.fftKernel.complexFrom;
@@ -460,7 +420,7 @@ export class GravitySpectral {
     this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumZ;
     this.gradientKernel.outForceSpectrumZ = null;
 
-    this.fftKernel.real = this.forceGridZTexture;
+    this.fftKernel.real = this.forceSampleKernel.inForceGridZ;
     this.fftKernel.run();
 
     this.gradientKernel.outForceSpectrumZ = this.fftKernel.complexFrom;
@@ -470,9 +430,6 @@ export class GravitySpectral {
 
 
     // Sampling forces
-    this.forceSampleKernel.inForceGridX = this.forceGridXTexture;
-    this.forceSampleKernel.inForceGridY = this.forceGridYTexture;
-    this.forceSampleKernel.inForceGridZ = this.forceGridZTexture;
     this.forceSampleKernel.run();
   }
 
@@ -559,73 +516,6 @@ export class GravitySpectral {
     if (this.forceSampleKernel) this.forceSampleKernel.dispose();
     if (this.integrateEulerKernel) this.integrateEulerKernel.dispose();
     if (this.boundsReduce) this.boundsReduce.dispose();
+    if (this.boundsReadbackFBO) this.gl.deleteFramebuffer(this.boundsReadbackFBO);
   }
-}
-
-/**
- * @param {WebGL2RenderingContext} gl
- * @param {number} width
- * @param {number} height
- * @param {number} [internalFormat]
- * @param {number} [type]
- */
-function createTexture2D(gl, width, height, internalFormat, type) {
-  const fmt = internalFormat || gl.RGBA32F;
-  const tp = type || gl.FLOAT;
-
-  const texture = gl.createTexture();
-  if (!texture) throw new Error('Failed to create texture');
-
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, fmt, width, height, 0,
-    fmt === gl.R32F ? gl.RED : gl.RGBA, tp, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.bindTexture(gl.TEXTURE_2D, null);
-
-  return texture;
-}
-
-/**
- * Create R32F single-channel texture
- * @param {WebGL2RenderingContext} gl
- * @param {number} width
- * @param {number} height
- */
-function createTextureR32F(gl, width, height) {
-  const texture = gl.createTexture();
-  if (!texture) throw new Error('Failed to create texture');
-
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, width, height, 0, gl.RED, gl.FLOAT, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.bindTexture(gl.TEXTURE_2D, null);
-
-  return texture;
-}
-
-/**
- * Create RG32F complex-number texture
- * @param {WebGL2RenderingContext} gl
- * @param {number} width
- * @param {number} height
- */
-function createComplexTexture(gl, width, height) {
-  const texture = gl.createTexture();
-  if (!texture) throw new Error('Failed to create texture');
-
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, width, height, 0, gl.RG, gl.FLOAT, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.bindTexture(gl.TEXTURE_2D, null);
-
-  return texture;
 }

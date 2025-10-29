@@ -34,21 +34,21 @@ export class KIntegrateEuler {
     this.gl = options.gl;
 
     // Resource slots - follow kernel contract: (truthy || === null) ? use : create
-    this.inPosition = (options.inPosition || options.inPosition === null)
-      ? options.inPosition
-      : createTextureRGBA32F(this.gl, options.width || 0, options.height || 0);
-    this.inVelocity = (options.inVelocity || options.inVelocity === null)
-      ? options.inVelocity
-      : createTextureRGBA32F(this.gl, options.width || 0, options.height || 0);
-    this.inForce = (options.inForce || options.inForce === null)
-      ? options.inForce
-      : createTextureRGBA32F(this.gl, options.width || 0, options.height || 0);
-    this.outPosition = (options.outPosition || options.outPosition === null)
-      ? options.outPosition
-      : createTextureRGBA32F(this.gl, options.width || 0, options.height || 0);
-    this.outVelocity = (options.outVelocity || options.outVelocity === null)
-      ? options.outVelocity
-      : createTextureRGBA32F(this.gl, options.width || 0, options.height || 0);
+    this.inPosition = (options.inPosition || options.inPosition === null) ?
+      options.inPosition :
+      createTextureRGBA32F(this.gl, options.width || 0, options.height || 0);
+    this.inVelocity = (options.inVelocity || options.inVelocity === null) ?
+      options.inVelocity :
+      createTextureRGBA32F(this.gl, options.width || 0, options.height || 0);
+    this.inForce = (options.inForce || options.inForce === null) ?
+      options.inForce :
+      createTextureRGBA32F(this.gl, options.width || 0, options.height || 0);
+    this.outPosition = (options.outPosition || options.outPosition === null) ?
+      options.outPosition :
+      createTextureRGBA32F(this.gl, options.width || 0, options.height || 0);
+    this.outVelocity = (options.outVelocity || options.outVelocity === null) ?
+      options.outVelocity :
+      createTextureRGBA32F(this.gl, options.width || 0, options.height || 0);
 
     // Texture dimensions
     this.width = options.width || 0;

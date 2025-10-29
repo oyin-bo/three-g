@@ -162,7 +162,8 @@ export class KDeposit {
       renderCount: this.renderCount
     };
 
-    const totalMass = value.grid?.density?.mean ? value.grid.density.mean * this.gridSize * this.gridSize * this.gridSize : 0;
+  const g = /** @type {any} */ (value.grid);
+  const totalMass = g?.density?.mean ? g.density.mean * this.gridSize * this.gridSize * this.gridSize : 0;
 
     value.toString = () =>
       `KDeposit(${this.particleCount} particles→${this.gridSize}³ grid) assignment=${this.assignment} texture=${this.textureSize}×${this.textureSize} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
