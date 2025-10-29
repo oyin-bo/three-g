@@ -1,8 +1,6 @@
 // @ts-check
 
-
-import { fsQuadVert } from '../core-shaders.js';
-import { formatNumber, readLinear } from '../diag.js';
+import { readLinear } from '../diag.js';
 
 /**
  * BoundsReduceKernel2 - GPU-resident hierarchical bounds reduction (8×8 tiles)
@@ -28,6 +26,11 @@ export class KBoundsReduce {
   constructor({ gl, inPosition, outBounds, particleTextureWidth, particleTextureHeight, particleCount }) {
     this.gl = gl;
 
+    // Require float color attachments for first-pass render-to-float
+    // WebGL2 needs EXT_color_buffer_float to render to RGBA16F/RGBA32F
+    this._extColorBufferFloat = this.gl.getExtension('EXT_color_buffer_float');
+    if (!this._extColorBufferFloat) throw new Error('KBoundsReduce: EXT_color_buffer_float not available; first pass cannot render to float textures');
+
     // Resource slots - follow kernel contract
     this.inPosition = (inPosition || inPosition === null) ? inPosition : createPositionTexture(this.gl, particleTextureWidth, particleTextureHeight);
     this.outBounds = (outBounds || outBounds === null) ? outBounds : createBoundsTexture(this.gl);
@@ -40,6 +43,7 @@ export class KBoundsReduce {
     // Create shader program
     const vert = this.gl.createShader(this.gl.VERTEX_SHADER);
     if (!vert) throw new Error('Failed to create vertex shader');
+    // Use a fullscreen triangle to avoid VBO/attribute dependency for passes
     this.gl.shaderSource(vert, fsQuadVert);
     this.gl.compileShader(vert);
     if (!this.gl.getShaderParameter(vert, this.gl.COMPILE_STATUS)) {
@@ -96,24 +100,31 @@ export class KBoundsReduce {
     this.gl.deleteShader(vert);
     this.gl.deleteShader(fragReduce);
 
-    // Create quad VAO
+    // Create a dedicated empty VAO for fullscreen triangle draws (no attributes needed)
+    const triVAO = this.gl.createVertexArray();
+    if (!triVAO) throw new Error('Failed to create VAO');
+    // Also create a legacy quad VAO/VBO (kept for potential future use) but not used in draws
     const quadVAO = this.gl.createVertexArray();
     if (!quadVAO) throw new Error('Failed to create VAO');
     this.gl.bindVertexArray(quadVAO);
     const buffer = this.gl.createBuffer();
+    if (!buffer) throw new Error('Failed to create quad VBO');
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
     const quadVertices = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, quadVertices, this.gl.STATIC_DRAW);
     this.gl.enableVertexAttribArray(0);
     this.gl.vertexAttribPointer(0, 2, this.gl.FLOAT, false, 0, 0);
     this.gl.bindVertexArray(null);
+    // Keep strong references so GC doesn't collect GPU resources
+    this.fullscreenTriVAO = triVAO;
+    this.quadVBO = buffer;
     this.quadVAO = quadVAO;
 
     // Calculate how many reduction passes we need (8× reduction per pass)
     let width = this.particleTextureWidth;
     let height = this.particleTextureHeight;
     const sizes = [];
-    
+
     while (width > 8 || height > 8) {
       width = Math.max(1, Math.ceil(width / 8));
       height = Math.max(1, Math.ceil(height / 8));
@@ -125,18 +136,18 @@ export class KBoundsReduce {
     // 0 passes: input → output (no intermediates)
     // 1 pass: input → small → output (1 intermediate)
     // 2+ passes: input → small → smaller → small → smaller... → output (2 intermediates, ping-pong)
-    
+
     this.smallTexture = null;
     this.smallerTexture = null;
     this.smallFBO = null;
     this.smallerFBO = null;
-    
+
     if (sizes.length >= 1) {
       const firstSize = sizes[0];
       this.smallTexture = createReductionTexture(this.gl, firstSize.width, firstSize.height);
       this.smallFBO = this.gl.createFramebuffer();
     }
-    
+
     if (sizes.length >= 2) {
       const secondSize = sizes[1];
       this.smallerTexture = createReductionTexture(this.gl, secondSize.width, secondSize.height);
@@ -224,6 +235,9 @@ bounds: ${value.bounds}${boundsMin && boundsMax ? `
     this.gl.disable(this.gl.DEPTH_TEST);
     this.gl.disable(this.gl.BLEND);
     this.gl.disable(this.gl.SCISSOR_TEST);
+    this.gl.disable(this.gl.CULL_FACE);
+    // Ensure fragments are generated (some kernels may enable this)
+    this.gl.disable(this.gl.RASTERIZER_DISCARD);
     this.gl.colorMask(true, true, true, true);
 
     let inputTex = this.inPosition;
@@ -235,7 +249,7 @@ bounds: ${value.bounds}${boundsMin && boundsMax ? `
       const size = this.reductionSizes[i];
       const isFirstPass = (i === 0);
       const program = isFirstPass ? this.programFirst : this.programReduce;
-      
+
       // Determine output texture and FBO for this pass
       let outputTex, outputFBO;
       if (i === 0) {
@@ -263,13 +277,20 @@ bounds: ${value.bounds}${boundsMin && boundsMax ? `
       this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0]);
       this.gl.viewport(0, 0, size.width, size.height);
 
+      // Validate FBO before drawing (especially important for first pass)
+      const status = this.gl.checkFramebufferStatus(this.gl.FRAMEBUFFER);
+      if (status !== this.gl.FRAMEBUFFER_COMPLETE) {
+        const hex = '0x' + status.toString(16);
+        throw new Error(`KBoundsReduce: framebuffer incomplete for ${isFirstPass ? 'first' : 'reduction'} pass (${hex})`);
+      }
+
       this.gl.activeTexture(this.gl.TEXTURE0);
       this.gl.bindTexture(this.gl.TEXTURE_2D, inputTex);
       this.gl.uniform1i(this.gl.getUniformLocation(program, 'u_inputTex'), 0);
       this.gl.uniform2f(this.gl.getUniformLocation(program, 'u_inputSize'), inputWidth, inputHeight);
 
-      this.gl.bindVertexArray(this.quadVAO);
-      this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+      this.gl.bindVertexArray(this.fullscreenTriVAO);
+      this.gl.drawArrays(this.gl.TRIANGLES, 0, 3);
       this.gl.bindVertexArray(null);
 
       // Next iteration uses this pass's output as input
@@ -278,6 +299,7 @@ bounds: ${value.bounds}${boundsMin && boundsMax ? `
       inputHeight = size.height;
     }
 
+
     // Final pass: reduce to 2×1 output (uses reduction shader)
     this.gl.useProgram(this.programReduce);
     this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.outFramebuffer);
@@ -285,13 +307,14 @@ bounds: ${value.bounds}${boundsMin && boundsMax ? `
     this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0]);
     this.gl.viewport(0, 0, 2, 1);
 
+
     this.gl.activeTexture(this.gl.TEXTURE0);
     this.gl.bindTexture(this.gl.TEXTURE_2D, inputTex);
     this.gl.uniform1i(this.gl.getUniformLocation(this.programReduce, 'u_inputTex'), 0);
     this.gl.uniform2f(this.gl.getUniformLocation(this.programReduce, 'u_inputSize'), inputWidth, inputHeight);
 
-    this.gl.bindVertexArray(this.quadVAO);
-    this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+    this.gl.bindVertexArray(this.fullscreenTriVAO);
+    this.gl.drawArrays(this.gl.TRIANGLES, 0, 3);
     this.gl.bindVertexArray(null);
 
     this.gl.activeTexture(this.gl.TEXTURE0);
@@ -325,14 +348,15 @@ bounds: ${value.bounds}${boundsMin && boundsMax ? `
 function firstPassShader() {
   return `#version 300 es
 precision highp float;
+precision highp int;
 
 uniform sampler2D u_inputTex;
 uniform vec2 u_inputSize;
 
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
 
 void main() {
-  ivec2 outCoord = ivec2(gl_FragCoord.xy);
+  ivec2 outCoord = ivec2(floor(gl_FragCoord.xy));
   
   // Calculate base input coordinate for this output pixel's 8×8 tile
   // Output is 2× wider, so divide x by 2 to get tile index
@@ -384,6 +408,7 @@ void main() {
 function reductionPassShader() {
   return `#version 300 es
 precision highp float;
+precision highp int;
 
 uniform sampler2D u_inputTex;
 uniform vec2 u_inputSize;
@@ -391,7 +416,7 @@ uniform vec2 u_inputSize;
 out vec4 fragColor;
 
 void main() {
-  ivec2 outCoord = ivec2(gl_FragCoord.xy);
+  ivec2 outCoord = ivec2(floor(gl_FragCoord.xy));
   
   // Calculate base tile coordinate
   // Output is 2× wider, so divide x by 2 to get tile index
@@ -496,3 +521,17 @@ function createPositionTexture(gl, width, height) {
   gl.bindTexture(gl.TEXTURE_2D, null);
   return texture;
 }
+
+// Fullscreen triangle vertex shader (no attributes required)
+const fsQuadVert =/* glsl */`#version 300 es
+precision highp float;
+
+const vec2 POS[3] = vec2[3](
+  vec2(-1.0, -1.0),
+  vec2(3.0, -1.0),
+  vec2(-1.0, 3.0)
+);
+
+void main() {
+  gl_Position = vec4(POS[gl_VertexID], 0.0, 1.0);
+}`;

@@ -133,17 +133,17 @@ export class KIntegrateEuler {
    */
   valueOf({ pixels } = {}) {
     const value = {
-      position: this.inPosition && readLinear({
+      inPosition: this.inPosition && readLinear({
         gl: this.gl, texture: this.inPosition, width: this.width,
         height: this.height, count: this.width * this.height,
         channels: ['x', 'y', 'z', 'mass'], pixels
       }),
-      velocity: this.inVelocity && readLinear({
+      inVelocity: this.inVelocity && readLinear({
         gl: this.gl, texture: this.inVelocity, width: this.width,
         height: this.height, count: this.width * this.height,
         channels: ['vx', 'vy', 'vz', 'color'], pixels
       }),
-      force: this.inForce && readLinear({
+      inForce: this.inForce && readLinear({
         gl: this.gl, texture: this.inForce, width: this.width,
         height: this.height, count: this.width * this.height,
         channels: ['fx', 'fy', 'fz', 'unused'], pixels
@@ -168,25 +168,25 @@ export class KIntegrateEuler {
     };
 
     // Compute average speed and displacement
-    const avgSpeedIn = value.velocity?.vx ?
-      Math.sqrt(value.velocity.vx.mean ** 2 + value.velocity.vy.mean ** 2 + value.velocity.vz.mean ** 2) : 0;
+    const avgSpeedIn = value.inVelocity?.vx ?
+      Math.sqrt(value.inVelocity.vx.mean ** 2 + value.inVelocity.vy.mean ** 2 + value.inVelocity.vz.mean ** 2) : 0;
     const avgSpeedOut = value.outVelocity?.vx ?
       Math.sqrt(value.outVelocity.vx.mean ** 2 + value.outVelocity.vy.mean ** 2 + value.outVelocity.vz.mean ** 2) : 0;
-    const displacement = value.position?.x && value.outPosition?.x ?
+    const displacement = value.inPosition?.x && value.outPosition?.x ?
       Math.sqrt(
-        (value.outPosition.x.mean - value.position.x.mean) ** 2 +
-        (value.outPosition.y.mean - value.position.y.mean) ** 2 +
-        (value.outPosition.z.mean - value.position.z.mean) ** 2
+        (value.outPosition.x.mean - value.inPosition.x.mean) ** 2 +
+        (value.outPosition.y.mean - value.inPosition.y.mean) ** 2 +
+        (value.outPosition.z.mean - value.inPosition.z.mean) ** 2
       ) : 0;
 
     value.toString = () =>
       `KIntegratePhysics(${this.width}×${this.height}) dt=${formatNumber(this.dt)} damping=${formatNumber(this.damping)} maxSpeed=${formatNumber(this.maxSpeed)} maxAccel=${formatNumber(this.maxAccel)} #${this.renderCount}
 
-position: ${value.position}
+position: ${value.inPosition}
 
-velocity: ${value.velocity ? `avgSpeed=${formatNumber(avgSpeedIn)} ` : ''}${value.velocity}
+velocity: ${value.inVelocity ? `avgSpeed=${formatNumber(avgSpeedIn)} ` : ''}${value.inVelocity}
 
-force: ${value.force}
+force: ${value.inForce}
 
 → outPosition: ${value.outPosition ? `displacement=${formatNumber(displacement)} ` : ''}${value.outPosition}
 
