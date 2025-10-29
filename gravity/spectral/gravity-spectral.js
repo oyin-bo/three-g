@@ -227,8 +227,8 @@ export class GravitySpectral {
     this.boundsReduce = new KBoundsReduce({
       gl: this.gl,
       inPosition: this.positionMassTexture,
-      particleTexWidth: this.textureWidth,
-      particleTexHeight: this.textureHeight,
+      particleTextureWidth: this.textureWidth,
+      particleTextureHeight: this.textureHeight,
       particleCount: this.particleCount
     });
 
@@ -256,8 +256,8 @@ export class GravitySpectral {
     // Periodic GPU bounds check: run KBoundsReduce every boundsInterval frames
     if (this.boundsReduce && (this.frameCount % this.boundsInterval === 0)) {
       this.boundsReduce.inPosition = this.positionMassTexture;
-      this.boundsReduce.particleTexWidth = this.textureWidth;
-      this.boundsReduce.particleTexHeight = this.textureHeight;
+      this.boundsReduce.particleTextureWidth = this.textureWidth;
+      this.boundsReduce.particleTextureHeight = this.textureHeight;
       this.boundsReduce.particleCount = this.particleCount;
       this.boundsReduce.run();
 
@@ -349,7 +349,7 @@ export class GravitySpectral {
 
 
     // Forward FFT: real → complexFrom scratch + complexTo
-    this.fftKernel.real = this.depositKernel.outMassGrid;
+    this.fftKernel.real = /** @type {WebGLTexture} */ (this.depositKernel.outMassGrid);
     this.fftKernel.inverse = false;
     this.fftKernel.run();
 
@@ -382,7 +382,7 @@ export class GravitySpectral {
     if (!this.fftKernel.complexTo) throw new Error('FFT kernel complexTo texture is null');
     this.gradientKernel.inPotentialSpectrum = null;
 
-    this.fftKernel.real = this.forceSampleKernel.inForceGridX;
+    this.fftKernel.real = /** @type {WebGLTexture} */ (this.forceSampleKernel.inForceGridX);
     this.fftKernel.run();
 
     this.gradientKernel.outForceSpectrumX = this.fftKernel.complexFrom;
@@ -392,7 +392,7 @@ export class GravitySpectral {
     this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumY;
     this.gradientKernel.outForceSpectrumY = null;
 
-    this.fftKernel.real = this.forceSampleKernel.inForceGridY;
+    this.fftKernel.real = /** @type {WebGLTexture} */ (this.forceSampleKernel.inForceGridY);
     this.fftKernel.run();
 
     this.gradientKernel.outForceSpectrumY = this.fftKernel.complexFrom;
@@ -403,7 +403,7 @@ export class GravitySpectral {
     this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumZ;
     this.gradientKernel.outForceSpectrumZ = null;
 
-    this.fftKernel.real = this.forceSampleKernel.inForceGridZ;
+    this.fftKernel.real = /** @type {WebGLTexture} */ (this.forceSampleKernel.inForceGridZ);
     this.fftKernel.run();
 
     this.gradientKernel.outForceSpectrumZ = this.fftKernel.complexFrom;
@@ -475,12 +475,12 @@ export class GravitySpectral {
     let output = `\nParticleSystemSpectralKernels(${snapshot.particleCount}p grid=${snapshot.gridSize}³) frame=${snapshot.frameCount}\n`;
     output += `  dt=${snapshot.dt.toExponential(2)} G=${snapshot.gravityStrength.toExponential(2)} soft=${snapshot.softening.toFixed(2)} damp=${snapshot.damping.toFixed(2)}\n`;
 
-    if (snapshot.deposit) output += '\n' + snapshot.deposit.toString().split('\n').map((l/**@type{string}*/) => '  ' + l).join('\n');
-    if (snapshot.poisson) output += '\n' + snapshot.poisson.toString().split('\n').map((l/**@type{string}*/) => '  ' + l).join('\n');
-    if (snapshot.gradient) output += '\n' + snapshot.gradient.toString().split('\n').map((l/**@type{string}*/) => '  ' + l).join('\n');
-    if (snapshot.fft) output += '\n' + snapshot.fft.toString().split('\n').map((l/**@type{string}*/) => '  ' + l).join('\n');
-    if (snapshot.forceSample) output += '\n' + snapshot.forceSample.toString().split('\n').map((l/**@type{string}*/) => '  ' + l).join('\n');
-    if (snapshot.integrate) output += '\n' + snapshot.integrate.toString().split('\n').map((l/**@type{string}*/) => '  ' + l).join('\n');
+    if (snapshot.deposit) output += '\n' + snapshot.deposit.toString().replace(/^/gm, '  ');
+    if (snapshot.poisson) output += '\n' + snapshot.poisson.toString().replace(/^/gm, '  ');
+    if (snapshot.gradient) output += '\n' + snapshot.gradient.toString().replace(/^/gm, '  ');
+    if (snapshot.fft) output += '\n' + snapshot.fft.toString().replace(/^/gm, '  ');
+    if (snapshot.forceSample) output += '\n' + snapshot.forceSample.toString().replace(/^/gm, '  ');
+    if (snapshot.integrate) output += '\n' + snapshot.integrate.toString().replace(/^/gm, '  ');
 
     return output;
   }

@@ -33,6 +33,9 @@ export class KDeposit {
    *   particleTexHeight?: number,
    *   gridSize?: number,
    *   slicesPerRow?: number,
+   *   textureSize?: number,
+   *   textureWidth?: number,
+   *   textureHeight?: number,
    *   worldBounds?: {min: [number,number,number], max: [number,number,number]},
    *   assignment?: 'ngp' | 'cic',
    *   disableFloatBlend?: boolean
@@ -43,7 +46,10 @@ export class KDeposit {
 
     // Resource slots
     this.inPosition = (options.inPosition || options.inPosition === null) ? options.inPosition : createTextureRGBA32F(this.gl, options.particleTexWidth || 1, options.particleTexHeight || 1);
-    this.outGrid = (options.outGrid || options.outGrid === null) ? options.outGrid : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.outGrid = (options.outGrid || options.outGrid === null) ? options.outGrid : createGridTexture(this.gl,
+      (options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))))),
+      (options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))))
+    );
 
     // Particle configuration
     this.particleCount = options.particleCount || 0;
@@ -52,8 +58,10 @@ export class KDeposit {
 
     // Grid configuration
     this.gridSize = options.gridSize || 64;
-    this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(this.gridSize));
-    this.textureSize = this.gridSize * this.slicesPerRow;
+  this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(this.gridSize));
+  this.textureWidth = options.textureWidth || options.textureSize || (this.gridSize * this.slicesPerRow);
+  this.textureHeight = options.textureHeight || options.textureSize || (this.gridSize * Math.ceil(this.gridSize / this.slicesPerRow));
+  this.textureSize = /** @deprecated */ (typeof options.textureSize === 'number' ? options.textureSize : this.textureWidth);
 
     // World bounds
     this.worldBounds = options.worldBounds || {
@@ -124,7 +132,7 @@ export class KDeposit {
     if (!texture) throw new Error('Failed to create texture');
 
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, this.textureSize, this.textureSize, 0, gl.RED, gl.FLOAT, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, this.textureWidth, this.textureHeight, 0, gl.RED, gl.FLOAT, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -146,8 +154,8 @@ export class KDeposit {
         channels: ['x', 'y', 'z', 'mass'], pixels
       }),
       grid: this.outGrid && readGrid3D({
-        gl: this.gl, texture: this.outGrid, width: this.textureSize,
-        height: this.textureSize, gridSize: this.gridSize,
+        gl: this.gl, texture: this.outGrid, width: this.textureWidth,
+        height: this.textureHeight, gridSize: this.gridSize,
         channels: ['density'], pixels, format: this.gl.R32F
       }),
       particleCount: this.particleCount,
@@ -166,7 +174,7 @@ export class KDeposit {
   const totalMass = g?.density?.mean ? g.density.mean * this.gridSize * this.gridSize * this.gridSize : 0;
 
     value.toString = () =>
-      `KDeposit(${this.particleCount} particles→${this.gridSize}³ grid) assignment=${this.assignment} texture=${this.textureSize}×${this.textureSize} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
+  `KDeposit(${this.particleCount} particles→${this.gridSize}³ grid) assignment=${this.assignment} texture=${this.textureWidth}×${this.textureHeight} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
 
 position: ${value.position}
 
@@ -210,7 +218,7 @@ position: ${value.position}
       throw new Error(`KDeposit: Framebuffer incomplete: ${fbStatus}`);
     }
 
-    gl.viewport(0, 0, this.textureSize, this.textureSize);
+  gl.viewport(0, 0, this.textureWidth, this.textureHeight);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -230,7 +238,7 @@ position: ${value.position}
   // Particle texture size for vertex fetch
   gl.uniform2f(gl.getUniformLocation(this.program, 'u_particleTextureSize'), this.particleTexWidth, this.particleTexHeight);
   // Packed grid texture size (width, height)
-  gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.textureSize, this.textureSize);
+  gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.textureWidth, this.textureHeight);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMin'), this.worldBounds.min[0], this.worldBounds.min[1], this.worldBounds.min[2]);
@@ -271,22 +279,18 @@ position: ${value.position}
 
     if (this.program) {
       gl.deleteProgram(this.program);
-      this.program = null;
     }
 
     if (this.particleVAO) {
       gl.deleteVertexArray(this.particleVAO);
-      this.particleVAO = null;
     }
 
     if (this.framebuffer) {
       gl.deleteFramebuffer(this.framebuffer);
-      this.framebuffer = null;
     }
 
     if (this.outGrid) {
       gl.deleteTexture(this.outGrid);
-      this.outGrid = null;
     }
   }
 }
@@ -313,13 +317,16 @@ function createTextureRGBA32F(gl, width, height) {
 /**
  * Helper: Create a grid texture (R32F for mass/counts)
  * @param {WebGL2RenderingContext} gl
- * @param {number} size
+ * @param {number} width
+ * @param {number} [height]
  */
-function createGridTexture(gl, size) {
+function createGridTexture(gl, width, height) {
   const texture = gl.createTexture();
   if (!texture) throw new Error('Failed to create texture');
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, size, size, 0, gl.RED, gl.FLOAT, null);
+  const w = width;
+  const h = (height === undefined) ? width : height;
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, w, h, 0, gl.RED, gl.FLOAT, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

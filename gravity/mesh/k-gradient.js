@@ -8,7 +8,8 @@
  */
 
 import { fsQuadVert } from '../core-shaders.js';
-import gradientFrag from './gradient.frag.js';
+// Reuse the spectral gradient shader that supports non-square packed textures
+import gradientFrag from '../spectral/shaders/gradient.frag.js';
 import { readLinear, readGrid3D, formatNumber } from '../diag.js';
 
 export class KGradient {
@@ -23,6 +24,8 @@ export class KGradient {
    *   gridSize?: number,
    *   slicesPerRow?: number,
    *   textureSize?: number,
+   *   textureWidth?: number,
+   *   textureHeight?: number,
    *   worldSize?: [number,number,number]
    * }} options
    */
@@ -30,16 +33,20 @@ export class KGradient {
     this.gl = options.gl;
     
     // Resource slots
-    this.inPotentialSpectrum = (options.inPotentialSpectrum || options.inPotentialSpectrum === null) ? options.inPotentialSpectrum : createComplexTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
-    this.outForceSpectrumX = (options.outForceSpectrumX || options.outForceSpectrumX === null) ? options.outForceSpectrumX : createComplexTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
-    this.outForceSpectrumY = (options.outForceSpectrumY || options.outForceSpectrumY === null) ? options.outForceSpectrumY : createComplexTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
-    this.outForceSpectrumZ = (options.outForceSpectrumZ || options.outForceSpectrumZ === null) ? options.outForceSpectrumZ : createComplexTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.inPotentialSpectrum = (options.inPotentialSpectrum || options.inPotentialSpectrum === null) ? options.inPotentialSpectrum : createComplexTexture(this.gl, options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))), options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))));
+    this.outForceSpectrumX = (options.outForceSpectrumX || options.outForceSpectrumX === null) ? options.outForceSpectrumX : createComplexTexture(this.gl, options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))), options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))));
+    this.outForceSpectrumY = (options.outForceSpectrumY || options.outForceSpectrumY === null) ? options.outForceSpectrumY : createComplexTexture(this.gl, options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))), options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))));
+    this.outForceSpectrumZ = (options.outForceSpectrumZ || options.outForceSpectrumZ === null) ? options.outForceSpectrumZ : createComplexTexture(this.gl, options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))), options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))));
     this.quadVAO = (options.quadVAO || options.quadVAO === null) ? options.quadVAO : createQuadVAO(this.gl);
     
     // Grid configuration
     this.gridSize = options.gridSize || 64;
     this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(this.gridSize));
-    this.textureSize = options.textureSize || (this.gridSize * this.slicesPerRow);
+  // Non-square packed 3D texture dimensions (fallback to square textureSize)
+  this.textureWidth = options.textureWidth || options.textureSize || (this.gridSize * this.slicesPerRow);
+  this.textureHeight = options.textureHeight || options.textureSize || (this.gridSize * Math.ceil(this.gridSize / this.slicesPerRow));
+  // Legacy alias kept for backward-compat reads
+  this.textureSize = /** @deprecated */ (typeof options.textureSize === 'number' ? options.textureSize : this.textureWidth);
     
     // Physics parameters
     this.worldSize = options.worldSize || [8, 8, 8];
@@ -94,7 +101,7 @@ export class KGradient {
     if (!texture) throw new Error('Failed to create texture');
     
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, this.textureSize, this.textureSize, 0, gl.RG, gl.FLOAT, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, this.textureWidth, this.textureHeight, 0, gl.RG, gl.FLOAT, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -130,34 +137,36 @@ export class KGradient {
   valueOf({ pixels } = {}) {
     const value = {
       potentialSpectrum: this.inPotentialSpectrum && readLinear({
-        gl: this.gl, texture: this.inPotentialSpectrum, width: this.textureSize,
-        height: this.textureSize, count: this.textureSize * this.textureSize,
+        gl: this.gl, texture: this.inPotentialSpectrum, width: this.textureWidth,
+        height: this.textureHeight, count: this.textureWidth * this.textureHeight,
         channels: ['real', 'imag'], pixels, format: this.gl.RG32F
       }),
       forceSpectrumX: this.outForceSpectrumX && readLinear({
-        gl: this.gl, texture: this.outForceSpectrumX, width: this.textureSize,
-        height: this.textureSize, count: this.textureSize * this.textureSize,
+        gl: this.gl, texture: this.outForceSpectrumX, width: this.textureWidth,
+        height: this.textureHeight, count: this.textureWidth * this.textureHeight,
         channels: ['real', 'imag'], pixels, format: this.gl.RG32F
       }),
       forceSpectrumY: this.outForceSpectrumY && readLinear({
-        gl: this.gl, texture: this.outForceSpectrumY, width: this.textureSize,
-        height: this.textureSize, count: this.textureSize * this.textureSize,
+        gl: this.gl, texture: this.outForceSpectrumY, width: this.textureWidth,
+        height: this.textureHeight, count: this.textureWidth * this.textureHeight,
         channels: ['real', 'imag'], pixels, format: this.gl.RG32F
       }),
       forceSpectrumZ: this.outForceSpectrumZ && readLinear({
-        gl: this.gl, texture: this.outForceSpectrumZ, width: this.textureSize,
-        height: this.textureSize, count: this.textureSize * this.textureSize,
+        gl: this.gl, texture: this.outForceSpectrumZ, width: this.textureWidth,
+        height: this.textureHeight, count: this.textureWidth * this.textureHeight,
         channels: ['real', 'imag'], pixels, format: this.gl.RG32F
       }),
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureSize,
+      textureWidth: this.textureWidth,
+      textureHeight: this.textureHeight,
       worldSize: [...this.worldSize],
       renderCount: this.renderCount
     };
     
     value.toString = () =>
-`KGradient(${this.gridSize}³ grid) texture=${this.textureSize}×${this.textureSize} worldSize=[${this.worldSize}] #${this.renderCount}
+`KGradient(${this.gridSize}³ grid) texture=${this.textureWidth}×${this.textureHeight} worldSize=[${this.worldSize}] #${this.renderCount}
 
 potentialSpectrum: ${value.potentialSpectrum}
 
@@ -196,7 +205,7 @@ potentialSpectrum: ${value.potentialSpectrum}
     const prevBlend = gl.getParameter(gl.BLEND);
     const prevDepthTest = gl.getParameter(gl.DEPTH_TEST);
     
-    gl.viewport(0, 0, this.textureSize, this.textureSize);
+    gl.viewport(0, 0, this.textureWidth, this.textureHeight);
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
     
@@ -210,6 +219,8 @@ potentialSpectrum: ${value.potentialSpectrum}
     // Set uniforms
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
+    // Provide packed texture dimensions for non-square support
+    gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.textureWidth, this.textureHeight);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldSize'), this.worldSize[0], this.worldSize[1], this.worldSize[2]);
     
     gl.bindVertexArray(this.quadVAO);
@@ -253,26 +264,18 @@ potentialSpectrum: ${value.potentialSpectrum}
     
     if (this.program) {
       gl.deleteProgram(this.program);
-      this.program = null;
     }
     
     if (this.framebufferX) gl.deleteFramebuffer(this.framebufferX);
     if (this.framebufferY) gl.deleteFramebuffer(this.framebufferY);
     if (this.framebufferZ) gl.deleteFramebuffer(this.framebufferZ);
-    this.framebufferX = null;
-    this.framebufferY = null;
-    this.framebufferZ = null;
     
     if (this.outForceSpectrumX) gl.deleteTexture(this.outForceSpectrumX);
     if (this.outForceSpectrumY) gl.deleteTexture(this.outForceSpectrumY);
     if (this.outForceSpectrumZ) gl.deleteTexture(this.outForceSpectrumZ);
-    this.outForceSpectrumX = null;
-    this.outForceSpectrumY = null;
-    this.outForceSpectrumZ = null;
     
     if (this.quadVAO) {
       gl.deleteVertexArray(this.quadVAO);
-      this.quadVAO = null;
     }
   }
 }
@@ -280,13 +283,16 @@ potentialSpectrum: ${value.potentialSpectrum}
 /**
  * Helper: Create an RG32F complex texture
  * @param {WebGL2RenderingContext} gl
- * @param {number} size
+ * @param {number} width
+ * @param {number} [height]
  */
-function createComplexTexture(gl, size) {
+function createComplexTexture(gl, width, height) {
+  const w = width;
+  const h = (height === undefined) ? width : height;
   const texture = gl.createTexture();
   if (!texture) throw new Error('Failed to create texture');
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, size, size, 0, gl.RG, gl.FLOAT, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, w, h, 0, gl.RG, gl.FLOAT, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

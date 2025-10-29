@@ -8,12 +8,16 @@
  */
 
 import { KDeposit } from './k-deposit.js';
-import { KFFT } from './k-fft.js';
-import { KPoisson } from './k-poisson.js';
+// Reuse the lean spectral KFFT implementation
+import { KFFT } from '../spectral/k-fft.js';
+// Reuse spectral KPoisson (non-square textures, unified options)
+import { KPoisson } from '../spectral/k-poisson.js';
 import { KGradient } from './k-gradient.js';
-import { KForceSample } from './k-force-sample.js';
+// Reuse spectral KForceSample (non-square textures, unified mapping)
+import { KForceSample } from '../spectral/k-force-sample.js';
 import { KNearField } from './k-near-field.js';
 import { KIntegrateEuler } from '../multipole/k-integrate-euler.js';
+import { KBoundsReduce } from '../multipole/k-bounds-reduce.js';
 
 export class GravityMesh {
   /**
@@ -95,8 +99,10 @@ export class GravityMesh {
     
     this.frameCount = 0;
     
-    // Grid configuration
-    this.gridTextureSize = this.meshConfig.gridSize * this.meshConfig.slicesPerRow;
+  // Grid configuration (packed 3D as non-square 2D)
+  this.sliceRows = Math.ceil(this.meshConfig.gridSize / this.meshConfig.slicesPerRow);
+  this.gridTextureWidth = this.meshConfig.gridSize * this.meshConfig.slicesPerRow;
+  this.gridTextureHeight = this.meshConfig.gridSize * this.sliceRows;
 
     // Check WebGL2 support
     const colorBufferFloat = this.gl.getExtension('EXT_color_buffer_float');
@@ -114,17 +120,18 @@ export class GravityMesh {
     this.velocityColorTexture = velocityColorTexture;
 
   // Create force grid textures for mesh method (R32F grid textures for inverse FFT output)
-  const gridTextureSize = this.meshConfig.gridSize * this.meshConfig.slicesPerRow;
-  // Spectral-style: system-owned resources for clear ownership
-  this.massGridTexture = createTexture2D(this.gl, gridTextureSize, gridTextureSize, this.gl.R32F);
-  this.fftComplexTexture1 = createComplexTexture(this.gl, gridTextureSize, gridTextureSize);
-  this.fftComplexTexture2 = createComplexTexture(this.gl, gridTextureSize, gridTextureSize);
-  this.forceSpectrumXTexture = createComplexTexture(this.gl, gridTextureSize, gridTextureSize);
-  this.forceSpectrumYTexture = createComplexTexture(this.gl, gridTextureSize, gridTextureSize);
-  this.forceSpectrumZTexture = createComplexTexture(this.gl, gridTextureSize, gridTextureSize);
-    this.forceGridX = createTexture2D(this.gl, gridTextureSize, gridTextureSize, this.gl.R32F);
-    this.forceGridY = createTexture2D(this.gl, gridTextureSize, gridTextureSize, this.gl.R32F);
-    this.forceGridZ = createTexture2D(this.gl, gridTextureSize, gridTextureSize, this.gl.R32F);
+  const gridTextureWidth = this.gridTextureWidth;
+  const gridTextureHeight = this.gridTextureHeight;
+  // Spectral-style: system-owned resources for clear ownership (now non-square)
+  this.massGridTexture = createTexture2D(this.gl, gridTextureWidth, gridTextureHeight, this.gl.R32F);
+  this.fftComplexTexture1 = createComplexTexture(this.gl, gridTextureWidth, gridTextureHeight);
+  this.fftComplexTexture2 = createComplexTexture(this.gl, gridTextureWidth, gridTextureHeight);
+  this.forceSpectrumXTexture = createComplexTexture(this.gl, gridTextureWidth, gridTextureHeight);
+  this.forceSpectrumYTexture = createComplexTexture(this.gl, gridTextureWidth, gridTextureHeight);
+  this.forceSpectrumZTexture = createComplexTexture(this.gl, gridTextureWidth, gridTextureHeight);
+    this.forceGridX = createTexture2D(this.gl, gridTextureWidth, gridTextureHeight, this.gl.R32F);
+    this.forceGridY = createTexture2D(this.gl, gridTextureWidth, gridTextureHeight, this.gl.R32F);
+    this.forceGridZ = createTexture2D(this.gl, gridTextureWidth, gridTextureHeight, this.gl.R32F);
 
     // Create shared quad VAO
     const vao = this.gl.createVertexArray();
@@ -165,41 +172,45 @@ export class GravityMesh {
       particleTexHeight: this.textureHeight,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
+      textureWidth: this.gridTextureWidth,
+      textureHeight: this.gridTextureHeight,
       outGrid: this.massGridTexture,
       worldBounds: this.worldBounds,
       assignment: this.meshConfig.assignment,
       disableFloatBlend: this.disableFloatBlend
     });
     
-    // FFT kernel for forward transform (real -> complex)
-    this.fftForwardKernel = new KFFT({
+    // Unified KFFT (reuse spectral implementation). We'll toggle inverse per use.
+    this.fftKernel = new KFFT({
       gl: this.gl,
-      real: this.massGridTexture,
-      complexFrom: this.fftComplexTexture1,
-      complexTo: this.fftComplexTexture2,
+      // Don't bind real here; set per-run to latest massGrid
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
-      textureSize: this.gridTextureSize,
+  // Use non-square packed texture dims
+  textureWidth: this.gridTextureWidth,
+  textureHeight: this.gridTextureHeight,
       inverse: false,
-      cellVolume: this.cellVolume
+      // massToDensity = 1 / cellVolume
+      massToDensity: 1.0 / this.cellVolume
     });
     
-    // Poisson solver kernel
-    this.poissonKernel = new KPoisson({
+    // Poisson solver kernel (reuse spectral version)
+    this.poissonKernel = new KPoisson(/** @type {any} */ ({
       gl: this.gl,
       inDensitySpectrum: null,
       outPotentialSpectrum: null,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
-      textureSize: this.gridTextureSize,
+      textureWidth: this.gridTextureWidth,
+      textureHeight: this.gridTextureHeight,
       worldSize: /** @type {[number, number, number]} */ (this.worldSize),
-      gravityStrength: this.gravityStrength,
-      splitMode: this.meshConfig.splitSigma > 0 ? 2 : this.meshConfig.kCut > 0 ? 1 : 0,
+      gravitationalConstant: 4.0 * Math.PI * this.gravityStrength,
+      assignment: /** @type {'NGP'|'CIC'|'TSC'} */ (this.meshConfig.assignment.toUpperCase()),
+      poissonUseDiscrete: true,
+      splitMode: this.meshConfig.splitSigma > 0 ? 2 : (this.meshConfig.kCut > 0 ? 1 : 0),
       kCut: this.meshConfig.kCut,
-      gaussianSigma: this.meshConfig.splitSigma,
-      deconvolveOrder: this.meshConfig.assignment === 'cic' ? 2 : 1,
-      useDiscrete: true
-    });
+      treePMSigma: this.meshConfig.splitSigma
+    }));
     
     // Gradient kernel
     this.gradientKernel = new KGradient({
@@ -210,20 +221,12 @@ export class GravityMesh {
       outForceSpectrumZ: this.forceSpectrumZTexture,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
-      textureSize: this.gridTextureSize,
+      textureWidth: this.gridTextureWidth,
+      textureHeight: this.gridTextureHeight,
       worldSize: /** @type {[number, number, number]} */ (this.worldSize)
     });
     
-    // FFT kernel for inverse transforms (reused for x, y, z): complex -> real
-    this.fftInverseKernel = new KFFT({
-      gl: this.gl,
-      complexTo: this.fftComplexTexture1,
-      gridSize: this.meshConfig.gridSize,
-      slicesPerRow: this.meshConfig.slicesPerRow,
-      textureSize: this.gridTextureSize,
-      inverse: true,
-      cellVolume: this.cellVolume
-    });
+    // Note: No separate inverse kernel needed when reusing spectral KFFT.
     
     // Force sampling kernel
     this.forceSampleKernel = new KForceSample({
@@ -233,6 +236,8 @@ export class GravityMesh {
       particleTexHeight: this.textureHeight,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
+      textureWidth: this.gridTextureWidth,
+      textureHeight: this.gridTextureHeight,
       worldBounds: this.worldBounds,
       accumulate: false
     });
@@ -242,7 +247,8 @@ export class GravityMesh {
       gl: this.gl,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
-      textureSize: this.gridTextureSize,
+      textureWidth: this.gridTextureWidth,
+      textureHeight: this.gridTextureHeight,
       worldBounds: this.worldBounds,
       softening: this.softening,
       gravityStrength: this.gravityStrength,
@@ -257,6 +263,8 @@ export class GravityMesh {
       particleTexHeight: this.textureHeight,
       gridSize: this.meshConfig.gridSize,
       slicesPerRow: this.meshConfig.slicesPerRow,
+      textureWidth: this.gridTextureWidth,
+      textureHeight: this.gridTextureHeight,
       worldBounds: this.worldBounds,
       accumulate: true
     });
@@ -276,6 +284,18 @@ export class GravityMesh {
 
     this.positionMassTexture = this.integrateEulerKernel.inPosition;
     this.velocityColorTexture = this.integrateEulerKernel.inVelocity;
+
+    // GPU bounds reduction (periodic)
+    this.boundsReduce = new KBoundsReduce({
+      gl: this.gl,
+      inPosition: this.positionMassTexture,
+      particleTextureWidth: this.textureWidth,
+      particleTextureHeight: this.textureHeight,
+      particleCount: this.particleCount
+    });
+    this.boundsInterval = 30;
+    this.boundsReadbackBuffer = new Float32Array(8);
+    this.boundsReadbackFBO = this.gl.createFramebuffer();
   }
 
   /**
@@ -284,6 +304,48 @@ export class GravityMesh {
   step() {
     // 1. Deposit particles onto mesh
     this._depositMass();
+
+    // Periodic GPU bounds check: run KBoundsReduce every boundsInterval frames
+    if (this.boundsReduce && (this.frameCount % this.boundsInterval === 0)) {
+      const gl = this.gl;
+      this.boundsReduce.inPosition = this.positionMassTexture;
+      this.boundsReduce.particleTextureWidth = this.textureWidth;
+      this.boundsReduce.particleTextureHeight = this.textureHeight;
+      this.boundsReduce.particleCount = this.particleCount;
+      this.boundsReduce.run();
+
+      // Read back 2x1 bounds texture (min, max) using pre-allocated resources
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.boundsReadbackFBO);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.boundsReduce.outBounds, 0);
+      gl.readPixels(0, 0, 2, 1, gl.RGBA, gl.FLOAT, this.boundsReadbackBuffer);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+      const newMin = [this.boundsReadbackBuffer[0], this.boundsReadbackBuffer[1], this.boundsReadbackBuffer[2]];
+      const newMax = [this.boundsReadbackBuffer[4], this.boundsReadbackBuffer[5], this.boundsReadbackBuffer[6]];
+      const marginFactor = 0.05;
+      const outMin = [0, 0, 0], outMax = [0, 0, 0];
+      for (let i = 0; i < 3; i++) {
+        const span = Math.max(1e-6, newMax[i] - newMin[i]);
+        outMin[i] = newMin[i] - marginFactor * span;
+        outMax[i] = newMax[i] + marginFactor * span;
+      }
+      this.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
+
+      const newWorldSize = [outMax[0] - outMin[0], outMax[1] - outMin[1], outMax[2] - outMin[2]];
+      const n = this.meshConfig.gridSize;
+      const newCellVolume = (newWorldSize[0] * newWorldSize[1] * newWorldSize[2]) / (n * n * n);
+      const massToDensity = 1.0 / newCellVolume;
+      this.cellVolume = newCellVolume;
+
+      // Propagate scaling/bounds updates
+      if (this.fftKernel) this.fftKernel.massToDensity = massToDensity;
+      if (this.poissonKernel) this.poissonKernel.worldSize = /** @type {[number,number,number]} */ (newWorldSize);
+      if (this.gradientKernel) this.gradientKernel.worldSize = /** @type {[number,number,number]} */ (newWorldSize);
+      if (this.forceSampleKernel) this.forceSampleKernel.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
+      if (this.depositKernel) this.depositKernel.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
+      if (this.nearFieldKernel) this.nearFieldKernel.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
+      if (this.nearFieldSampleKernel) this.nearFieldSampleKernel.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
+    }
     
     // 2. Compute mesh forces
     this._computeMeshForces();
@@ -307,6 +369,59 @@ export class GravityMesh {
   getTextureSize() {
     return { width: this.textureWidth, height: this.textureHeight };
   }
+
+  /**
+   * Reflection snapshot of system state for Daebug/diagnostics
+   * Mirrors kernel-style valueOf contract (see docs/10-reflection.md)
+   * @param {{ pixels?: boolean }} [options]
+   */
+  valueOf({ pixels } = {}) {
+    // Kernels already expose rich valueOf snapshots; here we summarize system-level wiring
+    const value = {
+      worldBounds: { min: [...this.worldBounds.min], max: [...this.worldBounds.max] },
+      worldSize: [...this.worldSize],
+      gridSize: this.meshConfig.gridSize,
+      slicesPerRow: this.meshConfig.slicesPerRow,
+      textureWidth: this.gridTextureWidth,
+      textureHeight: this.gridTextureHeight,
+      cellVolume: this.cellVolume,
+      massToDensity: this.fftKernel ? this.fftKernel.massToDensity : (1 / this.cellVolume),
+      particleTexture: { width: this.textureWidth, height: this.textureHeight, count: this.particleCount },
+      resources: {
+        massGridTexture: !!this.massGridTexture,
+        forceGridX: !!this.forceGridX,
+        forceGridY: !!this.forceGridY,
+        forceGridZ: !!this.forceGridZ,
+        fftComplex1: !!this.fftComplexTexture1,
+        fftComplex2: !!this.fftComplexTexture2,
+        forceSpectrumXTexture: !!this.forceSpectrumXTexture,
+        forceSpectrumYTexture: !!this.forceSpectrumYTexture,
+        forceSpectrumZTexture: !!this.forceSpectrumZTexture
+      },
+      frameCount: this.frameCount,
+      kernels: {
+        deposit: this.depositKernel && this.depositKernel.renderCount,
+        poisson: this.poissonKernel && this.poissonKernel.renderCount,
+        gradient: this.gradientKernel && this.gradientKernel.renderCount,
+        nearField: this.nearFieldKernel && this.nearFieldKernel.renderCount,
+        forceSample: this.forceSampleKernel && this.forceSampleKernel.renderCount
+      }
+    };
+
+    value.toString = () =>
+`GravityMesh(grid=${value.gridSize}³, packed=${value.textureWidth}×${value.textureHeight}) frames=${value.frameCount}
+bounds=[${value.worldBounds.min}]→[${value.worldBounds.max}] worldSize=[${value.worldSize}] cellVolume=${value.cellVolume.toExponential()} massToDensity=${value.massToDensity.toExponential()}
+resources: massGrid=${value.resources.massGridTexture} forceGrids=[${value.resources.forceGridX},${value.resources.forceGridY},${value.resources.forceGridZ}] spectra=[${value.resources.forceSpectrumXTexture},${value.resources.forceSpectrumYTexture},${value.resources.forceSpectrumZTexture}]`;
+
+    return value;
+  }
+
+  /**
+   * Compact human-readable system summary
+   */
+  toString() {
+    return this.valueOf().toString();
+  }
   
   _depositMass() {
   if (!this.depositKernel) throw new Error('Deposit kernel missing');
@@ -317,61 +432,73 @@ export class GravityMesh {
   }
   
   _computeMeshForces() {
-    if (!this.fftForwardKernel || !this.poissonKernel || !this.gradientKernel || !this.fftInverseKernel) {
+    // Texture ownership and borrowing protocol (see docs and GravitySpectral):
+    // - Forward FFT writes density spectrum to fftKernel.complexTo.
+    //   We hand off complexTo → Poisson.inDensitySpectrum and null local slot to avoid dual-ownership.
+    // - Poisson writes potential spectrum to fftKernel.complexFrom; we hand off to Gradient.inPotentialSpectrum.
+    // - Gradient produces three force spectra (X,Y,Z). For each component, we set fftKernel.inverse=true,
+    //   borrow the component spectrum into fftKernel.complexFrom, and set fftKernel.real to the target force grid.
+    //   When possible, we reuse freed spectra (e.g., Gradient.inPotentialSpectrum) as fftKernel.complexTo scratch.
+    // - After each inverse, we return complexFrom back to the producer for reuse, and reclaim Poisson input at the end
+    //   to complete the cycle. All hand-offs null the source field to clearly transfer ownership and prevent races.
+    if (!this.fftKernel || !this.poissonKernel || !this.gradientKernel) {
       throw new Error('Mesh force kernels missing');
     }
-    
-  // Forward FFT: mass grid -> density spectrum
-     this.fftForwardKernel.real = this.depositKernel.outGrid;
-    this.fftForwardKernel.run();
-    
+
+    // Forward FFT: mass grid -> density spectrum
+    this.fftKernel.inverse = false;
+  this.fftKernel.real = /** @type {WebGLTexture} */ (this.depositKernel.outGrid);
+    this.fftKernel.run();
+
     // Solve Poisson: density spectrum -> potential spectrum
-     this.poissonKernel.inDensitySpectrum = this.fftForwardKernel.complexTo;
-     // Ownership handoff: FFT no longer owns complexTo while Poisson is using it
-     this.fftForwardKernel.complexTo = null;
-     // Use FFT's scratch as Poisson output (explicit reuse)
-     this.poissonKernel.outPotentialSpectrum = this.fftForwardKernel.complexFrom;
-     this.fftForwardKernel.complexFrom = null;
-     this.poissonKernel.run();
-    
+    this.poissonKernel.inDensitySpectrum = this.fftKernel.complexTo;
+    this.fftKernel.complexTo = null; // handoff
+    this.poissonKernel.outPotentialSpectrum = this.fftKernel.complexFrom;
+    this.fftKernel.complexFrom = null; // handoff
+    this.poissonKernel.run();
+
     // Compute gradient: potential spectrum -> force spectra
-     this.gradientKernel.inPotentialSpectrum = this.poissonKernel.outPotentialSpectrum;
-     // Ownership handoff: Poisson relinquishes its output once gradient takes it
-     this.poissonKernel.outPotentialSpectrum = null;
+    this.gradientKernel.inPotentialSpectrum = this.poissonKernel.outPotentialSpectrum;
+    this.poissonKernel.outPotentialSpectrum = null; // handoff
     this.gradientKernel.run();
-    
+
     // Inverse FFT for each force component: force spectra -> force grids
-    // Set spectrum input and grid output, then run with inverse flag
-     this.fftInverseKernel.complexFrom = this.gradientKernel.outForceSpectrumX;
-     this.gradientKernel.outForceSpectrumX = null;
-     this.fftInverseKernel.real = this.forceGridX;
-    this.fftInverseKernel.run();
-     // Return ownership back to gradient (mirrors Spectral etiquette)
-     this.gradientKernel.outForceSpectrumX = this.fftInverseKernel.complexFrom;
-     this.fftInverseKernel.complexFrom = null;
-    
-     this.fftInverseKernel.complexFrom = this.gradientKernel.outForceSpectrumY;
-     this.gradientKernel.outForceSpectrumY = null;
-     this.fftInverseKernel.real = this.forceGridY;
-    this.fftInverseKernel.run();
-     this.gradientKernel.outForceSpectrumY = this.fftInverseKernel.complexFrom;
-     this.fftInverseKernel.complexFrom = null;
-    
-     this.fftInverseKernel.complexFrom = this.gradientKernel.outForceSpectrumZ;
-     this.gradientKernel.outForceSpectrumZ = null;
-     this.fftInverseKernel.real = this.forceGridZ;
-    this.fftInverseKernel.run();
-     this.gradientKernel.outForceSpectrumZ = this.fftInverseKernel.complexFrom;
-     this.fftInverseKernel.complexFrom = null;
+    this.fftKernel.inverse = true;
 
-     // Reclaim Poisson input back to FFT scratch to complete the cycle
-     if (this.poissonKernel.inDensitySpectrum) {
-       this.fftForwardKernel.complexFrom = this.poissonKernel.inDensitySpectrum;
-       this.poissonKernel.inDensitySpectrum = null;
-     }
+    // X component
+    this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumX;
+    this.gradientKernel.outForceSpectrumX = null;
+    // Reuse gradient's input spectrum as scratch if available
+    if (this.gradientKernel.inPotentialSpectrum) {
+      this.fftKernel.complexTo = this.gradientKernel.inPotentialSpectrum;
+      this.gradientKernel.inPotentialSpectrum = null;
+    }
+    this.fftKernel.real = this.forceGridX;
+    this.fftKernel.run();
+    this.gradientKernel.outForceSpectrumX = this.fftKernel.complexFrom; // returned
+    this.fftKernel.complexFrom = null;
 
-     // Ensure forward FFT has a valid complex target for the next frame
-      this.fftForwardKernel.complexTo = this.fftComplexTexture1 || this.fftForwardKernel.complexFrom;
+    // Y component
+    this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumY;
+    this.gradientKernel.outForceSpectrumY = null;
+    this.fftKernel.real = this.forceGridY;
+    this.fftKernel.run();
+    this.gradientKernel.outForceSpectrumY = this.fftKernel.complexFrom; // returned
+    this.fftKernel.complexFrom = null;
+
+    // Z component
+    this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumZ;
+    this.gradientKernel.outForceSpectrumZ = null;
+    this.fftKernel.real = this.forceGridZ;
+    this.fftKernel.run();
+    this.gradientKernel.outForceSpectrumZ = this.fftKernel.complexFrom; // returned
+    // Reclaim Poisson input back to FFT scratch to complete the cycle
+    if (!this.poissonKernel.inDensitySpectrum) throw new Error('Poisson kernel inDensitySpectrum texture is null');
+    this.fftKernel.complexFrom = this.poissonKernel.inDensitySpectrum;
+    this.poissonKernel.inDensitySpectrum = null;
+
+    // Ensure forward FFT has a valid complex target for the next frame
+    if (!this.fftKernel.complexTo) this.fftKernel.complexTo = this.fftComplexTexture1 || this.fftKernel.complexFrom;
   }
   
   _sampleForces() {
@@ -429,14 +556,15 @@ export class GravityMesh {
     
     // Dispose kernels
     if (this.depositKernel) this.depositKernel.dispose();
-    if (this.fftForwardKernel) this.fftForwardKernel.dispose();
+  if (this.fftKernel) this.fftKernel.dispose();
     if (this.poissonKernel) this.poissonKernel.dispose();
     if (this.gradientKernel) this.gradientKernel.dispose();
-    if (this.fftInverseKernel) this.fftInverseKernel.dispose();
     if (this.forceSampleKernel) this.forceSampleKernel.dispose();
     if (this.nearFieldKernel) this.nearFieldKernel.dispose();
     if (this.nearFieldSampleKernel) this.nearFieldSampleKernel.dispose();
     if (this.integrateEulerKernel) this.integrateEulerKernel.dispose();
+  if (this.boundsReduce) this.boundsReduce.dispose();
+  if (this.boundsReadbackFBO) gl.deleteFramebuffer(this.boundsReadbackFBO);
     
     // Clean up textures
     if (this.massGridTexture) gl.deleteTexture(this.massGridTexture);

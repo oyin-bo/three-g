@@ -22,6 +22,8 @@ export class KNearField {
    *   gridSize?: number,
    *   slicesPerRow?: number,
    *   textureSize?: number,
+   *   textureWidth?: number,
+   *   textureHeight?: number,
    *   worldBounds?: {min: [number,number,number], max: [number,number,number]},
    *   softening?: number,
    *   gravityStrength?: number,
@@ -32,16 +34,30 @@ export class KNearField {
     this.gl = options.gl;
 
     // Resource slots
-    this.inMassGrid = (options.inMassGrid || options.inMassGrid === null) ? options.inMassGrid : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
-    this.outForceX = (options.outForceX || options.outForceX === null) ? options.outForceX : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
-    this.outForceY = (options.outForceY || options.outForceY === null) ? options.outForceY : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
-    this.outForceZ = (options.outForceZ || options.outForceZ === null) ? options.outForceZ : createGridTexture(this.gl, (options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))));
+    this.inMassGrid = (options.inMassGrid || options.inMassGrid === null) ? options.inMassGrid : createGridTexture(this.gl,
+      (options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))))),
+      (options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))))
+    );
+    this.outForceX = (options.outForceX || options.outForceX === null) ? options.outForceX : createGridTexture(this.gl,
+      (options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))))),
+      (options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))))
+    );
+    this.outForceY = (options.outForceY || options.outForceY === null) ? options.outForceY : createGridTexture(this.gl,
+      (options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))))),
+      (options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))))
+    );
+    this.outForceZ = (options.outForceZ || options.outForceZ === null) ? options.outForceZ : createGridTexture(this.gl,
+      (options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))))),
+      (options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))))
+    );
     this.quadVAO = (options.quadVAO || options.quadVAO === null) ? options.quadVAO : createQuadVAO(this.gl);
 
     // Grid configuration
     this.gridSize = options.gridSize || 64;
-    this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(this.gridSize));
-    this.textureSize = options.textureSize || (this.gridSize * this.slicesPerRow);
+  this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(this.gridSize));
+  this.textureWidth = options.textureWidth || options.textureSize || (this.gridSize * this.slicesPerRow);
+  this.textureHeight = options.textureHeight || options.textureSize || (this.gridSize * Math.ceil(this.gridSize / this.slicesPerRow));
+  this.textureSize = /** @deprecated */ (typeof options.textureSize === 'number' ? options.textureSize : this.textureWidth);
 
     // World bounds
     this.worldBounds = options.worldBounds || {
@@ -139,35 +155,45 @@ export class KNearField {
    */
   valueOf({ pixels } = {}) {
     const value = {
-      position: this.inPosition && readLinear({
-        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
-        height: this.particleTexHeight, count: this.particleCount,
-        channels: ['x', 'y', 'z', 'mass'], pixels
+      massGrid: this.inMassGrid && readGrid3D({
+        gl: this.gl, texture: this.inMassGrid, width: this.textureWidth,
+        height: this.textureHeight, gridSize: this.gridSize,
+        channels: ['mass'], pixels, format: this.gl.R32F
       }),
-      force: this.outForce && readLinear({
-        gl: this.gl, texture: this.outForce, width: this.particleTexWidth,
-        height: this.particleTexHeight, count: this.particleCount,
-        channels: ['fx', 'fy', 'fz', 'unused'], pixels
+      forceX: this.outForceX && readGrid3D({
+        gl: this.gl, texture: this.outForceX, width: this.textureWidth,
+        height: this.textureHeight, gridSize: this.gridSize,
+        channels: ['fx'], pixels, format: this.gl.R32F
       }),
-      particleCount: this.particleCount,
-      particleTexWidth: this.particleTexWidth,
-      particleTexHeight: this.particleTexHeight,
+      forceY: this.outForceY && readGrid3D({
+        gl: this.gl, texture: this.outForceY, width: this.textureWidth,
+        height: this.textureHeight, gridSize: this.gridSize,
+        channels: ['fy'], pixels, format: this.gl.R32F
+      }),
+      forceZ: this.outForceZ && readGrid3D({
+        gl: this.gl, texture: this.outForceZ, width: this.textureWidth,
+        height: this.textureHeight, gridSize: this.gridSize,
+        channels: ['fz'], pixels, format: this.gl.R32F
+      }),
       gridSize: this.gridSize,
+      slicesPerRow: this.slicesPerRow,
+      textureWidth: this.textureWidth,
+      textureHeight: this.textureHeight,
       worldBounds: { min: [...this.worldBounds.min], max: [...this.worldBounds.max] },
-      gravitationalConstant: this.gravitationalConstant,
       softening: this.softening,
-      accumulate: this.accumulate,
+      gravityStrength: this.gravityStrength,
+      nearFieldRadius: this.nearFieldRadius,
       renderCount: this.renderCount
     };
 
-    const totalForce = value.force?.fx ? Math.sqrt(value.force.fx.mean ** 2 + value.force.fy.mean ** 2 + value.force.fz.mean ** 2) : 0;
-
     value.toString = () =>
-      `KNearField(${this.particleCount} particles) grid=${this.gridSize}³ G=${formatNumber(this.gravitationalConstant)} soft=${formatNumber(this.softening)} accumulate=${this.accumulate} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
+      `KNearField(grid=${this.gridSize}³) texture=${this.textureWidth}×${this.textureHeight} soft=${formatNumber(this.softening)} G=${formatNumber(this.gravityStrength)} r=${this.nearFieldRadius} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
 
-position: ${value.position}
+massGrid: ${value.massGrid}
 
-→ force: ${value.force ? `totalForceMag=${formatNumber(totalForce)} ` : ''}${value.force}`;
+→ forceX: ${value.forceX}
+→ forceY: ${value.forceY}
+→ forceZ: ${value.forceZ}`;
 
     return value;
   }
@@ -198,7 +224,7 @@ position: ${value.position}
     const prevBlend = gl.getParameter(gl.BLEND);
     const prevDepthTest = gl.getParameter(gl.DEPTH_TEST);
 
-    gl.viewport(0, 0, this.textureSize, this.textureSize);
+  gl.viewport(0, 0, this.textureWidth, this.textureHeight);
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
 
@@ -265,15 +291,12 @@ position: ${value.position}
 
     if (this.program) {
       gl.deleteProgram(this.program);
-      this.program = null;
     }
 
     if (this.framebufferX) gl.deleteFramebuffer(this.framebufferX);
     if (this.framebufferY) gl.deleteFramebuffer(this.framebufferY);
     if (this.framebufferZ) gl.deleteFramebuffer(this.framebufferZ);
-    this.framebufferX = null;
-    this.framebufferY = null;
-    this.framebufferZ = null;
+  // Avoid assigning nulls for @ts-check compatibility
 
     if (this.outForceX) gl.deleteTexture(this.outForceX);
     if (this.outForceY) gl.deleteTexture(this.outForceY);
@@ -292,13 +315,16 @@ position: ${value.position}
 /**
  * Helper: Create a grid texture (R32F for mass/force)
  * @param {WebGL2RenderingContext} gl
- * @param {number} size
+ * @param {number} width
+ * @param {number} [height]
  */
-function createGridTexture(gl, size) {
+function createGridTexture(gl, width, height) {
   const texture = gl.createTexture();
   if (!texture) throw new Error('Failed to create texture');
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, size, size, 0, gl.RED, gl.FLOAT, null);
+  const w = width;
+  const h = (height === undefined) ? width : height;
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, w, h, 0, gl.RED, gl.FLOAT, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
