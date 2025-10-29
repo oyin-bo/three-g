@@ -24,8 +24,8 @@ export class KAggregatorQuadrupole {
    *   outA2?: WebGLTexture|null,
    *   outOccupancy?: WebGLTexture|null,
    *   particleCount?: number,
-   *   particleTexWidth?: number,
-   *   particleTexHeight?: number,
+   *   particleTextureWidth?: number,
+   *   particleTextureHeight?: number,
    *   octreeSize?: number,
    *   gridSize?: number,
    *   slicesPerRow?: number,
@@ -38,8 +38,8 @@ export class KAggregatorQuadrupole {
 
     // Particle configuration
     this.particleCount = options.particleCount || 0;
-    this.particleTexWidth = options.particleTexWidth || 0;
-    this.particleTexHeight = options.particleTexHeight || 0;
+    this.particleTextureWidth = options.particleTextureWidth || 0;
+    this.particleTextureHeight = options.particleTextureHeight || 0;
 
     // Octree configuration
     this.octreeSize = options.octreeSize || 512;
@@ -133,8 +133,8 @@ export class KAggregatorQuadrupole {
   valueOf({ pixels } = {}) {
     const value = {
       position: this.inPosition && readLinear({
-        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
-        height: this.particleTexHeight, count: this.particleCount,
+        gl: this.gl, texture: this.inPosition, width: this.particleTextureWidth,
+        height: this.particleTextureHeight, count: this.particleCount,
         channels: ['x', 'y', 'z', 'mass'], pixels
       }),
       bounds: this.inBounds && readLinear({
@@ -162,8 +162,8 @@ export class KAggregatorQuadrupole {
         channels: ['mask0', 'mask1', 'mask2', 'mask3'], pixels
       }),
       particleCount: this.particleCount,
-      particleTexWidth: this.particleTexWidth,
-      particleTexHeight: this.particleTexHeight,
+      particleTextureWidth: this.particleTextureWidth,
+      particleTextureHeight: this.particleTextureHeight,
       octreeSize: this.octreeSize,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
@@ -273,7 +273,7 @@ Occupancy: ${value.occupancy}`;
     const u_gridSize = gl.getUniformLocation(this.program, 'u_gridSize');
     const u_slicesPerRow = gl.getUniformLocation(this.program, 'u_slicesPerRow');
 
-    gl.uniform2f(u_texSize, this.particleTexWidth, this.particleTexHeight);
+    gl.uniform2f(u_texSize, this.particleTextureWidth, this.particleTextureHeight);
     gl.uniform1f(u_gridSize, this.gridSize);
     gl.uniform1f(u_slicesPerRow, this.slicesPerRow);
 

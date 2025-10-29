@@ -18,8 +18,8 @@ export class KTraversal {
    *   inPosition?: WebGLTexture|null,
    *   inLevelA0?: WebGLTexture[],
    *   outForce?: WebGLTexture|null,
-   *   particleTexWidth?: number,
-   *   particleTexHeight?: number,
+   *   particleTextureWidth?: number,
+   *   particleTextureHeight?: number,
    *   numLevels?: number,
    *   levelConfigs?: Array<{size: number, gridSize: number, slicesPerRow: number}>,
    *   worldBounds?: {min: [number,number,number], max: [number,number,number]},
@@ -33,8 +33,8 @@ export class KTraversal {
     inPosition,
     inLevelA0,
     outForce,
-    particleTexWidth = 0,
-    particleTexHeight = 0,
+    particleTextureWidth = 0,
+    particleTextureHeight = 0,
     numLevels = 7,
     levelConfigs = [],
     worldBounds = { min: [-4, -4, 0], max: [4, 4, 2] },
@@ -45,13 +45,13 @@ export class KTraversal {
     this.gl = gl;
 
     // Particle texture dimensions
-    this.particleTexWidth = particleTexWidth;
-    this.particleTexHeight = particleTexHeight;
+    this.particleTextureWidth = particleTextureWidth;
+    this.particleTextureHeight = particleTextureHeight;
 
     // Resource slots - follow kernel contract: (truthy || === null) ? use : create
     this.inPosition = (inPosition || inPosition === null)
       ? inPosition
-      : createTextureRGBA32F(this.gl, this.particleTexWidth, this.particleTexHeight);
+      : createTextureRGBA32F(this.gl, this.particleTextureWidth, this.particleTextureHeight);
 
     this.inLevelA0 = (inLevelA0 || inLevelA0 === null)
       ? inLevelA0
@@ -60,7 +60,7 @@ export class KTraversal {
     // Allocate outForce if not provided (truthy) or explicitly null
     this.outForce = (outForce || outForce === null)
       ? outForce
-      : createTextureRGBA32F(this.gl, this.particleTexWidth, this.particleTexHeight);
+      : createTextureRGBA32F(this.gl, this.particleTextureWidth, this.particleTextureHeight);
 
     // Octree configuration
     this.numLevels = numLevels;
@@ -137,13 +137,13 @@ export class KTraversal {
   valueOf({ pixels } = {}) {
     const value = {
       position: this.inPosition && readLinear({
-        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
-        height: this.particleTexHeight, count: this.particleTexWidth * this.particleTexHeight,
+        gl: this.gl, texture: this.inPosition, width: this.particleTextureWidth,
+        height: this.particleTextureHeight, count: this.particleTextureWidth * this.particleTextureHeight,
         channels: ['x', 'y', 'z', 'mass'], pixels
       }),
       force: this.outForce && readLinear({
-        gl: this.gl, texture: this.outForce, width: this.particleTexWidth,
-        height: this.particleTexHeight, count: this.particleTexWidth * this.particleTexHeight,
+        gl: this.gl, texture: this.outForce, width: this.particleTextureWidth,
+        height: this.particleTextureHeight, count: this.particleTextureWidth * this.particleTextureHeight,
         channels: ['fx', 'fy', 'fz', 'w'], pixels: true
       }),
       levels: this.inLevelA0 && this.inLevelA0.map((tex, i) => tex && (() => {
@@ -161,8 +161,8 @@ export class KTraversal {
           })
         };
       })()).filter(Boolean),
-      particleTexWidth: this.particleTexWidth,
-      particleTexHeight: this.particleTexHeight,
+      particleTextureWidth: this.particleTextureWidth,
+      particleTextureHeight: this.particleTextureHeight,
       numLevels: this.numLevels,
       theta: this.theta,
       gravityStrength: this.gravityStrength,
@@ -185,7 +185,7 @@ export class KTraversal {
     }
 
     value.toString = () =>
-      `KTraversal(${this.particleTexWidth}×${this.particleTexHeight}) theta=${this.theta} G=${this.gravityStrength} soft=${this.softening} levels=${this.numLevels} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
+      `KTraversal(${this.particleTextureWidth}×${this.particleTextureHeight}) theta=${this.theta} G=${this.gravityStrength} soft=${this.softening} levels=${this.numLevels} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
 
 position: ${value.position}
 
@@ -231,7 +231,7 @@ ${!value.levels ? 'L:none' : value.levels.map(l => `L${l.level}:\n${l.toString()
 
     // Bind output framebuffer
     this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.outFramebuffer);
-    this.gl.viewport(0, 0, this.particleTexWidth, this.particleTexHeight);
+    this.gl.viewport(0, 0, this.particleTextureWidth, this.particleTextureHeight);
 
     // Setup GL state
     this.gl.disable(this.gl.DEPTH_TEST);
@@ -245,7 +245,7 @@ ${!value.levels ? 'L:none' : value.levels.map(l => `L${l.level}:\n${l.toString()
     this.gl.uniform1i(this.gl.getUniformLocation(this.program, 'u_particlePositions'), 0);
 
     // Set particle count
-    const particleCount = this.particleTexWidth * this.particleTexHeight;
+    const particleCount = this.particleTextureWidth * this.particleTextureHeight;
     this.gl.uniform1i(this.gl.getUniformLocation(this.program, 'u_particleCount'), particleCount);
 
     // Bind all octree level textures (A0 only for monopole)
@@ -282,7 +282,7 @@ ${!value.levels ? 'L:none' : value.levels.map(l => `L${l.level}:\n${l.toString()
 
     // Set physics parameters
     this.gl.uniform2f(this.gl.getUniformLocation(this.program, 'u_texSize'),
-      this.particleTexWidth, this.particleTexHeight);
+      this.particleTextureWidth, this.particleTextureHeight);
     this.gl.uniform3f(this.gl.getUniformLocation(this.program, 'u_worldMin'),
       this.worldBounds.min[0], this.worldBounds.min[1], this.worldBounds.min[2]);
     this.gl.uniform3f(this.gl.getUniformLocation(this.program, 'u_worldMax'),

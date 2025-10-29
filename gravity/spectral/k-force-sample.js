@@ -21,8 +21,8 @@ export class KForceSample {
    *   inForceGridZ?: WebGLTexture|null,
    *   outForce?: WebGLTexture|null,
    *   particleCount?: number,
-   *   particleTexWidth?: number,
-   *   particleTexHeight?: number,
+   *   particleTextureWidth?: number,
+   *   particleTextureHeight?: number,
    *   gridSize?: number,
    *   slicesPerRow?: number,
   *   textureSize?: number,
@@ -36,16 +36,16 @@ export class KForceSample {
     this.gl = options.gl;
 
     // Resource slots
-    this.inPosition = (options.inPosition || options.inPosition === null) ? options.inPosition : createTextureRGBA32F(this.gl, options.particleTexWidth || 1, options.particleTexHeight || 1);
+    this.inPosition = (options.inPosition || options.inPosition === null) ? options.inPosition : createTextureRGBA32F(this.gl, options.particleTextureWidth || 1, options.particleTextureHeight || 1);
     this.inForceGridX = (options.inForceGridX || options.inForceGridX === null) ? options.inForceGridX : createComplexTexture(this.gl, options.gridSize || 64);
     this.inForceGridY = (options.inForceGridY || options.inForceGridY === null) ? options.inForceGridY : createComplexTexture(this.gl, options.gridSize || 64);
     this.inForceGridZ = (options.inForceGridZ || options.inForceGridZ === null) ? options.inForceGridZ : createComplexTexture(this.gl, options.gridSize || 64);
-    this.outForce = (options.outForce || options.outForce === null) ? options.outForce : createTextureRGBA32F(this.gl, options.particleTexWidth || 1, options.particleTexHeight || 1);
+    this.outForce = (options.outForce || options.outForce === null) ? options.outForce : createTextureRGBA32F(this.gl, options.particleTextureWidth || 1, options.particleTextureHeight || 1);
 
     // Particle configuration
     this.particleCount = options.particleCount || 0;
-    this.particleTexWidth = options.particleTexWidth || 0;
-    this.particleTexHeight = options.particleTexHeight || 0;
+    this.particleTextureWidth = options.particleTextureWidth || 0;
+    this.particleTextureHeight = options.particleTextureHeight || 0;
 
     // Grid configuration
     this.gridSize = options.gridSize || 64;
@@ -125,8 +125,8 @@ export class KForceSample {
     const textureSize = this.textureWidth; // legacy
     const value = {
       position: this.inPosition && readLinear({
-        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
-        height: this.particleTexHeight, count: this.particleCount,
+        gl: this.gl, texture: this.inPosition, width: this.particleTextureWidth,
+        height: this.particleTextureHeight, count: this.particleCount,
         channels: ['x', 'y', 'z', 'mass'], pixels
       }),
       forceGridX: this.inForceGridX && readGrid3D({
@@ -145,13 +145,13 @@ export class KForceSample {
         channels: ['fz'], pixels, format: this.gl.R32F
       }),
       force: this.outForce && readLinear({
-        gl: this.gl, texture: this.outForce, width: this.particleTexWidth,
-        height: this.particleTexHeight, count: this.particleCount,
+        gl: this.gl, texture: this.outForce, width: this.particleTextureWidth,
+        height: this.particleTextureHeight, count: this.particleCount,
         channels: ['fx', 'fy', 'fz', 'unused'], pixels
       }),
       particleCount: this.particleCount,
-      particleTexWidth: this.particleTexWidth,
-      particleTexHeight: this.particleTexHeight,
+      particleTextureWidth: this.particleTextureWidth,
+      particleTextureHeight: this.particleTextureHeight,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       worldBounds: { min: [...this.worldBounds.min], max: [...this.worldBounds.max] },
@@ -212,7 +212,7 @@ forceGridZ: ${value.forceGridZ}
 
     // Bind output framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
-    gl.viewport(0, 0, this.particleTexWidth, this.particleTexHeight);
+    gl.viewport(0, 0, this.particleTextureWidth, this.particleTextureHeight);
 
     // Setup GL state
     if (this.accumulate) {
@@ -248,7 +248,7 @@ forceGridZ: ${value.forceGridZ}
     // Set uniforms
     // Particle texture size for vertex fetch
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_particleTextureSize'),
-      this.particleTexWidth, this.particleTexHeight);
+      this.particleTextureWidth, this.particleTextureHeight);
     // Packed 3D grid texture size for voxel->texcoord mapping
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'),
       this.textureWidth, this.textureHeight);

@@ -71,12 +71,12 @@ test('KDeposit: single particle deposition', async () => {
   const gl = getGL();
 
   const particleCount = 1;
-  const particleTexWidth = 1;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 1;
+  const particleTextureHeight = 1;
 
   // Place particle at (0, 0, 0) in world space
   const posData = new Float32Array([0.0, 0.0, 0.0, 1.0]); // x, y, z, mass
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -94,8 +94,8 @@ test('KDeposit: single particle deposition', async () => {
     inPosition: posTex,
     outMassGrid,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     gridSize,
     slicesPerRow,
     textureSize,
@@ -132,8 +132,8 @@ test('KDeposit: multiple particles', async () => {
   const gl = getGL();
 
   const particleCount = 3;
-  const particleTexWidth = 2;
-  const particleTexHeight = 2;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 2;
 
   // Three particles at different locations
   const posData = new Float32Array([
@@ -142,7 +142,7 @@ test('KDeposit: multiple particles', async () => {
     0.0, 0.0, 0.0, 2.0,  // particle 2 (double mass)
     0.0, 0.0, 0.0, 0.0   // padding
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -160,8 +160,8 @@ test('KDeposit: multiple particles', async () => {
     inPosition: posTex,
     outMassGrid,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     gridSize,
     slicesPerRow,
     textureSize,
@@ -192,12 +192,12 @@ test('KDeposit: CIC assignment', async () => {
   const gl = getGL();
 
   const particleCount = 1;
-  const particleTexWidth = 1;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 1;
+  const particleTextureHeight = 1;
 
   // Place particle at center
   const posData = new Float32Array([0.0, 0.0, 0.0, 1.0]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -215,8 +215,8 @@ test('KDeposit: CIC assignment', async () => {
     inPosition: posTex,
     outMassGrid,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     gridSize,
     slicesPerRow,
     textureSize,

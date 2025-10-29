@@ -13,12 +13,12 @@ test('KAggregator: single particle aggregation', async () => {
   const gl = getGL();
 
   const particleCount = 1;
-  const particleTexWidth = 1;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 1;
+  const particleTextureHeight = 1;
 
   // Place particle at (0, 0, 0) in world space
   const posData = new Float32Array([0.0, 0.0, 0.0, 1.0]); // x, y, z, mass
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -33,8 +33,8 @@ test('KAggregator: single particle aggregation', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     octreeSize,
     gridSize,
     slicesPerRow,
@@ -70,8 +70,8 @@ test('KAggregator: multiple particles same voxel with blending', async () => {
   const gl = getGL();
 
   const particleCount = 3;
-  const particleTexWidth = 2;
-  const particleTexHeight = 2;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 2;
 
   // Three particles all in center voxel [2,2,2] (world range [0,1])
   const posData = new Float32Array([
@@ -80,7 +80,7 @@ test('KAggregator: multiple particles same voxel with blending', async () => {
     0.2, 0.2, 0.2, 1.5,  // particle 2 further offset (still in [0,1])
     0.0, 0.0, 0.0, 0.0   // unused
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -92,8 +92,8 @@ test('KAggregator: multiple particles same voxel with blending', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     octreeSize,
     gridSize,
     slicesPerRow,
@@ -128,8 +128,8 @@ test('KAggregator: particles in different voxels', async () => {
   const gl = getGL();
 
   const particleCount = 4;
-  const particleTexWidth = 2;
-  const particleTexHeight = 2;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 2;
 
   // Four particles at corners of world space
   const posData = new Float32Array([
@@ -138,7 +138,7 @@ test('KAggregator: particles in different voxels', async () => {
     -1.5, 1.5, -1.5, 1.0,   // corner 0,3,0
     1.5, -1.5, 1.5, 1.0     // corner 3,0,3
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -150,8 +150,8 @@ test('KAggregator: particles in different voxels', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     octreeSize,
     gridSize,
     slicesPerRow,
@@ -187,12 +187,12 @@ test('KAggregator: quadrupole moments', async () => {
   const gl = getGL();
 
   const particleCount = 1;
-  const particleTexWidth = 1;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 1;
+  const particleTextureHeight = 1;
 
   // Particle at (1, 1, 1) with mass 2
   const posData = new Float32Array([1.0, 1.0, 1.0, 2.0]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -204,8 +204,8 @@ test('KAggregator: quadrupole moments', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     octreeSize,
     gridSize,
     slicesPerRow,
@@ -254,15 +254,15 @@ test('KAggregator: out of bounds particles', async () => {
   const gl = getGL();
 
   const particleCount = 2;
-  const particleTexWidth = 2;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 1;
 
   // One particle in bounds, one way out of bounds
   const posData = new Float32Array([
     0.0, 0.0, 0.0, 1.0,    // in bounds
     100.0, 100.0, 100.0, 1.0 // far out of bounds
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -274,8 +274,8 @@ test('KAggregator: out of bounds particles', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     octreeSize,
     gridSize,
     slicesPerRow,
@@ -304,14 +304,14 @@ test('KAggregator: zero mass particles', async () => {
   const gl = getGL();
 
   const particleCount = 2;
-  const particleTexWidth = 2;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 1;
 
   const posData = new Float32Array([
     0.0, 0.0, 0.0, 0.0,   // zero mass
     1.0, 1.0, 1.0, 3.0    // normal mass
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -323,8 +323,8 @@ test('KAggregator: zero mass particles', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     octreeSize,
     gridSize,
     slicesPerRow,
@@ -353,11 +353,11 @@ test('KAggregator: large particle count', async () => {
   const gl = getGL();
 
   const particleCount = 100;
-  const particleTexWidth = 10;
-  const particleTexHeight = 10;
+  const particleTextureWidth = 10;
+  const particleTextureHeight = 10;
 
   // Create 100 particles distributed in a grid pattern
-  const posData = new Float32Array(particleTexWidth * particleTexHeight * 4);
+  const posData = new Float32Array(particleTextureWidth * particleTextureHeight * 4);
   for (let i = 0; i < particleCount; i++) {
     const x = (i % 10) / 5 - 1; // -1 to 1
     const y = Math.floor(i / 10) / 5 - 1;
@@ -367,7 +367,7 @@ test('KAggregator: large particle count', async () => {
     posData[i * 4 + 2] = z;
     posData[i * 4 + 3] = 1.0; // unit mass
   }
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 8;
   const slicesPerRow = 4;
@@ -379,8 +379,8 @@ test('KAggregator: large particle count', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     octreeSize,
     gridSize,
     slicesPerRow,

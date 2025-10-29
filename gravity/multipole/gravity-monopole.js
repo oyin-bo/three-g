@@ -130,8 +130,8 @@ export class GravityMonopole {
       inPosition: null,  // set per-frame before run
       // outA0/outA1/outA2 omitted - kernel will create them
       particleCount: this.particleCount,
-      particleTexWidth: this.textureWidth,
-      particleTexHeight: this.textureHeight,
+      particleTextureWidth: this.textureWidth,
+      particleTextureHeight: this.textureHeight,
       octreeSize: this.L0Size,
       gridSize: this.octreeGridSize,
       slicesPerRow: this.octreeSlicesPerRow,
@@ -166,8 +166,8 @@ export class GravityMonopole {
       inPosition: null,  // set per-frame
       inLevelA0: undefined,
       // outForce omitted - kernel will create it
-      particleTexWidth: this.textureWidth,
-      particleTexHeight: this.textureHeight,
+      particleTextureWidth: this.textureWidth,
+      particleTextureHeight: this.textureHeight,
       numLevels: this.numLevels,
       levelConfigs: this.levelConfigs,
       worldBounds: this.worldBounds,

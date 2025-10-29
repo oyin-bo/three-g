@@ -46,11 +46,11 @@ function fillVoxelTexture(gl, gridSize, slicesPerRow, valueFunc) {
 test('KTraversal: single particle no force', async () => {
   const gl = getGL();
 
-  const particleTexWidth = 1;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 1;
+  const particleTextureHeight = 1;
 
   const posData = new Float32Array([0.0, 0.0, 0.0, 1.0]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -59,7 +59,7 @@ test('KTraversal: single particle no force', async () => {
   // Create empty octree level
   const levelA0 = fillVoxelTexture(gl, gridSize, slicesPerRow, () => [0, 0, 0, 0]);
 
-  const outForce = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
+  const outForce = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
 
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
 
@@ -68,8 +68,8 @@ test('KTraversal: single particle no force', async () => {
     inPosition: posTex,
     inLevelA0: [levelA0],
     outForce,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -101,15 +101,15 @@ test('KTraversal: two particle interaction', async () => {
   const gl = getGL();
 
   const particleCount = 2;
-  const particleTexWidth = 2;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 1;
 
   // Two particles separated along x-axis
   const posData = new Float32Array([
     -1.0, 0.0, 0.0, 1.0,
     1.0, 0.0, 0.0, 1.0
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -122,8 +122,8 @@ test('KTraversal: two particle interaction', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     octreeSize,
     gridSize,
     slicesPerRow,
@@ -133,15 +133,15 @@ test('KTraversal: two particle interaction', async () => {
 
   aggregator.run();
 
-  const outForce = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
+  const outForce = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
 
   const kernel = new KTraversal({
     gl,
     inPosition: posTex,
     inLevelA0: [aggregator.outA0],
     outForce,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: gridSize * gridSize * gridSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -183,12 +183,12 @@ test('KTraversal: theta criterion effect', async () => {
   const gl = getGL();
 
   const particleCount = 1;
-  const particleTexWidth = 1;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 1;
+  const particleTextureHeight = 1;
 
   // Test particle at origin
   const posData = new Float32Array([0.0, 0.0, 0.0, 1.0]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -203,8 +203,8 @@ test('KTraversal: theta criterion effect', async () => {
     return [0, 0, 0, 0];
   });
 
-  const outForce1 = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
-  const outForce2 = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
+  const outForce1 = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
+  const outForce2 = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
 
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
 
@@ -214,8 +214,8 @@ test('KTraversal: theta criterion effect', async () => {
     inPosition: posTex,
     inLevelA0: [octreeA0],
     outForce: outForce1,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -233,8 +233,8 @@ test('KTraversal: theta criterion effect', async () => {
     inPosition: posTex,
     inLevelA0: [octreeA0],
     outForce: outForce2,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -266,11 +266,11 @@ test('KTraversal: theta criterion effect', async () => {
 test('KTraversal: gravity strength scaling', async () => {
   const gl = getGL();
 
-  const particleTexWidth = 1;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 1;
+  const particleTextureHeight = 1;
 
   const posData = new Float32Array([0.0, 0.0, 0.0, 1.0]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -284,8 +284,8 @@ test('KTraversal: gravity strength scaling', async () => {
     return [0, 0, 0, 0];
   });
 
-  const outForce1 = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
-  const outForce2 = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
+  const outForce1 = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
+  const outForce2 = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
 
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
 
@@ -295,8 +295,8 @@ test('KTraversal: gravity strength scaling', async () => {
     inPosition: posTex,
     inLevelA0: [octreeA0],
     outForce: outForce1,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -314,8 +314,8 @@ test('KTraversal: gravity strength scaling', async () => {
     inPosition: posTex,
     inLevelA0: [octreeA0],
     outForce: outForce2,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -346,15 +346,15 @@ test('KTraversal: softening prevents singularities', async () => {
   const gl = getGL();
 
   const particleCount = 2;
-  const particleTexWidth = 2;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 1;
 
   // Two particles very close together
   const posData = new Float32Array([
     0.0, 0.0, 0.0, 1.0,
     0.01, 0.0, 0.0, 1.0
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -366,8 +366,8 @@ test('KTraversal: softening prevents singularities', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     octreeSize,
     gridSize,
     slicesPerRow,
@@ -381,8 +381,8 @@ test('KTraversal: softening prevents singularities', async () => {
 
   const aggregatorAfter = aggregator.valueOf();
 
-  const outForce1 = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
-  const outForce2 = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
+  const outForce1 = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
+  const outForce2 = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
 
   // Small softening
   const kernel1 = new KTraversal({
@@ -390,8 +390,8 @@ test('KTraversal: softening prevents singularities', async () => {
     inPosition: posTex,
     inLevelA0: [aggregator.outA0],
     outForce: outForce1,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: gridSize * gridSize * gridSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -410,8 +410,8 @@ test('KTraversal: softening prevents singularities', async () => {
     inPosition: posTex,
     inLevelA0: [aggregator.outA0],
     outForce: outForce2,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: gridSize * gridSize * gridSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -458,8 +458,8 @@ LARGE SOFTENING AFTER: ${kernel2After}
 test('KTraversal: zero mass octree', async () => {
   const gl = getGL();
 
-  const particleTexWidth = 2;
-  const particleTexHeight = 2;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 2;
 
   const posData = new Float32Array([
     1.0, 1.0, 1.0, 1.0,
@@ -467,7 +467,7 @@ test('KTraversal: zero mass octree', async () => {
     0.5, 0.5, 0.5, 2.0,
     -0.5, -0.5, -0.5, 0.5
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -476,7 +476,7 @@ test('KTraversal: zero mass octree', async () => {
   // Empty octree
   const octreeA0 = fillVoxelTexture(gl, gridSize, slicesPerRow, () => [0, 0, 0, 0]);
 
-  const outForce = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
+  const outForce = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
 
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
 
@@ -485,8 +485,8 @@ test('KTraversal: zero mass octree', async () => {
     inPosition: posTex,
     inLevelA0: [octreeA0],
     outForce,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -517,11 +517,11 @@ test('KTraversal: zero mass octree', async () => {
 test('KTraversal: multi-level octree', async () => {
   const gl = getGL();
 
-  const particleTexWidth = 1;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 1;
+  const particleTextureHeight = 1;
 
   const posData = new Float32Array([0.0, 0.0, 0.0, 1.0]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   // Create two octree levels
   const gridSize0 = 4;
@@ -545,7 +545,7 @@ test('KTraversal: multi-level octree', async () => {
     return [1.0, 1.0, 1.0, 1.0];
   });
 
-  const outForce = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
+  const outForce = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
 
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
 
@@ -554,8 +554,8 @@ test('KTraversal: multi-level octree', async () => {
     inPosition: posTex,
     inLevelA0: [octreeA0_L0, octreeA0_L1],
     outForce,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 2,
     levelConfigs: [
       { size: octreeSize0, gridSize: gridSize0, slicesPerRow: slicesPerRow0 },

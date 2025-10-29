@@ -22,8 +22,8 @@ export class KAggregatorMonopole {
    *   outA1?: WebGLTexture|null,
    *   outA2?: WebGLTexture|null,
    *   particleCount?: number,
-   *   particleTexWidth?: number,
-   *   particleTexHeight?: number,
+   *   particleTextureWidth?: number,
+   *   particleTextureHeight?: number,
    *   octreeSize?: number,
    *   gridSize?: number,
    *   slicesPerRow?: number,
@@ -36,8 +36,8 @@ export class KAggregatorMonopole {
 
     // Particle configuration
     this.particleCount = options.particleCount || 0;
-    this.particleTexWidth = options.particleTexWidth || 0;
-    this.particleTexHeight = options.particleTexHeight || 0;
+    this.particleTextureWidth = options.particleTextureWidth || 0;
+    this.particleTextureHeight = options.particleTextureHeight || 0;
 
     // Octree configuration
     this.octreeSize = options.octreeSize || 512;
@@ -134,8 +134,8 @@ export class KAggregatorMonopole {
   valueOf({ pixels } = {}) {
     const value = {
       position: this.inPosition && readLinear({
-        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
-        height: this.particleTexHeight, count: this.particleCount,
+        gl: this.gl, texture: this.inPosition, width: this.particleTextureWidth,
+        height: this.particleTextureHeight, count: this.particleCount,
         channels: ['x', 'y', 'z', 'mass'], pixels
       }),
       a0: this.outA0 && readGrid3D({
@@ -154,8 +154,8 @@ export class KAggregatorMonopole {
         channels: ['xz', 'yz', 'unused1', 'unused2'], pixels
       }),
       particleCount: this.particleCount,
-      particleTexWidth: this.particleTexWidth,
-      particleTexHeight: this.particleTexHeight,
+      particleTextureWidth: this.particleTextureWidth,
+      particleTextureHeight: this.particleTextureHeight,
       octreeSize: this.octreeSize,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
@@ -245,7 +245,7 @@ A2 (quadrupole xz,yz): ${value.a2}`;
     const u_gridSize = gl.getUniformLocation(this.program, 'u_gridSize');
     const u_slicesPerRow = gl.getUniformLocation(this.program, 'u_slicesPerRow');
 
-    gl.uniform2f(u_texSize, this.particleTexWidth, this.particleTexHeight);
+    gl.uniform2f(u_texSize, this.particleTextureWidth, this.particleTextureHeight);
     gl.uniform3f(u_worldMin,
       this.worldBounds.min[0], this.worldBounds.min[1], this.worldBounds.min[2]);
     gl.uniform3f(u_worldMax,

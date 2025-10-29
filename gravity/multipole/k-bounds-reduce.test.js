@@ -42,8 +42,8 @@ test('KBoundsReduce: simple particle set', async () => {
   const kernel = new KBoundsReduce({
     gl,
     inPosition: posTex,
-    particleTexWidth: width,
-    particleTexHeight: height,
+    particleTextureWidth: width,
+    particleTextureHeight: height,
     particleCount
   });
 
@@ -94,8 +94,8 @@ test('KBoundsReduce: negative coordinates', async () => {
   const kernel = new KBoundsReduce({
     gl,
     inPosition: posTex,
-    particleTexWidth: width,
-    particleTexHeight: height,
+    particleTextureWidth: width,
+    particleTextureHeight: height,
     particleCount
   });
 
@@ -139,8 +139,8 @@ test('KBoundsReduce: ignore zero-mass particles', async () => {
   const kernel = new KBoundsReduce({
     gl,
     inPosition: posTex,
-    particleTexWidth: width,
-    particleTexHeight: height,
+    particleTextureWidth: width,
+    particleTextureHeight: height,
     particleCount
   });
 
@@ -182,8 +182,8 @@ test('KBoundsReduce: single particle', async () => {
   const kernel = new KBoundsReduce({
     gl,
     inPosition: posTex,
-    particleTexWidth: width,
-    particleTexHeight: height,
+    particleTextureWidth: width,
+    particleTextureHeight: height,
     particleCount
   });
 
@@ -230,8 +230,8 @@ test('KBoundsReduce: larger particle set', async () => {
   const kernel = new KBoundsReduce({
     gl,
     inPosition: posTex,
-    particleTexWidth: width,
-    particleTexHeight: height,
+    particleTextureWidth: width,
+    particleTextureHeight: height,
     particleCount
   });
 
@@ -275,8 +275,8 @@ test('KBoundsReduce: all zero-mass particles', async () => {
   const kernel = new KBoundsReduce({
     gl,
     inPosition: posTex,
-    particleTexWidth: width,
-    particleTexHeight: height,
+    particleTextureWidth: width,
+    particleTextureHeight: height,
     particleCount
   });
 

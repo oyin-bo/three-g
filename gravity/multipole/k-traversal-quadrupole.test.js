@@ -87,11 +87,11 @@ function createTextureArrayFromLevels(gl, levelTextures, maxSize) {
 test('KTraversalQuadrupole: single particle no force', async () => {
   const gl = getGL();
 
-  const particleTexWidth = 1;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 1;
+  const particleTextureHeight = 1;
 
   const posData = new Float32Array([0.0, 0.0, 0.0, 1.0]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -107,7 +107,7 @@ test('KTraversalQuadrupole: single particle no force', async () => {
   const levelsA1 = createTextureArrayFromLevels(gl, [levelA1], octreeSize);
   const levelsA2 = createTextureArrayFromLevels(gl, [levelA2], octreeSize);
 
-  const outForce = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
+  const outForce = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
 
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
 
@@ -118,8 +118,8 @@ test('KTraversalQuadrupole: single particle no force', async () => {
     inLevelsA1: levelsA1,
     inLevelsA2: levelsA2,
     outForce,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -151,15 +151,15 @@ test('KTraversalQuadrupole: two particle interaction', async () => {
   const gl = getGL();
 
   const particleCount = 2;
-  const particleTexWidth = 2;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 1;
 
   // Two particles separated along x-axis
   const posData = new Float32Array([
     -1.0, 0.0, 0.0, 1.0,
     1.0, 0.0, 0.0, 1.0
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -172,8 +172,8 @@ test('KTraversalQuadrupole: two particle interaction', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     octreeSize,
     gridSize,
     slicesPerRow,
@@ -183,7 +183,7 @@ test('KTraversalQuadrupole: two particle interaction', async () => {
 
   aggregator.run();
 
-  const outForce = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
+  const outForce = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
 
   const kernel = new KTraversalQuadrupole({
     gl,
@@ -192,8 +192,8 @@ test('KTraversalQuadrupole: two particle interaction', async () => {
     inLevelsA1: createTextureArrayFromLevels(gl, [aggregator.outA1], octreeSize),
     inLevelsA2: createTextureArrayFromLevels(gl, [aggregator.outA2], octreeSize),
     outForce,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -238,8 +238,8 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
   const gl = getGL();
 
   const particleCount = 4;
-  const particleTexWidth = 2;
-  const particleTexHeight = 2;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 2;
 
   // Four particles in a configuration where quadrupole effects are visible
   const posData = new Float32Array([
@@ -248,7 +248,7 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
     -0.5, 0.5, 0.0, 1.0,
     0.5, 0.5, 0.0, 1.0
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -260,8 +260,8 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     octreeSize,
     gridSize,
     slicesPerRow,
@@ -272,7 +272,7 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
   aggregator.run();
 
   // Test with quadrupoles enabled
-  const outForceQuad = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
+  const outForceQuad = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
 
   const kernelQuad = new KTraversalQuadrupole({
     gl,
@@ -281,8 +281,8 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
     inLevelsA1: createTextureArrayFromLevels(gl, [aggregator.outA1], octreeSize),
     inLevelsA2: createTextureArrayFromLevels(gl, [aggregator.outA2], octreeSize),
     outForce: outForceQuad,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -293,12 +293,12 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
 
   kernelQuad.run();
 
-  const resultQuad = readTexture(gl, outForceQuad, particleTexWidth, particleTexHeight);
+  const resultQuad = readTexture(gl, outForceQuad, particleTextureWidth, particleTextureHeight);
 
   assertAllFinite(resultQuad, 'Quadrupole force must be finite');
 
   // Test with quadrupoles disabled (monopole only)
-  const outForceMono = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
+  const outForceMono = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
 
   const kernelMono = new KTraversalQuadrupole({
     gl,
@@ -307,8 +307,8 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
     inLevelsA1: createTextureArrayFromLevels(gl, [aggregator.outA1], octreeSize),
     inLevelsA2: createTextureArrayFromLevels(gl, [aggregator.outA2], octreeSize),
     outForce: outForceMono,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -319,7 +319,7 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
 
   kernelMono.run();
 
-  const resultMono = readTexture(gl, outForceMono, particleTexWidth, particleTexHeight);
+  const resultMono = readTexture(gl, outForceMono, particleTextureWidth, particleTextureHeight);
 
   assertAllFinite(resultMono, 'Monopole force must be finite');
 
@@ -339,8 +339,8 @@ test('KTraversalQuadrupole: quadrupole enabled vs disabled', async () => {
 test('KTraversalQuadrupole: multiple hierarchy levels', async () => {
   const gl = getGL();
 
-  const particleTexWidth = 2;
-  const particleTexHeight = 2;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 2;
 
   const posData = new Float32Array([
     -1.0, 0.0, 0.0, 1.0,
@@ -348,7 +348,7 @@ test('KTraversalQuadrupole: multiple hierarchy levels', async () => {
     0.0, -1.0, 0.0, 1.0,
     0.0, 1.0, 0.0, 1.0
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   // Create two levels
   const gridSize0 = 4;
@@ -378,7 +378,7 @@ test('KTraversalQuadrupole: multiple hierarchy levels', async () => {
   const arrayA1 = createTextureArrayFromLevels(gl, [level0A1, level1A1], octreeSize0);
   const arrayA2 = createTextureArrayFromLevels(gl, [level0A2, level1A2], octreeSize0);
 
-  const outForce = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
+  const outForce = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
 
   const worldBounds = /** @type {{min: [number, number, number], max: [number, number, number]}} */ ({ min: [-2, -2, -2], max: [2, 2, 2] });
 
@@ -389,8 +389,8 @@ test('KTraversalQuadrupole: multiple hierarchy levels', async () => {
     inLevelsA1: arrayA1,
     inLevelsA2: arrayA2,
     outForce,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 2,
     levelConfigs,
     worldBounds,
@@ -401,7 +401,7 @@ test('KTraversalQuadrupole: multiple hierarchy levels', async () => {
 
   kernel.run();
 
-  const result = readTexture(gl, outForce, particleTexWidth, particleTexHeight);
+  const result = readTexture(gl, outForce, particleTextureWidth, particleTextureHeight);
 
   assertAllFinite(result, 'Force must be finite with multiple levels');
 
@@ -415,14 +415,14 @@ test('KTraversalQuadrupole: multiple hierarchy levels', async () => {
 test('KTraversalQuadrupole: zero mass particle', async () => {
   const gl = getGL();
 
-  const particleTexWidth = 2;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 1;
 
   const posData = new Float32Array([
     0.0, 0.0, 0.0, 0.0,  // zero mass
     1.0, 0.0, 0.0, 1.0   // normal mass
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
 
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -434,8 +434,8 @@ test('KTraversalQuadrupole: zero mass particle', async () => {
     gl,
     inPosition: posTex,
     particleCount: 2,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     octreeSize,
     gridSize,
     slicesPerRow,
@@ -445,7 +445,7 @@ test('KTraversalQuadrupole: zero mass particle', async () => {
 
   aggregator.run();
 
-  const outForce = createTestTexture(gl, particleTexWidth, particleTexHeight, null);
+  const outForce = createTestTexture(gl, particleTextureWidth, particleTextureHeight, null);
 
   const kernel = new KTraversalQuadrupole({
     gl,
@@ -454,8 +454,8 @@ test('KTraversalQuadrupole: zero mass particle', async () => {
     inLevelsA1: createTextureArrayFromLevels(gl, [aggregator.outA1], octreeSize),
     inLevelsA2: createTextureArrayFromLevels(gl, [aggregator.outA2], octreeSize),
     outForce,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     numLevels: 1,
     levelConfigs: [{ size: octreeSize, gridSize, slicesPerRow }],
     worldBounds,
@@ -466,7 +466,7 @@ test('KTraversalQuadrupole: zero mass particle', async () => {
 
   kernel.run();
 
-  const result = readTexture(gl, outForce, particleTexWidth, particleTexHeight);
+  const result = readTexture(gl, outForce, particleTextureWidth, particleTextureHeight);
 
   assertAllFinite(result, 'Force must be finite');
 

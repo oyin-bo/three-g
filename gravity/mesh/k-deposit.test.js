@@ -38,12 +38,12 @@ test('KDeposit: single particle NGP deposit', async () => {
   const gl = getGL();
   
   const particleCount = 1;
-  const particleTexWidth = 1;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 1;
+  const particleTextureHeight = 1;
   
   // Place particle at (0, 0, 0) in world space with mass 1.0
   const posData = new Float32Array([0.0, 0.0, 0.0, 1.0]); // x, y, z, mass
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
   
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -58,8 +58,8 @@ test('KDeposit: single particle NGP deposit', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     gridSize,
     slicesPerRow,
     worldBounds,
@@ -87,8 +87,8 @@ test('KDeposit: multiple particles NGP deposit', async () => {
   const gl = getGL();
   
   const particleCount = 3;
-  const particleTexWidth = 2;
-  const particleTexHeight = 2;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 2;
   
   // Three particles at different positions
   const posData = new Float32Array([
@@ -97,7 +97,7 @@ test('KDeposit: multiple particles NGP deposit', async () => {
     1.0, 1.0, 1.0, 0.8,     // Particle 2
     0.0, 0.0, 0.0, 0.0      // Padding
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
   
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -112,8 +112,8 @@ test('KDeposit: multiple particles NGP deposit', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     gridSize,
     slicesPerRow,
     worldBounds,
@@ -142,12 +142,12 @@ test('KDeposit: single particle CIC deposit', async () => {
   const gl = getGL();
   
   const particleCount = 1;
-  const particleTexWidth = 1;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 1;
+  const particleTextureHeight = 1;
   
   // Place particle slightly off-center to test CIC interpolation
   const posData = new Float32Array([0.25, 0.25, 0.25, 1.0]); // x, y, z, mass
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
   
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -162,8 +162,8 @@ test('KDeposit: single particle CIC deposit', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     gridSize,
     slicesPerRow,
     worldBounds,
@@ -191,18 +191,18 @@ test('KDeposit: creates output texture when not provided', async () => {
   const gl = getGL();
   
   const particleCount = 1;
-  const particleTexWidth = 1;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 1;
+  const particleTextureHeight = 1;
   
   const posData = new Float32Array([0.0, 0.0, 0.0, 1.0]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
   
   const kernel = new KDeposit({
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     gridSize: 4,
     slicesPerRow: 2,
     worldBounds: { min: [-2, -2, -2], max: [2, 2, 2] },
@@ -232,8 +232,8 @@ test('KDeposit.diagnostic: kernel properties and shader compilation', async () =
     gl,
     inPosition: null,
     particleCount: 10,
-    particleTexWidth: 4,
-    particleTexHeight: 3,
+    particleTextureWidth: 4,
+    particleTextureHeight: 3,
     gridSize: 8,
     slicesPerRow: 3,
     worldBounds: { min: [-4, -4, -4], max: [4, 4, 4] },
@@ -271,8 +271,8 @@ test('KDeposit.diagnostic: voxel coordinate mapping', async () => {
   const gl = getGL();
   
   const particleCount = 5;
-  const particleTexWidth = 2;
-  const particleTexHeight = 3;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 3;
   
   // Test positions at grid corners and center
   // Grid bounds: [-2, 2] in each dimension, 4³ cells (size 1.0 each)
@@ -286,7 +286,7 @@ test('KDeposit.diagnostic: voxel coordinate mapping', async () => {
     // Padding
      0.0,  0.0,  0.0, 0.0
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, positions);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, positions);
   
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -296,8 +296,8 @@ test('KDeposit.diagnostic: voxel coordinate mapping', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     gridSize,
     slicesPerRow,
     worldBounds: { min: [-2, -2, -2], max: [2, 2, 2] },
@@ -326,13 +326,13 @@ test('KDeposit.diagnostic: CIC mass distribution pattern', async () => {
   const gl = getGL();
   
   const particleCount = 1;
-  const particleTexWidth = 1;
-  const particleTexHeight = 1;
+  const particleTextureWidth = 1;
+  const particleTextureHeight = 1;
   
   // Place particle at a known fractional position
   // (0.5, 0.5, 0.5) should split mass equally to 8 neighbors
   const posData = new Float32Array([0.5, 0.5, 0.5, 1.0]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
   
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -342,8 +342,8 @@ test('KDeposit.diagnostic: CIC mass distribution pattern', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     gridSize,
     slicesPerRow,
     worldBounds: { min: [-2, -2, -2], max: [2, 2, 2] },
@@ -395,11 +395,11 @@ test('KDeposit.diagnostic: grid resolution scaling', async () => {
   
   for (const gridSize of gridSizes) {
     const particleCount = 1;
-    const particleTexWidth = 1;
-    const particleTexHeight = 1;
+    const particleTextureWidth = 1;
+    const particleTextureHeight = 1;
     
     const posData = new Float32Array([0.0, 0.0, 0.0, 1.0]);
-    const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+    const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
     
     const slicesPerRow = Math.ceil(Math.sqrt(gridSize));
     const textureSize = gridSize * slicesPerRow;
@@ -408,8 +408,8 @@ test('KDeposit.diagnostic: grid resolution scaling', async () => {
       gl,
       inPosition: posTex,
       particleCount,
-      particleTexWidth,
-      particleTexHeight,
+      particleTextureWidth,
+      particleTextureHeight,
       gridSize,
       slicesPerRow,
       worldBounds: { min: [-2, -2, -2], max: [2, 2, 2] },
@@ -461,8 +461,8 @@ test('KDeposit.diagnostic: world bounds normalization', async () => {
   
   for (const bounds of boundsPairs) {
     const particleCount = 1;
-    const particleTexWidth = 1;
-    const particleTexHeight = 1;
+    const particleTextureWidth = 1;
+    const particleTextureHeight = 1;
     
     // Place particle at center of world bounds
     const centerX = (bounds.min[0] + bounds.max[0]) / 2;
@@ -470,7 +470,7 @@ test('KDeposit.diagnostic: world bounds normalization', async () => {
     const centerZ = (bounds.min[2] + bounds.max[2]) / 2;
     
     const posData = new Float32Array([centerX, centerY, centerZ, 1.0]);
-    const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+    const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
     
     const gridSize = 4;
     const slicesPerRow = 2;
@@ -480,8 +480,8 @@ test('KDeposit.diagnostic: world bounds normalization', async () => {
       gl,
       inPosition: posTex,
       particleCount,
-      particleTexWidth,
-      particleTexHeight,
+      particleTextureWidth,
+      particleTextureHeight,
       gridSize,
       slicesPerRow,
       // @ts-ignore - bounds types match at runtime
@@ -523,8 +523,8 @@ test('KDeposit.diagnostic: out-of-bounds particle handling', async () => {
   const gl = getGL();
   
   const particleCount = 3;
-  const particleTexWidth = 2;
-  const particleTexHeight = 2;
+  const particleTextureWidth = 2;
+  const particleTextureHeight = 2;
   
   // Mix of in-bounds and out-of-bounds particles
   const posData = new Float32Array([
@@ -533,7 +533,7 @@ test('KDeposit.diagnostic: out-of-bounds particle handling', async () => {
     -10.0, -10.0, -10.0, 1.0, // Far out-of-bounds
     0.0, 0.0, 0.0, 0.0       // Padding
   ]);
-  const posTex = createTestTexture(gl, particleTexWidth, particleTexHeight, posData);
+  const posTex = createTestTexture(gl, particleTextureWidth, particleTextureHeight, posData);
   
   const gridSize = 4;
   const slicesPerRow = 2;
@@ -543,8 +543,8 @@ test('KDeposit.diagnostic: out-of-bounds particle handling', async () => {
     gl,
     inPosition: posTex,
     particleCount,
-    particleTexWidth,
-    particleTexHeight,
+    particleTextureWidth,
+    particleTextureHeight,
     gridSize,
     slicesPerRow,
     worldBounds: { min: [-2, -2, -2], max: [2, 2, 2] },

@@ -29,8 +29,8 @@ export class KDeposit {
    *   inPosition?: WebGLTexture|null,
    *   outGrid?: WebGLTexture|null,
    *   particleCount?: number,
-   *   particleTexWidth?: number,
-   *   particleTexHeight?: number,
+   *   particleTextureWidth?: number,
+   *   particleTextureHeight?: number,
    *   gridSize?: number,
    *   slicesPerRow?: number,
    *   textureSize?: number,
@@ -45,7 +45,7 @@ export class KDeposit {
     this.gl = options.gl;
 
     // Resource slots
-    this.inPosition = (options.inPosition || options.inPosition === null) ? options.inPosition : createTextureRGBA32F(this.gl, options.particleTexWidth || 1, options.particleTexHeight || 1);
+    this.inPosition = (options.inPosition || options.inPosition === null) ? options.inPosition : createTextureRGBA32F(this.gl, options.particleTextureWidth || 1, options.particleTextureHeight || 1);
     this.outGrid = (options.outGrid || options.outGrid === null) ? options.outGrid : createGridTexture(this.gl,
       (options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))))),
       (options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))))
@@ -53,8 +53,8 @@ export class KDeposit {
 
     // Particle configuration
     this.particleCount = options.particleCount || 0;
-    this.particleTexWidth = options.particleTexWidth || 0;
-    this.particleTexHeight = options.particleTexHeight || 0;
+    this.particleTextureWidth = options.particleTextureWidth || 0;
+    this.particleTextureHeight = options.particleTextureHeight || 0;
 
     // Grid configuration
     this.gridSize = options.gridSize || 64;
@@ -149,8 +149,8 @@ export class KDeposit {
   valueOf({ pixels } = {}) {
     const value = {
       position: this.inPosition && readLinear({
-        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
-        height: this.particleTexHeight, count: this.particleCount,
+        gl: this.gl, texture: this.inPosition, width: this.particleTextureWidth,
+        height: this.particleTextureHeight, count: this.particleCount,
         channels: ['x', 'y', 'z', 'mass'], pixels
       }),
       grid: this.outGrid && readGrid3D({
@@ -159,8 +159,8 @@ export class KDeposit {
         channels: ['density'], pixels, format: this.gl.R32F
       }),
       particleCount: this.particleCount,
-      particleTexWidth: this.particleTexWidth,
-      particleTexHeight: this.particleTexHeight,
+      particleTextureWidth: this.particleTextureWidth,
+      particleTextureHeight: this.particleTextureHeight,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureSize,
@@ -236,7 +236,7 @@ position: ${value.position}
 
     // Set uniforms
   // Particle texture size for vertex fetch
-  gl.uniform2f(gl.getUniformLocation(this.program, 'u_particleTextureSize'), this.particleTexWidth, this.particleTexHeight);
+  gl.uniform2f(gl.getUniformLocation(this.program, 'u_particleTextureSize'), this.particleTextureWidth, this.particleTextureHeight);
   // Packed grid texture size (width, height)
   gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.textureWidth, this.textureHeight);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);

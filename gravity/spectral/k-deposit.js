@@ -18,8 +18,8 @@ export class KDeposit {
    *   inPosition?: WebGLTexture|null,
    *   outMassGrid?: WebGLTexture|null,
    *   particleCount?: number,
-   *   particleTexWidth?: number,
-   *   particleTexHeight?: number,
+   *   particleTextureWidth?: number,
+   *   particleTextureHeight?: number,
    *   gridSize?: number,
    *   slicesPerRow?: number,
   *   textureSize?: number,
@@ -36,15 +36,15 @@ export class KDeposit {
     // Resource slots - follow kernel contract: (truthy || === null) ? use : create
     this.inPosition = (options.inPosition || options.inPosition === null)
       ? options.inPosition
-      : createTextureRGBA32F(this.gl, options.particleTexWidth || 0, options.particleTexHeight || 0);
+      : createTextureRGBA32F(this.gl, options.particleTextureWidth || 0, options.particleTextureHeight || 0);
     this.outMassGrid = (options.outMassGrid || options.outMassGrid === null)
       ? options.outMassGrid
       : createTextureR32F(this.gl, options.textureSize || 64, options.textureSize || 64);
 
     // Particle configuration
     this.particleCount = options.particleCount || 0;
-    this.particleTexWidth = options.particleTexWidth || 0;
-    this.particleTexHeight = options.particleTexHeight || 0;
+    this.particleTextureWidth = options.particleTextureWidth || 0;
+    this.particleTextureHeight = options.particleTextureHeight || 0;
 
     // Grid configuration
     this.gridSize = options.gridSize || 64;
@@ -130,8 +130,8 @@ export class KDeposit {
   valueOf({ pixels } = {}) {
     const value = {
       position: this.inPosition && readLinear({
-        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
-        height: this.particleTexHeight, count: this.particleCount,
+        gl: this.gl, texture: this.inPosition, width: this.particleTextureWidth,
+        height: this.particleTextureHeight, count: this.particleCount,
         channels: ['x', 'y', 'z', 'mass'], pixels, format: this.gl.RGBA32F
       }),
       massGrid: this.outMassGrid && readGrid3D({
@@ -140,8 +140,8 @@ export class KDeposit {
         channels: ['mass'], pixels, format: this.gl.R32F
       }),
       particleCount: this.particleCount,
-      particleTexWidth: this.particleTexWidth,
-      particleTexHeight: this.particleTexHeight,
+      particleTextureWidth: this.particleTextureWidth,
+      particleTextureHeight: this.particleTextureHeight,
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureSize,
@@ -231,7 +231,7 @@ massGrid: ${value.massGrid ? `totalMass=${formatNumber(totalMass)} ` : ''}${valu
     // Set uniforms
     // Particle position texture size (width, height)
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_particleTextureSize'),
-      this.particleTexWidth, this.particleTexHeight);
+      this.particleTextureWidth, this.particleTextureHeight);
     // Packed 3D grid texture size (width, height)
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.textureWidth, this.textureHeight);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);

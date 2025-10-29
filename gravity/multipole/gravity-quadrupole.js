@@ -168,8 +168,8 @@ export class GravityQuadrupole {
       gl: this.gl,
       inPosition: null,  // set per-frame before run
       particleCount: this.particleCount,
-      particleTexWidth: this.textureWidth,
-      particleTexHeight: this.textureHeight,
+      particleTextureWidth: this.textureWidth,
+      particleTextureHeight: this.textureHeight,
       octreeSize: this.L0Size,
       gridSize: this.octreeGridSize,
       slicesPerRow: this.octreeSlicesPerRow,
@@ -205,8 +205,8 @@ export class GravityQuadrupole {
       inLevelsA1: null,  // set per-frame from texture arrays
       inLevelsA2: null,  // set per-frame from texture arrays
       inOccupancy: null,  // set per-frame from aggregator
-      particleTexWidth: this.textureWidth,
-      particleTexHeight: this.textureHeight,
+      particleTextureWidth: this.textureWidth,
+      particleTextureHeight: this.textureHeight,
       numLevels: this.numLevels,
       levelConfigs: this.levelConfigs,
       worldBounds: this.worldBounds,
@@ -239,8 +239,8 @@ export class GravityQuadrupole {
     this.boundsKernel = new KBoundsReduce({
       gl: this.gl,
       inPosition: null,  // set per-run
-      particleTexWidth: this.textureWidth,
-      particleTexHeight: this.textureHeight,
+      particleTextureWidth: this.textureWidth,
+      particleTextureHeight: this.textureHeight,
       particleCount: this.particleCount
     });
   }

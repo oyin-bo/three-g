@@ -21,8 +21,8 @@ export class KTraversalQuadrupole {
    *   inLevelsA2?: WebGLTexture|null,
    *   inOccupancy?: WebGLTexture|null,
    *   outForce?: WebGLTexture|null,
-   *   particleTexWidth?: number,
-   *   particleTexHeight?: number,
+   *   particleTextureWidth?: number,
+   *   particleTextureHeight?: number,
    *   numLevels?: number,
    *   levelConfigs?: Array<{size: number, gridSize: number, slicesPerRow: number}>,
    *   worldBounds?: {min: [number,number,number], max: [number,number,number]},
@@ -38,7 +38,7 @@ export class KTraversalQuadrupole {
     // Resource slots - follow kernel contract: (truthy || === null) ? use : create
     this.inPosition = (options.inPosition || options.inPosition === null)
       ? options.inPosition
-      : createTextureRGBA32F(this.gl, options.particleTexWidth || 0, options.particleTexHeight || 0);
+      : createTextureRGBA32F(this.gl, options.particleTextureWidth || 0, options.particleTextureHeight || 0);
 
     this.inBounds = (options.inBounds || options.inBounds === null)
       ? options.inBounds
@@ -55,11 +55,11 @@ export class KTraversalQuadrupole {
 
     this.outForce = (options.outForce || options.outForce === null)
       ? options.outForce
-      : createTextureRGBA32F(this.gl, options.particleTexWidth || 0, options.particleTexHeight || 0);
+      : createTextureRGBA32F(this.gl, options.particleTextureWidth || 0, options.particleTextureHeight || 0);
 
     // Particle texture dimensions
-    this.particleTexWidth = options.particleTexWidth || 0;
-    this.particleTexHeight = options.particleTexHeight || 0;
+    this.particleTextureWidth = options.particleTextureWidth || 0;
+    this.particleTextureHeight = options.particleTextureHeight || 0;
 
     // Octree configuration
     this.numLevels = options.numLevels || 4;
@@ -212,13 +212,13 @@ export class KTraversalQuadrupole {
 
     const value = {
       position: this.inPosition && readLinear({
-        gl: this.gl, texture: this.inPosition, width: this.particleTexWidth,
-        height: this.particleTexHeight, count: this.particleTexWidth * this.particleTexHeight,
+        gl: this.gl, texture: this.inPosition, width: this.particleTextureWidth,
+        height: this.particleTextureHeight, count: this.particleTextureWidth * this.particleTextureHeight,
         channels: ['x', 'y', 'z', 'mass'], pixels
       }),
       force: this.outForce && readLinear({
-        gl: this.gl, texture: this.outForce, width: this.particleTexWidth,
-        height: this.particleTexHeight, count: this.particleTexWidth * this.particleTexHeight,
+        gl: this.gl, texture: this.outForce, width: this.particleTextureWidth,
+        height: this.particleTextureHeight, count: this.particleTextureWidth * this.particleTextureHeight,
         channels: ['fx', 'fy', 'fz', 'w'], pixels
       }),
       bounds: this.inBounds && readLinear({
@@ -228,8 +228,8 @@ export class KTraversalQuadrupole {
       levelTextureArrayA0,
       levelTextureArrayA1,
       levelTextureArrayA2,
-      particleTexWidth: this.particleTexWidth,
-      particleTexHeight: this.particleTexHeight,
+      particleTextureWidth: this.particleTextureWidth,
+      particleTextureHeight: this.particleTextureHeight,
       numLevels: this.numLevels,
       theta: this.theta,
       gravityStrength: this.gravityStrength,
@@ -250,7 +250,7 @@ export class KTraversalQuadrupole {
     const formatLevels = (arr) => arr.map(l => l ? l.toString() : 'null').join('\n  ');
 
     value.toString = () =>
-      `KTraversalQuadrupole(${this.particleTexWidth}×${this.particleTexHeight}) theta=${this.theta} G=${this.gravityStrength} soft=${this.softening} levels=${this.numLevels} occupancy=${this.useOccupancyMasks} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
+      `KTraversalQuadrupole(${this.particleTextureWidth}×${this.particleTextureHeight}) theta=${this.theta} G=${this.gravityStrength} soft=${this.softening} levels=${this.numLevels} occupancy=${this.useOccupancyMasks} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
 
 position: ${value.position}
 
@@ -311,7 +311,7 @@ levelTextureArrayA2 (quadrupole xz,yz):
 
     // Bind output framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFramebuffer);
-    gl.viewport(0, 0, this.particleTexWidth, this.particleTexHeight);
+    gl.viewport(0, 0, this.particleTextureWidth, this.particleTextureHeight);
 
     // Setup GL state
     gl.disable(gl.DEPTH_TEST);
@@ -386,9 +386,9 @@ levelTextureArrayA2 (quadrupole xz,yz):
 
     // Set physics parameters
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_texSize'),
-      this.particleTexWidth, this.particleTexHeight);
+      this.particleTextureWidth, this.particleTextureHeight);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_particleCount'),
-      this.particleTexWidth * this.particleTexHeight);
+      this.particleTextureWidth * this.particleTextureHeight);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMin'),
       this.worldBounds.min[0], this.worldBounds.min[1], this.worldBounds.min[2]);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMax'),
