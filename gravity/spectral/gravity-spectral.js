@@ -111,16 +111,10 @@ export class GravitySpectral {
     this.textureHeight3D = this.gridSize * this.sliceRows3D;
 
     // Check WebGL2 support
-    const colorBufferFloat = this.gl.getExtension('EXT_color_buffer_float');
-    if (!colorBufferFloat) {
-      throw new Error('EXT_color_buffer_float extension not supported');
-    }
+    this.gl.getExtension('EXT_color_buffer_float');
 
     const floatBlend = this.gl.getExtension('EXT_float_blend');
     this.disableFloatBlend = !floatBlend;
-    if (!floatBlend) {
-      console.warn('EXT_float_blend not supported: reduced accumulation accuracy');
-    }
 
     // Compute world size for kernels
     const bounds = this.worldBounds;
@@ -250,16 +244,8 @@ export class GravitySpectral {
    * Step the simulation forward one frame
    */
   step() {
-    // 1. Compute PM forces
-    this._computePMForces();
-
-    // 2. Integrate physics
-    this._integratePhysics();
-
     this.frameCount++;
-  }
 
-  _computePMForces() {
     // Set current position for deposit and force sample
     this.depositKernel.inPosition = this.positionMassTexture;
     this.forceSampleKernel.inPosition = this.positionMassTexture;
@@ -383,8 +369,6 @@ export class GravitySpectral {
 
     this.gradientKernel.run();
 
-
-
     ///////////////////////////////////////////////////////////////////////////
     // REVERSE
 
@@ -405,7 +389,6 @@ export class GravitySpectral {
     this.fftKernel.complexFrom = null; // returned
 
     // Inverse FFT/Y: gradient's forceSpectrumY (scratch already there) → real
-    if (!this.gradientKernel.outForceSpectrumY) throw new Error('Gradient kernel outForceSpectrumY texture is null');
     this.fftKernel.complexFrom = this.gradientKernel.outForceSpectrumY;
     this.gradientKernel.outForceSpectrumY = null;
 
@@ -431,9 +414,7 @@ export class GravitySpectral {
 
     // Sampling forces
     this.forceSampleKernel.run();
-  }
 
-  _integratePhysics() {
     // allow external inputs
     this.integrateEulerKernel.inVelocity = this.velocityColorTexture;
     this.integrateEulerKernel.inPosition = this.positionMassTexture;
@@ -444,10 +425,15 @@ export class GravitySpectral {
     this.positionMassTexture = this.integrateEulerKernel.outPosition;
     this.velocityColorTexture = this.integrateEulerKernel.outVelocity;
 
-    this.integrateEulerKernel.outPosition = this.integrateEulerKernel.inPosition;
     this.integrateEulerKernel.outVelocity = this.integrateEulerKernel.inVelocity;
+    this.integrateEulerKernel.outPosition = this.integrateEulerKernel.inPosition;
     this.integrateEulerKernel.inPosition = this.positionMassTexture;
     this.integrateEulerKernel.inVelocity = this.velocityColorTexture;
+
+    // Swap force textures for next frame
+    const temp = this.integrateEulerKernel.inForce;
+    this.integrateEulerKernel.inForce = this.forceSampleKernel.outForce;
+    this.forceSampleKernel.outForce = temp;
   }
 
   /**
