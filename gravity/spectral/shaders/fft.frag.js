@@ -31,9 +31,8 @@ uniform sampler2D u_spectrum;
 `}
 uniform int u_axis;          // 0=X, 1=Y, 2=Z
 uniform int u_stage;         // FFT stage (0 to numStages-1)
-uniform int u_numStages;     // Total number of stages (log2(gridSize))
 uniform int u_inverse;       // 0=forward, 1=inverse
-uniform float u_gridSize;    // Grid dimension (e.g., 64)
+uniform ivec3 u_gridSize;    // Grid dimension (e.g., 64,64,64)
 uniform float u_slicesPerRow;
 uniform int u_debugMode;     // 0 = normal, 1 = current, 2 = partner
 uniform vec2 u_textureSize;  // 2D packed texture size (width, height)
@@ -42,23 +41,23 @@ const float PI = 3.14159265359;
 const float TWO_PI = 6.28318530718;
 
 // Convert 2D texture coords to 3D voxel coords
-ivec3 texCoordToVoxel(vec2 uv, float gridSize, float slicesPerRow) {
+ivec3 texCoordToVoxel(vec2 uv, ivec3 gridSize, float slicesPerRow) {
   // Map uv -> texel coordinates using full texture dimensions, then subtract 0.5
   vec2 texel = uv * u_textureSize - 0.5;
-  int ix = int(mod(texel.x, gridSize));
-  int iy = int(mod(texel.y, gridSize));
-  int sliceRow = int(texel.y / gridSize);
-  int iz = sliceRow * int(slicesPerRow) + int(texel.x / gridSize);
+  int ix = int(mod(texel.x, float(gridSize.x)));
+  int iy = int(mod(texel.y, float(gridSize.y)));
+  int sliceRow = int(texel.y / float(gridSize.y));
+  int iz = sliceRow * int(slicesPerRow) + int(texel.x / float(gridSize.x));
   return ivec3(ix, iy, iz);
 }
 
 // Convert 3D voxel to 2D texture coords
-vec2 voxelToTexCoord(ivec3 voxel, float gridSize, float slicesPerRow) {
+vec2 voxelToTexCoord(ivec3 voxel, ivec3 gridSize, float slicesPerRow) {
   int sliceRow = voxel.z / int(slicesPerRow);
-  int sliceCol = voxel.z % int(slicesPerRow);  // Use modulo instead of subtraction
+  int sliceCol = voxel.z % int(slicesPerRow);
   
-  float texX = float(sliceCol * int(gridSize) + voxel.x) + 0.5;
-  float texY = float(sliceRow * int(gridSize) + voxel.y) + 0.5;
+  float texX = float(sliceCol * gridSize.x + voxel.x) + 0.5;
+  float texY = float(sliceRow * gridSize.y + voxel.y) + 0.5;
   
   // Normalize by actual texture width/height
   return vec2(texX / u_textureSize.x, texY / u_textureSize.y);
@@ -88,7 +87,7 @@ vec2 twiddle(float k, float N, float sign) {
 void main() {
   // Common setup: determine voxel position and butterfly pairing
   ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
-  int N = int(u_gridSize);
+  int N = (u_axis == 0) ? u_gridSize.x : ((u_axis == 1) ? u_gridSize.y : u_gridSize.z);
   
   // Get the index along the FFT axis
   int idx = (u_axis == 0) ? voxel.x : ((u_axis == 1) ? voxel.y : voxel.z);
@@ -147,10 +146,9 @@ ${collapsed === 'from' ? `
   // Compute twiddle factor
   float twiddleSign = (u_inverse == 1) ? 1.0 : -1.0;
   // Correct twiddle exponent: for stage with block size stageSize the
-  // twiddle exponent should be pairIndex * (N / stageSize). Using
-  // pairIndex * halfStage was incorrect except for small N. Compute as float.
+  // twiddle exponent should be pairIndex * (N / stageSize).
   float twiddleK = float(pairIndex) * float(N) / float(stageSize);
-  vec2 w = twiddle(twiddleK, u_gridSize, twiddleSign);
+  vec2 w = twiddle(twiddleK, float(N), twiddleSign);
   
   // Butterfly operation
   // Cooley-Tukey: X[k] = E[k] + W^k*O[k], X[k+N/2] = E[k] - W^k*O[k]

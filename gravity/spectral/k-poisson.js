@@ -1,50 +1,49 @@
 // @ts-check
 
+import { fsQuadVert } from '../core-shaders.js';
+import { formatNumber, readLinear } from '../diag.js';
+import poissonFrag from './shaders/poisson.frag.js';
+
 /**
  * KPoisson - Poisson solver in Fourier space
  * 
  * Solves Poisson equation: ∇²φ = 4πGρ → φ(k) = -4πGρ(k) / k²
  * Follows the WebGL2 Kernel contract.
  */
-
-import { fsQuadVert } from '../core-shaders.js';
-import { formatNumber, readLinear } from '../diag.js';
-import poissonFrag from './shaders/poisson.frag.js';
-
 export class KPoisson {
   /**
   * @param {{
    *  gl: WebGL2RenderingContext,
    *  inDensitySpectrum?: WebGLTexture|null,
    *  outPotentialSpectrum?: WebGLTexture|null,
-   *  gridSize?: number,
+   *  gridSize?: number | [number, number, number],
    *  slicesPerRow?: number,
-  *   textureSize?: number,
-  *   textureWidth?: number,
-  *   textureHeight?: number,
+   *  textureWidth?: number,
+   *  textureHeight?: number,
    *  gravitationalConstant?: number,
    *  worldSize?: [number, number, number],
    *  assignment?: 'NGP'|'CIC'|'TSC',
    *  poissonUseDiscrete?: boolean,
    *  treePMSigma?: number,
-   *  splitMode?: 0 | 1 | 2
+   *  splitMode?: 0 | 1 | 2,
+   *  kCut?: number
    * }} options
    */
   constructor(options) {
     this.gl = options.gl;
 
-    // Resource slots
-    this.inDensitySpectrum = (options.inDensitySpectrum || options.inDensitySpectrum === null) ? options.inDensitySpectrum : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
-    this.outPotentialSpectrum = (options.outPotentialSpectrum || options.outPotentialSpectrum === null) ? options.outPotentialSpectrum : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
-
     // Grid configuration
-    this.gridSize = options.gridSize || 64;
+    this.gridSize = Array.isArray(options.gridSize) ? options.gridSize : [options.gridSize || 64, options.gridSize || 64, options.gridSize || 64];
     this.slicesPerRow = options.slicesPerRow || 8;
-    this.textureWidth = options.textureWidth || options.textureSize || (this.gridSize * this.slicesPerRow);
-    this.textureHeight = options.textureHeight || options.textureSize || (this.gridSize * Math.ceil(this.gridSize / this.slicesPerRow));
-    this.textureSize = this.textureWidth; // legacy
+    const [Nx, Ny, Nz] = this.gridSize;
+    this.textureWidth = options.textureWidth || (Nx * this.slicesPerRow);
+    this.textureHeight = options.textureHeight || (Ny * Math.ceil(Nz / this.slicesPerRow));
 
-    // Physics parameters
+    // Resource slots
+    this.inDensitySpectrum = (options.inDensitySpectrum || options.inDensitySpectrum === null) ? options.inDensitySpectrum : createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.outPotentialSpectrum = (options.outPotentialSpectrum || options.outPotentialSpectrum === null) ? options.outPotentialSpectrum : createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
+
+    // Physical parameters
     this.gravitationalConstant = options.gravitationalConstant !== undefined ? options.gravitationalConstant : (4.0 * Math.PI * 0.0003);
     this.worldSize = options.worldSize || [100.0, 100.0, 100.0];
     this.assignment = options.assignment || 'CIC';
@@ -75,19 +74,20 @@ export class KPoisson {
       throw new Error(`Fragment shader compile failed: ${info}`);
     }
 
-    this.program = this.gl.createProgram();
-    if (!this.program) throw new Error('Failed to create program');
-    this.gl.attachShader(this.program, vert);
-    this.gl.attachShader(this.program, frag);
-    this.gl.linkProgram(this.program);
-    if (!this.gl.getProgramParameter(this.program, this.gl.LINK_STATUS)) {
-      const info = this.gl.getProgramInfoLog(this.program);
-      this.gl.deleteProgram(this.program);
+    const program = this.gl.createProgram();
+    if (!program) throw new Error('Failed to create program');
+    this.gl.attachShader(program, vert);
+    this.gl.attachShader(program, frag);
+    this.gl.linkProgram(program);
+    if (!this.gl.getProgramParameter(program, this.gl.LINK_STATUS)) {
+      const info = this.gl.getProgramInfoLog(program);
+      this.gl.deleteProgram(program);
       throw new Error(`Program link failed: ${info}`);
     }
 
     this.gl.deleteShader(vert);
     this.gl.deleteShader(frag);
+    this.program = program;
 
     // Create quad VAO
     const quadVAO = this.gl.createVertexArray();
@@ -128,7 +128,6 @@ export class KPoisson {
       }),
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureSize,
       gravitationalConstant: this.gravitationalConstant,
       worldSize: [...this.worldSize],
       assignment: this.assignment,
@@ -138,7 +137,7 @@ export class KPoisson {
     };
 
     value.toString = () =>
-      `KPoisson(${this.gridSize}³ grid) texture=${this.textureWidth}×${this.textureHeight} G=${formatNumber(this.gravitationalConstant)} assignment=${this.assignment} #${this.renderCount}
+      `KPoisson(${this.gridSize.join('x')} grid) texture=${this.textureWidth}×${this.textureHeight} G=${formatNumber(this.gravitationalConstant)} assignment=${this.assignment} #${this.renderCount}
 
 densitySpectrum: ${value.densitySpectrum}
 
@@ -195,7 +194,7 @@ densitySpectrum: ${value.densitySpectrum}
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_densitySpectrum'), 0);
 
     // Set uniforms
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
+    gl.uniform3iv(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
     // Provide packed 3D texture dims
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.textureWidth, this.textureHeight);
@@ -239,11 +238,14 @@ densitySpectrum: ${value.densitySpectrum}
     if (this.quadVAO) gl.deleteVertexArray(this.quadVAO);
     if (this.outFramebuffer) gl.deleteFramebuffer(this.outFramebuffer);
 
-    if (this.inDensitySpectrum) gl.deleteTexture(this.inDensitySpectrum);
-    if (this.outPotentialSpectrum) gl.deleteTexture(this.outPotentialSpectrum);
-
-    this.inDensitySpectrum = null;
-    this.outPotentialSpectrum = null;
+    if (this.inDensitySpectrum) {
+      gl.deleteTexture(this.inDensitySpectrum);
+      this.inDensitySpectrum = null;
+    }
+    if (this.outPotentialSpectrum) {
+      gl.deleteTexture(this.outPotentialSpectrum);
+      this.outPotentialSpectrum = null;
+    }
     this._fboShadow = null;
   }
 }

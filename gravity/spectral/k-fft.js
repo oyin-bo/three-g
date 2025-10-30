@@ -1,37 +1,94 @@
 // @ts-check
 
-/**
- * KFFT - 3D FFT Transform Kernel
- * 
- * Implements forward and inverse 3D FFT for PM method.
- * Follows the WebGL2 Kernel contract, adapted for complex FFT operations.
- * 
- * LEAN ARCHITECTURE:
- * - Uses exactly 3 textures: real (R32F), complexFrom (RG32F), complexTo (RG32F)
- * - 3 shader program variants baked from single generator
- * - Texture swapping invariant: complexFrom holds input/result, complexTo holds intermediate
- * 
- * NORMALIZATION CONVENTION:
- * - Forward: F̂(k) = Σ f(x)·exp(-2πikx)           [unnormalized]
- * - Inverse: f(x) = Σ F̂(k)·exp(2πikx)           [unnormalized]
- */
-
 import { fsQuadVert } from '../core-shaders.js';
 import { formatNumber, readGrid3D, readLinear } from '../diag.js';
 import fftFrag from './shaders/fft.frag.js';
 
+/**
+ * KFFT - 3D FFT Transform Kernel
+ *
+ * Implements forward and inverse 3D FFT for PM method.
+ * Follows the WebGL2 Kernel contract, adapted for complex FFT operations.
+ *
+ * LEAN ARCHITECTURE:
+ * - Uses exactly 3 textures: real (R32F), complexFrom (RG32F), complexTo (RG32F)
+ * - 3 shader program variants baked from single generator
+ * - Texture swapping invariant: complexFrom holds input/result, complexTo holds intermediate
+ *
+ * NORMALIZATION CONVENTION:
+ * - Forward: F̂(k) = Σ f(x)·exp(-2πikx)           [unnormalized]
+ * - Inverse: f(x) = Σ F̂(k)·exp(2πikx)           [unnormalized]
+ *
+ * @property {WebGL2RenderingContext} gl
+ * @property {number[]} gridSize
+ * @property {number} slicesPerRow
+ * @property {number} textureWidth
+ * @property {number} textureHeight
+ * @property {WebGLTexture | null} real
+ * @property {WebGLTexture | null} complexFrom
+ * @property {WebGLTexture | null} inPosition
+ * @property {WebGLTexture | null} complexTo
+ * @property {boolean} inverse
+ * @property {number} massToDensity
+ * @property {WebGLProgram} fftProgramRealToComplex
+ * @property {WebGLProgram} fftProgramComplexToReal
+ * @property {WebGLProgram} fftProgramComplexToComplex
+ * @property {WebGLVertexArrayObject} quadVAO
+ * @property {WebGLFramebuffer} framebufferFrom
+ * @property {WebGLFramebuffer} framebufferTo
+ * @property {WebGLFramebuffer} framebufferReal
+ * @property {number | undefined} renderCount
+ */
 export class KFFT {
+  /** @type {WebGL2RenderingContext} */
+  gl;
+  /** @type {number[]} */
+  gridSize;
+  /** @type {number} */
+  slicesPerRow;
+  /** @type {number} */
+  textureWidth;
+  /** @type {number} */
+  textureHeight;
+  /** @type {WebGLTexture | null} */
+  real;
+  /** @type {WebGLTexture | null} */
+  complexFrom;
+  /** @type {WebGLTexture | null} */
+  inPosition;
+  /** @type {WebGLTexture | null} */
+  complexTo;
+  /** @type {boolean} */
+  inverse;
+  /** @type {number} */
+  massToDensity;
+  /** @type {WebGLProgram} */
+  fftProgramRealToComplex;
+  /** @type {WebGLProgram} */
+  fftProgramComplexToReal;
+  /** @type {WebGLProgram} */
+  fftProgramComplexToComplex;
+  /** @type {WebGLVertexArrayObject} */
+  quadVAO;
+  /** @type {WebGLFramebuffer} */
+  framebufferFrom;
+  /** @type {WebGLFramebuffer} */
+  framebufferTo;
+  /** @type {WebGLFramebuffer} */
+  framebufferReal;
+  /** @type {number | undefined} */
+  renderCount;
+
   /**
    * @param {{
    *   gl: WebGL2RenderingContext,
    *   real?: WebGLTexture|null,
    *   complexFrom?: WebGLTexture|null,
    *   complexTo?: WebGLTexture|null,
-   *   gridSize?: number,
+   *   gridSize?: number | [number, number, number],
    *   slicesPerRow?: number,
-  *   textureSize?: number,
-  *   textureWidth?: number,
-  *   textureHeight?: number,
+   *   textureWidth?: number,
+   *   textureHeight?: number,
    *   inverse?: boolean,
    *   massToDensity?: number
    * }} options
@@ -40,19 +97,21 @@ export class KFFT {
     this.gl = options.gl;
 
     // Grid configuration
-    this.gridSize = options.gridSize || 64;
+    this.gridSize = Array.isArray(options.gridSize) ? options.gridSize : [options.gridSize || 64, options.gridSize || 64, options.gridSize || 64];
     this.slicesPerRow = options.slicesPerRow || 8;
+    
     // Support non-square packed textures: accept textureWidth/textureHeight
-    this.textureWidth = options.textureWidth || options.textureSize || (this.gridSize * this.slicesPerRow);
-    this.textureHeight = options.textureHeight || options.textureSize || (this.gridSize * Math.ceil(this.gridSize / this.slicesPerRow));
-    this.textureSize = this.textureWidth; // legacy fallback
+    const [Nx, Ny, Nz] = this.gridSize;
+    this.textureWidth = options.textureWidth || (Nx * this.slicesPerRow);
+    this.textureHeight = options.textureHeight || (Ny * Math.ceil(Nz / this.slicesPerRow));
 
     // Lean texture architecture: exactly 3 textures (use provided or create with real dims)
     this.real = options.real || createTextureR32F(this.gl, this.textureWidth, this.textureHeight);
-    this.complexFrom =
-      this.inPosition = (options.complexFrom || options.complexFrom === null) ?
+    const complexFromTexture = (options.complexFrom || options.complexFrom === null) ?
         options.complexFrom :
         createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.complexFrom = complexFromTexture;
+    this.inPosition = complexFromTexture;
     this.complexTo = (options.complexTo || options.complexTo === null) ?
       options.complexTo :
       createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
@@ -141,29 +200,28 @@ export class KFFT {
   valueOf({ pixels } = {}) {
     const value = {
       real: this.real && readGrid3D({
-        gl: this.gl, texture: this.real, width: this.textureSize,
-        height: this.textureSize, gridSize: this.gridSize,
+        gl: this.gl, texture: this.real, width: this.textureWidth,
+        height: this.textureHeight, gridSize: this.gridSize[0],
         channels: ['real'], pixels, format: this.gl.R32F
       }),
       complexFrom: this.complexFrom && readLinear({
-        gl: this.gl, texture: this.complexFrom, width: this.textureSize,
-        height: this.textureSize, count: this.textureSize * this.textureSize,
+        gl: this.gl, texture: this.complexFrom, width: this.textureWidth,
+        height: this.textureHeight, count: this.textureWidth * this.textureHeight,
         channels: ['real', 'imag'], pixels, format: this.gl.RG32F
       }),
       complexTo: this.complexTo && readLinear({
-        gl: this.gl, texture: this.complexTo, width: this.textureSize,
-        height: this.textureSize, count: this.textureSize * this.textureSize,
+        gl: this.gl, texture: this.complexTo, width: this.textureWidth,
+        height: this.textureHeight, count: this.textureWidth * this.textureHeight,
         channels: ['real', 'imag'], pixels, format: this.gl.RG32F
       }),
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureSize,
       inverse: this.inverse,
       renderCount: this.renderCount
     };
 
     value.toString = () =>
-      `KFFT(${this.gridSize}³ grid) texture=${this.textureSize}×${this.textureSize} slices=${this.slicesPerRow} inverse=${this.inverse} #${this.renderCount}
+      `KFFT(${this.gridSize.join('x')} grid) texture=${this.textureWidth}×${this.textureHeight} slices=${this.slicesPerRow} inverse=${this.inverse} #${this.renderCount}
 
 real: ${value.real}
 
@@ -198,7 +256,11 @@ complexFrom: ${value.complexFrom}
     }
 
     const gl = this.gl;
-    const numStages = Math.log2(this.gridSize);
+    const [Nx, Ny, Nz] = this.gridSize;
+    const numStages = [Math.log2(Nx), Math.log2(Ny), Math.log2(Nz)];
+    if (numStages.some(s => !Number.isInteger(s))) {
+      throw new Error(`KFFT grid dimensions must be powers of 2. Got [${this.gridSize.join(', ')}]`);
+    }
 
     gl.viewport(0, 0, this.textureWidth, this.textureHeight);
     gl.disable(gl.BLEND);
@@ -206,9 +268,9 @@ complexFrom: ${value.complexFrom}
 
     // Perform FFT along each axis (X, Y, Z)
     for (let axis = 0; axis < 3; axis++) {
-      for (let stage = 0; stage < numStages; stage++) {
+      for (let stage = 0; stage < numStages[axis]; stage++) {
         const isFirstStage = (axis === 0 && stage === 0);
-        const isLastStage = (axis === 2 && stage === numStages - 1);
+        const isLastStage = (axis === 2 && stage === numStages[2] - 1);
 
         // Select shader program
         let program;
@@ -223,17 +285,16 @@ complexFrom: ${value.complexFrom}
         gl.useProgram(program);
 
         // Set common uniforms
-        gl.uniform1f(gl.getUniformLocation(program, 'u_gridSize'), this.gridSize);
+        gl.uniform3iv(gl.getUniformLocation(program, 'u_gridSize'), this.gridSize);
         gl.uniform1f(gl.getUniformLocation(program, 'u_slicesPerRow'), this.slicesPerRow);
         // Provide packed 3D texture dimensions
         gl.uniform2f(gl.getUniformLocation(program, 'u_textureSize'), this.textureWidth, this.textureHeight);
         gl.uniform1i(gl.getUniformLocation(program, 'u_inverse'), this.inverse ? 1 : 0);
-        gl.uniform1i(gl.getUniformLocation(program, 'u_numStages'), numStages);
         gl.uniform1i(gl.getUniformLocation(program, 'u_axis'), axis);
         gl.uniform1i(gl.getUniformLocation(program, 'u_stage'), stage);
         gl.uniform1i(gl.getUniformLocation(program, 'u_debugMode'), 0);
 
-        // Special handling for first/last stages
+        // Set textures and framebuffer
         if (!this.inverse && isFirstStage) {
           // First forward stage: read from real, write to complexTo
           gl.activeTexture(gl.TEXTURE0);
@@ -253,9 +314,6 @@ complexFrom: ${value.complexFrom}
           gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.real, 0);
         } else {
           // Middle stages: ping-pong between complexFrom and complexTo
-          // After first stage of axis 0 (forward) or before last stage of axis 2 (inverse),
-          // we need to track which texture has the current data
-
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, this.complexFrom);
           gl.uniform1i(gl.getUniformLocation(program, 'u_spectrum'), 0);
@@ -293,15 +351,18 @@ complexFrom: ${value.complexFrom}
     if (this.framebufferReal) gl.deleteFramebuffer(this.framebufferReal);
 
     if (this.real) {
-      gl.deleteTexture(this.real);
+      this.gl.deleteTexture(this.real);
+      /** @type {any} */
       this.real = null;
     }
     if (this.complexFrom) {
-      gl.deleteTexture(this.complexFrom);
+      this.gl.deleteTexture(this.complexFrom);
+      /** @type {any} */
       this.complexFrom = null;
     }
     if (this.complexTo) {
-      gl.deleteTexture(this.complexTo);
+      this.gl.deleteTexture(this.complexTo);
+      /** @type {any} */
       this.complexTo = null;
     }
   }

@@ -1,5 +1,9 @@
 // @ts-check
 
+import { fsQuadVert } from '../core-shaders.js';
+import { readLinear } from '../diag.js';
+import gradientFrag from './shaders/gradient.frag.js';
+
 /**
  * KGradient - Computes force field from gravitational potential
  * 
@@ -7,11 +11,6 @@
  * Generates three force spectrum textures (Fx, Fy, Fz)
  * Follows the WebGL2 Kernel contract.
  */
-
-import { fsQuadVert } from '../core-shaders.js';
-import { readLinear } from '../diag.js';
-import gradientFrag from './shaders/gradient.frag.js';
-
 export class KGradient {
   /**
    * @param {{
@@ -20,29 +19,28 @@ export class KGradient {
    *   outForceSpectrumX?: WebGLTexture|null,
    *   outForceSpectrumY?: WebGLTexture|null,
    *   outForceSpectrumZ?: WebGLTexture|null,
-   *   gridSize?: number,
+   *   gridSize?: number | [number, number, number],
    *   slicesPerRow?: number,
-  *   textureSize?: number,
-  *   textureWidth?: number,
-  *   textureHeight?: number,
+   *   textureWidth?: number,
+   *   textureHeight?: number,
    *   worldSize?: [number, number, number]
    * }} options
    */
   constructor(options) {
     this.gl = options.gl;
 
-    // Resource slots
-    this.inPotentialSpectrum = (options.inPotentialSpectrum || options.inPotentialSpectrum === null) ? options.inPotentialSpectrum : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
-    this.outForceSpectrumX = (options.outForceSpectrumX || options.outForceSpectrumX === null) ? options.outForceSpectrumX : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
-    this.outForceSpectrumY = (options.outForceSpectrumY || options.outForceSpectrumY === null) ? options.outForceSpectrumY : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
-    this.outForceSpectrumZ = (options.outForceSpectrumZ || options.outForceSpectrumZ === null) ? options.outForceSpectrumZ : createComplexTexture(this.gl, options.textureSize || (options.gridSize || 64) * (options.slicesPerRow || 8));
-
     // Grid configuration
-    this.gridSize = options.gridSize || 64;
+    this.gridSize = Array.isArray(options.gridSize) ? options.gridSize : [options.gridSize || 64, options.gridSize || 64, options.gridSize || 64];
     this.slicesPerRow = options.slicesPerRow || 8;
-    this.textureWidth = options.textureWidth || options.textureSize || (this.gridSize * this.slicesPerRow);
-    this.textureHeight = options.textureHeight || options.textureSize || (this.gridSize * Math.ceil(this.gridSize / this.slicesPerRow));
-    this.textureSize = this.textureWidth; // legacy
+    const [Nx, Ny, Nz] = this.gridSize;
+    this.textureWidth = options.textureWidth || (Nx * this.slicesPerRow);
+    this.textureHeight = options.textureHeight || (Ny * Math.ceil(Nz / this.slicesPerRow));
+
+    // Resource slots
+    this.inPotentialSpectrum = (options.inPotentialSpectrum || options.inPotentialSpectrum === null) ? options.inPotentialSpectrum : createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.outForceSpectrumX = (options.outForceSpectrumX || options.outForceSpectrumX === null) ? options.outForceSpectrumX : createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.outForceSpectrumY = (options.outForceSpectrumY || options.outForceSpectrumY === null) ? options.outForceSpectrumY : createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.outForceSpectrumZ = (options.outForceSpectrumZ || options.outForceSpectrumZ === null) ? options.outForceSpectrumZ : createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
 
     // World size
     this.worldSize = options.worldSize || [4, 4, 4];
@@ -68,19 +66,20 @@ export class KGradient {
       throw new Error(`Fragment shader compile failed: ${info}`);
     }
 
-    this.program = this.gl.createProgram();
-    if (!this.program) throw new Error('Failed to create program');
-    this.gl.attachShader(this.program, vert);
-    this.gl.attachShader(this.program, frag);
-    this.gl.linkProgram(this.program);
-    if (!this.gl.getProgramParameter(this.program, this.gl.LINK_STATUS)) {
-      const info = this.gl.getProgramInfoLog(this.program);
-      this.gl.deleteProgram(this.program);
+    const program = this.gl.createProgram();
+    if (!program) throw new Error('Failed to create program');
+    this.gl.attachShader(program, vert);
+    this.gl.attachShader(program, frag);
+    this.gl.linkProgram(program);
+    if (!this.gl.getProgramParameter(program, this.gl.LINK_STATUS)) {
+      const info = this.gl.getProgramInfoLog(program);
+      this.gl.deleteProgram(program);
       throw new Error(`Program link failed: ${info}`);
     }
 
     this.gl.deleteShader(vert);
     this.gl.deleteShader(frag);
+    this.program = program;
 
     // Create quad VAO
     const quadVAO = this.gl.createVertexArray();
@@ -134,7 +133,6 @@ export class KGradient {
       }),
       gridSize: this.gridSize,
       slicesPerRow: this.slicesPerRow,
-      textureSize: this.textureSize,
       textureWidth: this.textureWidth,
       textureHeight: this.textureHeight,
       worldSize: [...this.worldSize],
@@ -142,7 +140,7 @@ export class KGradient {
     };
 
     value.toString = () =>
-      `KGradient(${this.gridSize}³ grid) texture=${this.textureWidth}×${this.textureHeight} worldSize=[${this.worldSize}] #${this.renderCount}
+      `KGradient(${this.gridSize.join('x')} grid) texture=${this.textureWidth}×${this.textureHeight} worldSize=[${this.worldSize}] #${this.renderCount}
 
 potentialSpectrum: ${value.potentialSpectrum}
 
@@ -218,7 +216,7 @@ potentialSpectrum: ${value.potentialSpectrum}
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_potentialSpectrum'), 0);
 
     // Set common uniforms
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
+    gl.uniform3iv(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
     // Provide packed 3D texture dims
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.textureWidth, this.textureHeight);
@@ -260,15 +258,22 @@ potentialSpectrum: ${value.potentialSpectrum}
     if (this.outFramebufferY) gl.deleteFramebuffer(this.outFramebufferY);
     if (this.outFramebufferZ) gl.deleteFramebuffer(this.outFramebufferZ);
 
-    if (this.inPotentialSpectrum) gl.deleteTexture(this.inPotentialSpectrum);
-    if (this.outForceSpectrumX) gl.deleteTexture(this.outForceSpectrumX);
-    if (this.outForceSpectrumY) gl.deleteTexture(this.outForceSpectrumY);
-    if (this.outForceSpectrumZ) gl.deleteTexture(this.outForceSpectrumZ);
-
-    this.inPotentialSpectrum = null;
-    this.outForceSpectrumX = null;
-    this.outForceSpectrumY = null;
-    this.outForceSpectrumZ = null;
+    if (this.inPotentialSpectrum) {
+      gl.deleteTexture(this.inPotentialSpectrum);
+      this.inPotentialSpectrum = null;
+    }
+    if (this.outForceSpectrumX) {
+      gl.deleteTexture(this.outForceSpectrumX);
+      this.outForceSpectrumX = null;
+    }
+    if (this.outForceSpectrumY) {
+      gl.deleteTexture(this.outForceSpectrumY);
+      this.outForceSpectrumY = null;
+    }
+    if (this.outForceSpectrumZ) {
+      gl.deleteTexture(this.outForceSpectrumZ);
+      this.outForceSpectrumZ = null;
+    }
     this._fboShadow = null;
   }
 }

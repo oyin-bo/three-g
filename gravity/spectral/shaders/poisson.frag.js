@@ -17,7 +17,7 @@ in vec2 v_uv;
 out vec4 outColor;
 
 uniform sampler2D u_densitySpectrum;
-uniform float u_gridSize;
+uniform ivec3 u_gridSize;
 uniform float u_slicesPerRow;
 uniform vec2 u_textureSize;
 uniform float u_gravitationalConstant;  // 4πG
@@ -33,13 +33,13 @@ const float PI = 3.14159265359;
 const float TWO_PI = 6.28318530718;
 
 // Convert 2D texture coords to 3D voxel coords
-ivec3 texCoordToVoxel(vec2 uv, float gridSize, float slicesPerRow) {
+ivec3 texCoordToVoxel(vec2 uv, ivec3 gridSize, float slicesPerRow) {
   // Map uv -> texel coordinates using actual texture dimensions, then subtract 0.5
   vec2 texel = uv * u_textureSize - 0.5;
-  int sliceIndex = int(texel.y / gridSize) * int(slicesPerRow) + int(texel.x / gridSize);
+  int sliceIndex = int(texel.y / float(gridSize.y)) * int(slicesPerRow) + int(texel.x / float(gridSize.x));
   int iz = sliceIndex;
-  int ix = int(mod(texel.x, gridSize));
-  int iy = int(mod(texel.y, gridSize));
+  int ix = int(mod(texel.x, float(gridSize.x)));
+  int iy = int(mod(texel.y, float(gridSize.y)));
   return ivec3(ix, iy, iz);
 }
 
@@ -55,25 +55,25 @@ float sinc(float x) {
 
 void main() {
   ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
-  int N = int(u_gridSize);
+  ivec3 N = u_gridSize;
   vec3 L = u_worldSize;
-  vec3 d = L / u_gridSize;
+  vec3 d = L / vec3(N);
 
   // Read density spectrum
   vec2 rho_k = texture(u_densitySpectrum, v_uv).rg;
 
   // Wave indices on [-N/2, N/2)
   vec3 kg;
-  kg.x = float(voxel.x <= N/2 ? voxel.x : voxel.x - N);
-  kg.y = float(voxel.y <= N/2 ? voxel.y : voxel.y - N);
-  kg.z = float(voxel.z <= N/2 ? voxel.z : voxel.z - N);
+  kg.x = float(voxel.x <= N.x/2 ? voxel.x : voxel.x - N.x);
+  kg.y = float(voxel.y <= N.y/2 ? voxel.y : voxel.y - N.y);
+  kg.z = float(voxel.z <= N.z/2 ? voxel.z : voxel.z - N.z);
 
   // 1. Deconvolution of assignment window (NGP/CIC/TSC)
   // This corrects for the smearing effect of the mass assignment scheme.
   if (u_deconvolveOrder > 0) {
-    float wx = pow(max(sinc(kg.x * PI / u_gridSize), 1e-4), float(u_deconvolveOrder));
-    float wy = pow(max(sinc(kg.y * PI / u_gridSize), 1e-4), float(u_deconvolveOrder));
-    float wz = pow(max(sinc(kg.z * PI / u_gridSize), 1e-4), float(u_deconvolveOrder));
+    float wx = pow(max(sinc(kg.x * PI / float(N.x)), 1e-4), float(u_deconvolveOrder));
+    float wy = pow(max(sinc(kg.y * PI / float(N.y)), 1e-4), float(u_deconvolveOrder));
+    float wz = pow(max(sinc(kg.z * PI / float(N.z)), 1e-4), float(u_deconvolveOrder));
     float window = max(wx * wy * wz, 1e-4);
     rho_k /= window;
   }
@@ -81,10 +81,10 @@ void main() {
   // 2. Compute k^2 (squared wavenumber)
   float k2;
   if (u_useDiscrete == 1) {
-    // Discrete Laplacian eigenvalue on the grid: k_eff^2 = sum_i (2/Δx_i * sin(π*k_i/N))^2
-    float sx = sin(PI * kg.x / u_gridSize);
-    float sy = sin(PI * kg.y / u_gridSize);
-    float sz = sin(PI * kg.z / u_gridSize);
+    // Discrete Laplacian eigenvalue on the grid: k_eff^2 = sum_i (2/Δx_i * sin(π*k_i/N_i))^2
+    float sx = sin(PI * kg.x / float(N.x));
+    float sy = sin(PI * kg.y / float(N.y));
+    float sz = sin(PI * kg.z / float(N.z));
     vec3 inv_d = 2.0 / d;
     vec3 k_eff = inv_d * vec3(sx, sy, sz);
     k2 = dot(k_eff, k_eff);

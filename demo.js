@@ -195,6 +195,16 @@ function createGraphVelocityKernel(gl, width, height) {
   const framebuffer = gl.createFramebuffer();
   
   return {
+    /**
+     * @param {{
+     *   inVelocity: WebGLTexture,
+     *   inPosition: WebGLTexture,
+     *   inForce: WebGLTexture,
+     *   outVelocity: WebGLTexture,
+     *   dt: number,
+     *   damping: number
+     * }} _
+     */
     apply({ inVelocity, inPosition, inForce, outVelocity, dt, damping }) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outVelocity, 0);
@@ -245,7 +255,7 @@ outcome.animate = () => {
   }
 
   if (!isInitialized) {
-    const positionTexture = physics.positionTexture || physics.positionMassTexture;
+    const positionTexture = physics.positionMassTexture;
     positionTextureWrapper = new THREE.ExternalTexture(positionTexture);
 
     // Use pre-loaded global color texture
@@ -455,7 +465,7 @@ function recreateAll() {
           positions: snap.positions,
           velocities: snap.velocities,
           masses: snap.masses,
-          logicalCount: physics.options?.particleCount || physics.textureWidth * physics.textureHeight,
+          logicalCount: physics.particleCount || physics.textureWidth * physics.textureHeight,
           textureWidth: physics.textureWidth,
           textureHeight: physics.textureHeight
         };
@@ -602,12 +612,16 @@ function recreatePhysicsAndMesh() {
       dt: 10 / 60,
       damping: 0.006,
       worldBounds,
-      get: /** @type {NonNullable<Parameters<typeof particleSystem>[0]['get']>} */ ((spot, out) => {
+      /**
+       * @param {any} spot
+       * @param {{rgb: number, index: number, x?: number, y?: number, z?: number, vx?: number, vy?: number, vz?: number, mass?: number}} out
+       */
+      get: (spot, out) => {
         const sx = spot?.x ?? 0;
         const sy = spot?.y ?? 0;
         const sz = spot?.z ?? 0;
         out.rgb = encodeRGBFromBounds(sx, sy, sz, worldBounds);
-      })
+      },
     });
 
     if (calculationMethod === 'mesh') {
@@ -626,7 +640,7 @@ function recreatePhysicsAndMesh() {
     // Record logical particle count provided to the kernel creator so we can
     // match it during future readbacks/unloads.
     try {
-      system['__logicalParticleCount'] = particles.length;
+      system.particleCount = particles.length;
     } catch (e) {
       // ignore
     }
@@ -647,7 +661,7 @@ function recreatePhysicsAndMesh() {
     particleCount,
     textures: {
       // positionTexture is always defined here
-      position: /** @type {WebGLTexture} */ (system.positionTexture || system.positionMassTexture),
+      position: /** @type {WebGLTexture} */ (system.positionMassTexture),
       color: colorTexture,
       size: [textureSize.width, textureSize.height],
     },
@@ -660,7 +674,7 @@ function recreatePhysicsAndMesh() {
 
   // Create LaplacianForceModuleKernels if graph forces are enabled
   if (graphForcesEnabled && edges) {
-    const textureSize = system.getTextureSize ? system.getTextureSize() : { width: system.textureWidth, height: system.textureHeight };
+    const textureSize = { width: system.textureWidth, height: system.textureHeight };
     const hasFloatBlend = !!gl.getExtension('EXT_float_blend');
     
     laplacianModule = new GraphLaplacian({
@@ -806,6 +820,3 @@ function buildColorTexture(gl, particles, textureSize, worldBounds) {
 
   return texture;
 }
-
-
-

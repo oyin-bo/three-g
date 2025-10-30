@@ -159,11 +159,11 @@ export class KForceSample {
       renderCount: this.renderCount
     };
 
-    const totalForce = (value.force && value.force.fx) ? Math.sqrt(value.force.fx.mean ** 2 + value.force.fy.mean ** 2 + value.force.fz.mean ** 2) : 0;
+    const totalForce = (value.force && value.force.r) ? Math.sqrt(value.force.r.mean ** 2 + value.force.g.mean ** 2 + value.force.b.mean ** 2) : 0;
+    const maxForce = (value.force && value.force.r) ? Math.sqrt(value.force.r.max ** 2 + value.force.g.max ** 2 + value.force.b.max ** 2) : 0;
 
     value.toString = () =>
-      `KForceSample(${this.particleCount} particles from ${this.gridSize}³ grid) accumulate=${this.accumulate} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
-
+`KForceSample(«${this.label}») #${this.renderCount}
 position: ${value.position}
 
 forceGridX: ${value.forceGridX}

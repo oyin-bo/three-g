@@ -20,7 +20,8 @@ import { GravitySpectral } from './spectral/gravity-spectral.js';
  *     index: number,
  *     x?: number, y?: number, z?: number,
  *     vx?: number, vy?: number, vz?: number,
- *     mass?: number
+ *     mass?: number,
+ *     rgb?: number
  *   }) => void,
  *   method?: 'quadrupole' | 'monopole' | 'spectral' | 'mesh',
  *   theta?: number,
@@ -295,7 +296,8 @@ function prepareParticleData({ particles, get }) {
     index: 0,
     x: 0, y: 0, z: 0,
     vx: 0, vy: 0, vz: 0,
-    mass: 0
+    mass: 0,
+    rgb: 0
   };
 
   for (let i = 0; i < particleCount; i++) {

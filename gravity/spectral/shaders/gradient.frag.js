@@ -20,7 +20,7 @@ out vec4 outColor;
 
 uniform sampler2D u_potentialSpectrum;
 uniform int u_axis;  // 0=X, 1=Y, 2=Z
-uniform float u_gridSize;
+uniform ivec3 u_gridSize;
 uniform float u_slicesPerRow;
 uniform vec2 u_textureSize;
 uniform vec3 u_worldSize;
@@ -29,13 +29,13 @@ const float PI = 3.14159265359;
 const float TWO_PI = 6.28318530718;
 
 // Convert 2D texture coords to 3D voxel coords
-ivec3 texCoordToVoxel(vec2 uv, float gridSize, float slicesPerRow) {
-  // Map uv -> texel coords using actual texture dimensions, then subtract 0.5
+ivec3 texCoordToVoxel(vec2 uv, ivec3 gridSize, float slicesPerRow) {
+  // Map uv -> texel coordinates using actual texture dimensions, then subtract 0.5
   vec2 texel = uv * u_textureSize - 0.5;
-  int ix = int(mod(texel.x, gridSize));
-  int iy = int(mod(texel.y, gridSize));
-  int sliceRow = int(texel.y / gridSize);
-  int iz = sliceRow * int(slicesPerRow) + int(texel.x / gridSize);
+  int ix = int(mod(texel.x, float(gridSize.x)));
+  int iy = int(mod(texel.y, float(gridSize.y)));
+  int sliceRow = int(texel.y / float(gridSize.y));
+  int iz = sliceRow * int(slicesPerRow) + int(texel.x / float(gridSize.x));
   return ivec3(ix, iy, iz);
 }
 
@@ -46,16 +46,16 @@ vec2 complexMul(vec2 a, vec2 b) {
 
 void main() {
   ivec3 voxel = texCoordToVoxel(v_uv, u_gridSize, u_slicesPerRow);
-  int N = int(u_gridSize);
+  ivec3 N = u_gridSize;
   
   // Read potential spectrum (complex)
   vec2 phi_k = texture(u_potentialSpectrum, v_uv).rg;
   
   // Compute integer wave vector
   vec3 kg;
-  kg.x = float(voxel.x <= N/2 ? voxel.x : voxel.x - N);
-  kg.y = float(voxel.y <= N/2 ? voxel.y : voxel.y - N);
-  kg.z = float(voxel.z <= N/2 ? voxel.z : voxel.z - N);
+  kg.x = float(voxel.x <= N.x/2 ? voxel.x : voxel.x - N.x);
+  kg.y = float(voxel.y <= N.y/2 ? voxel.y : voxel.y - N.y);
+  kg.z = float(voxel.z <= N.z/2 ? voxel.z : voxel.z - N.z);
   
   // Scale to physical wave vector: k_phys = 2π * k_grid / L
   vec3 k_phys = kg * (TWO_PI / u_worldSize);

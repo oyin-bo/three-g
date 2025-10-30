@@ -34,6 +34,17 @@ export class ParticleSystem {
   }
 }
 
+/**
+ * @param {{
+ *   gl: WebGL2RenderingContext,
+ *   particles: any[],
+ *   get: (particle: any, out: any) => void,
+ *   texture: WebGLTexture,
+ *   textureWidth: number,
+ *   textureHeight: number,
+ *   textureIndex: number
+ * }} _
+ */
 export function writeTextureRgba({
   gl,
   particles,
@@ -45,7 +56,18 @@ export function writeTextureRgba({
   // TODO: write particles array data into RGBA texture
 }
 
-export function readTextureRgba(
+/**
+ * @param {{
+ *   gl: WebGL2RenderingContext,
+ *   particles: any[],
+ *   set: (particle: any, data: any) => void,
+ *   texture: WebGLTexture,
+ *   textureWidth: number,
+ *   textureHeight: number,
+ *   textureIndex: number
+ * }} _
+ */
+export function readTextureRgba({
   gl,
   particles,
   set,
