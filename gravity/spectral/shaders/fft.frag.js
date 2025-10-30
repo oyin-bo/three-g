@@ -23,9 +23,8 @@ ${collapsed === 'from' ? `
 uniform sampler2D u_realInput;
 uniform float u_massToDensity;  // Convert mass per voxel to physical density
 ` : collapsed === 'to' ? `
-// Complex-to-real mode: read RG32F, write R32F with normalization
+// Complex-to-real mode: read RG32F, write R32F
 uniform sampler2D u_spectrum;
-uniform float u_normalizeInverse;
 ` : `
 // Complex-to-complex mode: standard FFT butterfly
 uniform sampler2D u_spectrum;
@@ -166,8 +165,8 @@ ${collapsed === 'from' ? `
   
   // OUTPUT: Write result (format depends on collapsed flag)
 ${collapsed === 'to' ? `
-  // Complex-to-real: apply normalization and extract real part
-  float realPart = result.r * u_normalizeInverse;
+  // Complex-to-real: extract real part
+  float realPart = result.r;
   outColor = vec4(realPart, 0.0, 0.0, 0.0);
 ` : `
   // Real-to-complex or complex-to-complex: output complex

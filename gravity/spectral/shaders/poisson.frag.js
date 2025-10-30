@@ -21,6 +21,7 @@ uniform float u_gridSize;
 uniform float u_slicesPerRow;
 uniform vec2 u_textureSize;
 uniform float u_gravitationalConstant;  // 4πG
+uniform float u_worldVolume;            // Physical volume of simulation box
 uniform vec3 u_worldSize;              // Physical size per axis of simulation box
 uniform int u_splitMode;               // 0 = none, 1 = hard cutoff, 2 = Gaussian
 uniform float u_kCut;                  // Cutoff wavenumber (rad / unit length)
@@ -112,7 +113,10 @@ void main() {
 
   vec2 phi_k = vec2(0.0);
   if (k2 >= 1e-10) { // Avoid division by zero at DC (k=0)
-    float green = -u_gravitationalConstant / k2;
+    // The mass spectrum needs to be converted to a density spectrum.
+    // The N^3 from the density conversion and 1/N^3 from IFFT cancel.
+    // The remaining factor is 1/worldVolume.
+    float green = -u_gravitationalConstant / (k2 * u_worldVolume);
     phi_k = rho_k * green;
   } else {
     // DC mode (k=0): set to zero (mean field should be zero in periodic box)

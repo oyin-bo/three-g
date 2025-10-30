@@ -200,6 +200,8 @@ densitySpectrum: ${value.densitySpectrum}
     // Provide packed 3D texture dims
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.textureWidth, this.textureHeight);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_gravitationalConstant'), this.gravitationalConstant);
+    const worldVolume = this.worldSize[0] * this.worldSize[1] * this.worldSize[2];
+    gl.uniform1f(gl.getUniformLocation(this.program, 'u_worldVolume'), worldVolume);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldSize'),
       this.worldSize[0], this.worldSize[1], this.worldSize[2]);
 

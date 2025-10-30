@@ -13,7 +13,7 @@
  * 
  * NORMALIZATION CONVENTION:
  * - Forward: F̂(k) = Σ f(x)·exp(-2πikx)           [unnormalized]
- * - Inverse: f(x) = (1/N³)·Σ F̂(k)·exp(2πikx)    [normalized by 1/N³]
+ * - Inverse: f(x) = Σ F̂(k)·exp(2πikx)           [unnormalized]
  */
 
 import { fsQuadVert } from '../core-shaders.js';
@@ -244,10 +244,7 @@ complexFrom: ${value.complexFrom}
           gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebufferTo);
           gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.complexTo, 0);
         } else if (this.inverse && isLastStage) {
-          // Last inverse stage: read from complexFrom, write to real with normalization
-          const normalizeInverse = 1.0 / (this.gridSize * this.gridSize * this.gridSize);
-          gl.uniform1f(gl.getUniformLocation(program, 'u_normalizeInverse'), normalizeInverse);
-
+          // Last inverse stage: read from complexFrom, write to real
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, this.complexFrom);
           gl.uniform1i(gl.getUniformLocation(program, 'u_spectrum'), 0);
