@@ -31,7 +31,7 @@ export class KDeposit {
    *   particleCount?: number,
    *   particleTextureWidth?: number,
    *   particleTextureHeight?: number,
-   *   gridSize?: number,
+   *   gridSize?: number | [number, number, number],
    *   slicesPerRow?: number,
    *   textureSize?: number,
    *   textureWidth?: number,
@@ -44,24 +44,26 @@ export class KDeposit {
   constructor(options) {
     this.gl = options.gl;
 
-    // Resource slots
-    this.inPosition = (options.inPosition || options.inPosition === null) ? options.inPosition : createTextureRGBA32F(this.gl, options.particleTextureWidth || 1, options.particleTextureHeight || 1);
-    this.outGrid = (options.outGrid || options.outGrid === null) ? options.outGrid : createGridTexture(this.gl,
-      (options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))))),
-      (options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))))
-    );
-
     // Particle configuration
     this.particleCount = options.particleCount || 0;
     this.particleTextureWidth = options.particleTextureWidth || 0;
     this.particleTextureHeight = options.particleTextureHeight || 0;
 
-    // Grid configuration
-    this.gridSize = options.gridSize || 64;
-  this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(this.gridSize));
-  this.textureWidth = options.textureWidth || options.textureSize || (this.gridSize * this.slicesPerRow);
-  this.textureHeight = options.textureHeight || options.textureSize || (this.gridSize * Math.ceil(this.gridSize / this.slicesPerRow));
-  this.textureSize = /** @deprecated */ (typeof options.textureSize === 'number' ? options.textureSize : this.textureWidth);
+    // Resource slots
+    this.inPosition = (options.inPosition || options.inPosition === null) ? options.inPosition : createTextureRGBA32F(this.gl, this.particleTextureWidth || 1, this.particleTextureHeight || 1);
+    
+    // Grid configuration (process gridSize early for texture creation)
+    const rawGridSize = options.gridSize || 64;
+    this.gridSize = Array.isArray(rawGridSize) 
+      ? rawGridSize 
+      : [rawGridSize, rawGridSize, rawGridSize];
+    const [Nx, Ny, Nz] = this.gridSize;
+    this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(Nz));
+    this.textureWidth = options.textureWidth || options.textureSize || (Nx * this.slicesPerRow);
+    this.textureHeight = options.textureHeight || options.textureSize || (Ny * Math.ceil(Nz / this.slicesPerRow));
+    this.textureSize = /** @deprecated */ (typeof options.textureSize === 'number' ? options.textureSize : this.textureWidth);
+    
+    this.outGrid = (options.outGrid || options.outGrid === null) ? options.outGrid : createGridTexture(this.gl, this.textureWidth, this.textureHeight);
 
     // World bounds
     this.worldBounds = options.worldBounds || {
@@ -155,13 +157,13 @@ export class KDeposit {
       }),
       grid: this.outGrid && readGrid3D({
         gl: this.gl, texture: this.outGrid, width: this.textureWidth,
-        height: this.textureHeight, gridSize: this.gridSize,
+        height: this.textureHeight, gridSize: this.gridSize[0],
         channels: ['density'], pixels, format: this.gl.R32F
       }),
       particleCount: this.particleCount,
       particleTextureWidth: this.particleTextureWidth,
       particleTextureHeight: this.particleTextureHeight,
-      gridSize: this.gridSize,
+      gridSize: [...this.gridSize],
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureSize,
       worldBounds: { min: [...this.worldBounds.min], max: [...this.worldBounds.max] },
@@ -171,10 +173,11 @@ export class KDeposit {
     };
 
   const g = /** @type {any} */ (value.grid);
-  const totalMass = g?.density?.mean ? g.density.mean * this.gridSize * this.gridSize * this.gridSize : 0;
+  const [Nx, Ny, Nz] = this.gridSize;
+  const totalMass = g?.density?.mean ? g.density.mean * Nx * Ny * Nz : 0;
 
     value.toString = () =>
-  `KDeposit(${this.particleCount} particles→${this.gridSize}³ grid) assignment=${this.assignment} texture=${this.textureWidth}×${this.textureHeight} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
+  `KDeposit(${this.particleCount} particles→${this.gridSize[0]}×${this.gridSize[1]}×${this.gridSize[2]} grid) assignment=${this.assignment} texture=${this.textureWidth}×${this.textureHeight} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
 
 position: ${value.position}
 
@@ -239,7 +242,7 @@ position: ${value.position}
   gl.uniform2f(gl.getUniformLocation(this.program, 'u_particleTextureSize'), this.particleTextureWidth, this.particleTextureHeight);
   // Packed grid texture size (width, height)
   gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.textureWidth, this.textureHeight);
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
+    gl.uniform3i(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize[0], this.gridSize[1], this.gridSize[2]);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMin'), this.worldBounds.min[0], this.worldBounds.min[1], this.worldBounds.min[2]);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMax'), this.worldBounds.max[0], this.worldBounds.max[1], this.worldBounds.max[2]);

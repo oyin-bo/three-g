@@ -37,7 +37,7 @@ export class GravityMesh {
    *   maxAccel?: number,
    *   mesh?: {
    *     assignment?: 'ngp' | 'cic',
-   *     gridSize?: number,
+   *     gridSize?: number | [number, number, number],
    *     slicesPerRow?: number,
    *     kCut?: number,
    *     splitSigma?: number,
@@ -88,10 +88,13 @@ export class GravityMesh {
     
     // Mesh configuration
     const meshOptions = meshConfig || {};
+    const rawGridSize = meshOptions.gridSize || 64;
     this.meshConfig = {
       assignment: meshOptions.assignment || 'ngp',
-      gridSize: meshOptions.gridSize || 64,
-      slicesPerRow: meshOptions.slicesPerRow || Math.ceil(Math.sqrt(meshOptions.gridSize || 64)),
+      gridSize: Array.isArray(rawGridSize) 
+        ? rawGridSize 
+        : [rawGridSize, rawGridSize, rawGridSize],
+      slicesPerRow: meshOptions.slicesPerRow || Math.ceil(Math.sqrt(Array.isArray(rawGridSize) ? rawGridSize[2] : rawGridSize)),
       kCut: meshOptions.kCut ?? 0,
       splitSigma: meshOptions.splitSigma ?? 0,
       nearFieldRadius: Math.max(1, Math.floor(meshOptions.nearFieldRadius ?? 2))
@@ -100,9 +103,10 @@ export class GravityMesh {
     this.frameCount = 0;
     
   // Grid configuration (packed 3D as non-square 2D)
-  this.sliceRows = Math.ceil(this.meshConfig.gridSize / this.meshConfig.slicesPerRow);
-  this.gridTextureWidth = this.meshConfig.gridSize * this.meshConfig.slicesPerRow;
-  this.gridTextureHeight = this.meshConfig.gridSize * this.sliceRows;
+  const [Nx, Ny, Nz] = this.meshConfig.gridSize;
+  this.sliceRows = Math.ceil(Nz / this.meshConfig.slicesPerRow);
+  this.gridTextureWidth = Nx * this.meshConfig.slicesPerRow;
+  this.gridTextureHeight = Ny * this.sliceRows;
 
     // Check WebGL2 support
     const colorBufferFloat = this.gl.getExtension('EXT_color_buffer_float');
@@ -158,9 +162,8 @@ export class GravityMesh {
       bounds.max[2] - bounds.min[2]
     ];
     const worldVolume = Math.max(1e-12, this.worldSize[0] * this.worldSize[1] * this.worldSize[2]);
-    const n = this.meshConfig.gridSize;
-    // Per-voxel volume = worldVolume / n^3; density = mass / cellVolume
-    this.cellVolume = worldVolume / (n * n * n);
+    // Per-voxel volume = worldVolume / (Nx*Ny*Nz); density = mass / cellVolume
+    this.cellVolume = worldVolume / (Nx * Ny * Nz);
 
     // Create kernels inline
     // Deposit kernel
@@ -170,7 +173,7 @@ export class GravityMesh {
       particleCount: this.particleCount,
       particleTextureWidth: this.textureWidth,
       particleTextureHeight: this.textureHeight,
-      gridSize: this.meshConfig.gridSize,
+      gridSize: /** @type {[number, number, number]} */ (this.meshConfig.gridSize),
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureWidth: this.gridTextureWidth,
       textureHeight: this.gridTextureHeight,
@@ -184,7 +187,7 @@ export class GravityMesh {
     this.fftKernel = new KFFT({
       gl: this.gl,
       // Don't bind real here; set per-run to latest massGrid
-      gridSize: this.meshConfig.gridSize,
+      gridSize: /** @type {[number, number, number]} */ (this.meshConfig.gridSize),
       slicesPerRow: this.meshConfig.slicesPerRow,
   // Use non-square packed texture dims
   textureWidth: this.gridTextureWidth,
@@ -219,7 +222,7 @@ export class GravityMesh {
       outForceSpectrumX: this.forceSpectrumXTexture,
       outForceSpectrumY: this.forceSpectrumYTexture,
       outForceSpectrumZ: this.forceSpectrumZTexture,
-      gridSize: this.meshConfig.gridSize,
+      gridSize: /** @type {[number, number, number]} */ (this.meshConfig.gridSize),
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureWidth: this.gridTextureWidth,
       textureHeight: this.gridTextureHeight,
@@ -234,7 +237,7 @@ export class GravityMesh {
       particleCount: this.particleCount,
       particleTextureWidth: this.textureWidth,
       particleTextureHeight: this.textureHeight,
-      gridSize: this.meshConfig.gridSize,
+      gridSize: this.meshConfig.gridSize[0], // Note: KForceSample expects cubic grid; use first dimension
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureWidth: this.gridTextureWidth,
       textureHeight: this.gridTextureHeight,
@@ -245,7 +248,7 @@ export class GravityMesh {
     // Near-field kernel
     this.nearFieldKernel = new KNearField({
       gl: this.gl,
-      gridSize: this.meshConfig.gridSize,
+      gridSize: /** @type {[number, number, number]} */ (this.meshConfig.gridSize),
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureWidth: this.gridTextureWidth,
       textureHeight: this.gridTextureHeight,
@@ -261,7 +264,7 @@ export class GravityMesh {
       particleCount: this.particleCount,
       particleTextureWidth: this.textureWidth,
       particleTextureHeight: this.textureHeight,
-      gridSize: this.meshConfig.gridSize,
+      gridSize: this.meshConfig.gridSize[0], // Note: KForceSample expects cubic grid; use first dimension
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureWidth: this.gridTextureWidth,
       textureHeight: this.gridTextureHeight,
@@ -332,8 +335,8 @@ export class GravityMesh {
       this.worldBounds = { min: /** @type {[number,number,number]} */(outMin), max: /** @type {[number,number,number]} */(outMax) };
 
       const newWorldSize = [outMax[0] - outMin[0], outMax[1] - outMin[1], outMax[2] - outMin[2]];
-      const n = this.meshConfig.gridSize;
-      const newCellVolume = (newWorldSize[0] * newWorldSize[1] * newWorldSize[2]) / (n * n * n);
+      const [Nx, Ny, Nz] = this.meshConfig.gridSize;
+      const newCellVolume = (newWorldSize[0] * newWorldSize[1] * newWorldSize[2]) / (Nx * Ny * Nz);
       const massToDensity = 1.0 / newCellVolume;
       this.cellVolume = newCellVolume;
 
@@ -380,7 +383,7 @@ export class GravityMesh {
     const value = {
       worldBounds: { min: [...this.worldBounds.min], max: [...this.worldBounds.max] },
       worldSize: [...this.worldSize],
-      gridSize: this.meshConfig.gridSize,
+      gridSize: [...this.meshConfig.gridSize],
       slicesPerRow: this.meshConfig.slicesPerRow,
       textureWidth: this.gridTextureWidth,
       textureHeight: this.gridTextureHeight,
@@ -409,7 +412,7 @@ export class GravityMesh {
     };
 
     value.toString = () =>
-`GravityMesh(grid=${value.gridSize}³, packed=${value.textureWidth}×${value.textureHeight}) frames=${value.frameCount}
+`GravityMesh(grid=${value.gridSize[0]}×${value.gridSize[1]}×${value.gridSize[2]}, packed=${value.textureWidth}×${value.textureHeight}) frames=${value.frameCount}
 bounds=[${value.worldBounds.min}]→[${value.worldBounds.max}] worldSize=[${value.worldSize}] cellVolume=${value.cellVolume.toExponential()} massToDensity=${value.massToDensity.toExponential()}
 resources: massGrid=${value.resources.massGridTexture} forceGrids=[${value.resources.forceGridX},${value.resources.forceGridY},${value.resources.forceGridZ}] spectra=[${value.resources.forceSpectrumXTexture},${value.resources.forceSpectrumYTexture},${value.resources.forceSpectrumZTexture}]`;
 

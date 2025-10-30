@@ -8,7 +8,7 @@ uniform sampler2D u_positionTexture;
 uniform vec2 u_particleTextureSize;
 // packed grid texture size (width, height)
 uniform vec2 u_textureSize;
-uniform float u_gridSize;
+uniform ivec3 u_gridSize;
 uniform float u_slicesPerRow;
 uniform vec3 u_worldMin;
 uniform vec3 u_worldMax;
@@ -47,7 +47,7 @@ void main() {
 
   vec3 extent = max(u_worldMax - u_worldMin, vec3(EPS));
   vec3 norm = (worldPos - u_worldMin) / extent;
-  vec3 gridPos = norm * u_gridSize;
+  vec3 gridPos = norm * vec3(u_gridSize);
   vec3 baseVoxel = floor(gridPos);
   vec3 frac = gridPos - baseVoxel;
 
@@ -56,16 +56,16 @@ void main() {
     targetVoxel += u_offset;
   }
 
-  targetVoxel.x = wrapIndex(targetVoxel.x, u_gridSize);
-  targetVoxel.y = wrapIndex(targetVoxel.y, u_gridSize);
-  targetVoxel.z = wrapIndex(targetVoxel.z, u_gridSize);
+  targetVoxel.x = wrapIndex(targetVoxel.x, float(u_gridSize.x));
+  targetVoxel.y = wrapIndex(targetVoxel.y, float(u_gridSize.y));
+  targetVoxel.z = wrapIndex(targetVoxel.z, float(u_gridSize.z));
 
   int sliceRow = int(targetVoxel.z) / int(u_slicesPerRow);
   int sliceCol = int(targetVoxel.z) - sliceRow * int(u_slicesPerRow);
 
   vec2 texel = vec2(
-    float(sliceCol * int(u_gridSize) + int(targetVoxel.x)),
-    float(sliceRow * int(u_gridSize) + int(targetVoxel.y))
+    float(sliceCol * u_gridSize.x + int(targetVoxel.x)),
+    float(sliceRow * u_gridSize.y + int(targetVoxel.y))
   );
 
   // Normalize texel coordinates by the actual packed grid texture width/height

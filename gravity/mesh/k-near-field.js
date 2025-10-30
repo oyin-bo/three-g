@@ -19,7 +19,7 @@ export class KNearField {
    *   outForceY?: WebGLTexture|null,
    *   outForceZ?: WebGLTexture|null,
    *   quadVAO?: WebGLVertexArrayObject|null,
-   *   gridSize?: number,
+   *   gridSize?: number | [number, number, number],
    *   slicesPerRow?: number,
    *   textureSize?: number,
    *   textureWidth?: number,
@@ -33,31 +33,23 @@ export class KNearField {
   constructor(options) {
     this.gl = options.gl;
 
-    // Resource slots
-    this.inMassGrid = (options.inMassGrid || options.inMassGrid === null) ? options.inMassGrid : createGridTexture(this.gl,
-      (options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))))),
-      (options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))))
-    );
-    this.outForceX = (options.outForceX || options.outForceX === null) ? options.outForceX : createGridTexture(this.gl,
-      (options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))))),
-      (options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))))
-    );
-    this.outForceY = (options.outForceY || options.outForceY === null) ? options.outForceY : createGridTexture(this.gl,
-      (options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))))),
-      (options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))))
-    );
-    this.outForceZ = (options.outForceZ || options.outForceZ === null) ? options.outForceZ : createGridTexture(this.gl,
-      (options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64))))),
-      (options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))))
-    );
-    this.quadVAO = (options.quadVAO || options.quadVAO === null) ? options.quadVAO : createQuadVAO(this.gl);
+    // Grid configuration (process gridSize early for texture creation)
+    const rawGridSize = options.gridSize || 64;
+    this.gridSize = Array.isArray(rawGridSize) 
+      ? rawGridSize 
+      : [rawGridSize, rawGridSize, rawGridSize];
+    const [Nx, Ny, Nz] = this.gridSize;
+    this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(Nz));
+    this.textureWidth = options.textureWidth || options.textureSize || (Nx * this.slicesPerRow);
+    this.textureHeight = options.textureHeight || options.textureSize || (Ny * Math.ceil(Nz / this.slicesPerRow));
+    this.textureSize = /** @deprecated */ (typeof options.textureSize === 'number' ? options.textureSize : this.textureWidth);
 
-    // Grid configuration
-    this.gridSize = options.gridSize || 64;
-  this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(this.gridSize));
-  this.textureWidth = options.textureWidth || options.textureSize || (this.gridSize * this.slicesPerRow);
-  this.textureHeight = options.textureHeight || options.textureSize || (this.gridSize * Math.ceil(this.gridSize / this.slicesPerRow));
-  this.textureSize = /** @deprecated */ (typeof options.textureSize === 'number' ? options.textureSize : this.textureWidth);
+    // Resource slots
+    this.inMassGrid = (options.inMassGrid || options.inMassGrid === null) ? options.inMassGrid : createGridTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.outForceX = (options.outForceX || options.outForceX === null) ? options.outForceX : createGridTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.outForceY = (options.outForceY || options.outForceY === null) ? options.outForceY : createGridTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.outForceZ = (options.outForceZ || options.outForceZ === null) ? options.outForceZ : createGridTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.quadVAO = (options.quadVAO || options.quadVAO === null) ? options.quadVAO : createQuadVAO(this.gl);
 
     // World bounds
     this.worldBounds = options.worldBounds || {
@@ -157,25 +149,25 @@ export class KNearField {
     const value = {
       massGrid: this.inMassGrid && readGrid3D({
         gl: this.gl, texture: this.inMassGrid, width: this.textureWidth,
-        height: this.textureHeight, gridSize: this.gridSize,
+        height: this.textureHeight, gridSize: this.gridSize[0],
         channels: ['mass'], pixels, format: this.gl.R32F
       }),
       forceX: this.outForceX && readGrid3D({
         gl: this.gl, texture: this.outForceX, width: this.textureWidth,
-        height: this.textureHeight, gridSize: this.gridSize,
+        height: this.textureHeight, gridSize: this.gridSize[0],
         channels: ['fx'], pixels, format: this.gl.R32F
       }),
       forceY: this.outForceY && readGrid3D({
         gl: this.gl, texture: this.outForceY, width: this.textureWidth,
-        height: this.textureHeight, gridSize: this.gridSize,
+        height: this.textureHeight, gridSize: this.gridSize[0],
         channels: ['fy'], pixels, format: this.gl.R32F
       }),
       forceZ: this.outForceZ && readGrid3D({
         gl: this.gl, texture: this.outForceZ, width: this.textureWidth,
-        height: this.textureHeight, gridSize: this.gridSize,
+        height: this.textureHeight, gridSize: this.gridSize[0],
         channels: ['fz'], pixels, format: this.gl.R32F
       }),
-      gridSize: this.gridSize,
+      gridSize: [...this.gridSize],
       slicesPerRow: this.slicesPerRow,
       textureWidth: this.textureWidth,
       textureHeight: this.textureHeight,
@@ -187,7 +179,7 @@ export class KNearField {
     };
 
     value.toString = () =>
-      `KNearField(grid=${this.gridSize}³) texture=${this.textureWidth}×${this.textureHeight} soft=${formatNumber(this.softening)} G=${formatNumber(this.gravityStrength)} r=${this.nearFieldRadius} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
+      `KNearField(grid=${this.gridSize[0]}×${this.gridSize[1]}×${this.gridSize[2]}) texture=${this.textureWidth}×${this.textureHeight} soft=${formatNumber(this.softening)} G=${formatNumber(this.gravityStrength)} r=${this.nearFieldRadius} #${this.renderCount} bounds=[${this.worldBounds.min}]to[${this.worldBounds.max}]
 
 massGrid: ${value.massGrid}
 
@@ -236,7 +228,7 @@ massGrid: ${value.massGrid}
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_massGrid'), 0);
 
     // Set uniforms
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
+    gl.uniform3i(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize[0], this.gridSize[1], this.gridSize[2]);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMin'), this.worldBounds.min[0], this.worldBounds.min[1], this.worldBounds.min[2]);
     gl.uniform3f(gl.getUniformLocation(this.program, 'u_worldMax'), this.worldBounds.max[0], this.worldBounds.max[1], this.worldBounds.max[2]);
@@ -361,7 +353,7 @@ precision highp int;
 out vec4 outColor;
 
 uniform sampler2D u_massGrid;
-uniform float u_gridSize;
+uniform ivec3 u_gridSize;
 uniform float u_slicesPerRow;
 uniform vec3 u_worldMin;
 uniform vec3 u_worldMax;
@@ -381,24 +373,24 @@ vec3 minimumImage(vec3 delta, vec3 extent) {
   return delta - extent * floor(delta / extent + 0.5);
 }
 
-ivec2 voxelToTexel(ivec3 voxel, int gridSize, int slicesPerRow) {
+ivec2 voxelToTexel(ivec3 voxel, ivec3 gridSize, int slicesPerRow) {
   int sliceRow = voxel.z / slicesPerRow;
   int sliceCol = voxel.z - sliceRow * slicesPerRow;
-  int texX = sliceCol * gridSize + voxel.x;
-  int texY = sliceRow * gridSize + voxel.y;
+  int texX = sliceCol * gridSize.x + voxel.x;
+  int texY = sliceRow * gridSize.y + voxel.y;
   return ivec2(texX, texY);
 }
 
-vec3 voxelCenterWorld(ivec3 voxel, vec3 worldMin, vec3 worldMax, float gridSize) {
+vec3 voxelCenterWorld(ivec3 voxel, vec3 worldMin, vec3 worldMax, ivec3 gridSize) {
   vec3 extent = max(worldMax - worldMin, vec3(1e-6));
-  return worldMin + (vec3(voxel) + vec3(0.5)) / gridSize * extent;
+  return worldMin + (vec3(voxel) + vec3(0.5)) / vec3(gridSize) * extent;
 }
 
 void main() {
-  int gridSize = int(u_gridSize + 0.5);
+  ivec3 N = u_gridSize;
   int slicesPerRow = int(u_slicesPerRow + 0.5);
 
-  if (gridSize <= 0 || slicesPerRow <= 0) {
+  if (N.x <= 0 || N.y <= 0 || N.z <= 0 || slicesPerRow <= 0) {
     outColor = vec4(0.0);
     return;
   }
@@ -419,27 +411,27 @@ void main() {
     return;
   }
 
-  int sliceCol = texel.x / gridSize;
-  int sliceRow = texel.y / gridSize;
+  int sliceCol = texel.x / N.x;
+  int sliceRow = texel.y / N.y;
   int iz = sliceRow * slicesPerRow + sliceCol;
-  if (iz < 0 || iz >= gridSize) {
+  if (iz < 0 || iz >= N.z) {
     outColor = vec4(0.0);
     return;
   }
 
-  int ix = texel.x - sliceCol * gridSize;
-  int iy = texel.y - sliceRow * gridSize;
-  if (ix < 0 || ix >= gridSize || iy < 0 || iy >= gridSize) {
+  int ix = texel.x - sliceCol * N.x;
+  int iy = texel.y - sliceRow * N.y;
+  if (ix < 0 || ix >= N.x || iy < 0 || iy >= N.y) {
     outColor = vec4(0.0);
     return;
   }
 
   ivec3 baseVoxel = ivec3(ix, iy, iz);
 
-  ivec2 baseTexel = voxelToTexel(baseVoxel, gridSize, slicesPerRow);
+  ivec2 baseTexel = voxelToTexel(baseVoxel, N, slicesPerRow);
   vec4 baseCell = texelFetch(u_massGrid, baseTexel, 0);
   float baseMass = baseCell.a;
-  vec3 baseCOM = baseMass > 0.0 ? baseCell.rgb / baseMass : voxelCenterWorld(baseVoxel, u_worldMin, u_worldMax, u_gridSize);
+  vec3 baseCOM = baseMass > 0.0 ? baseCell.rgb / baseMass : voxelCenterWorld(baseVoxel, u_worldMin, u_worldMax, N);
 
   vec3 extent = max(u_worldMax - u_worldMin, vec3(1e-6));
   vec3 total = vec3(0.0);
@@ -452,11 +444,11 @@ void main() {
         if (abs(dx) > radius) continue;
 
         ivec3 neighbor = baseVoxel + ivec3(dx, dy, dz);
-        neighbor.x = wrapIndexInt(neighbor.x, gridSize);
-        neighbor.y = wrapIndexInt(neighbor.y, gridSize);
-        neighbor.z = wrapIndexInt(neighbor.z, gridSize);
+        neighbor.x = wrapIndexInt(neighbor.x, N.x);
+        neighbor.y = wrapIndexInt(neighbor.y, N.y);
+        neighbor.z = wrapIndexInt(neighbor.z, N.z);
 
-        ivec2 neighborTexel = voxelToTexel(neighbor, gridSize, slicesPerRow);
+        ivec2 neighborTexel = voxelToTexel(neighbor, N, slicesPerRow);
         vec4 cell = texelFetch(u_massGrid, neighborTexel, 0);
         float mass = cell.a;
         if (mass <= 0.0) {

@@ -21,7 +21,7 @@ export class KGradient {
    *   outForceSpectrumY?: WebGLTexture|null,
    *   outForceSpectrumZ?: WebGLTexture|null,
    *   quadVAO?: WebGLVertexArrayObject|null,
-   *   gridSize?: number,
+   *   gridSize?: number | [number, number, number],
    *   slicesPerRow?: number,
    *   textureSize?: number,
    *   textureWidth?: number,
@@ -32,21 +32,23 @@ export class KGradient {
   constructor(options) {
     this.gl = options.gl;
     
-    // Resource slots
-    this.inPotentialSpectrum = (options.inPotentialSpectrum || options.inPotentialSpectrum === null) ? options.inPotentialSpectrum : createComplexTexture(this.gl, options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))), options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))));
-    this.outForceSpectrumX = (options.outForceSpectrumX || options.outForceSpectrumX === null) ? options.outForceSpectrumX : createComplexTexture(this.gl, options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))), options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))));
-    this.outForceSpectrumY = (options.outForceSpectrumY || options.outForceSpectrumY === null) ? options.outForceSpectrumY : createComplexTexture(this.gl, options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))), options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))));
-    this.outForceSpectrumZ = (options.outForceSpectrumZ || options.outForceSpectrumZ === null) ? options.outForceSpectrumZ : createComplexTexture(this.gl, options.textureWidth || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))), options.textureHeight || options.textureSize || ((options.gridSize || 64) * (options.slicesPerRow || Math.ceil(Math.sqrt(options.gridSize || 64)))));
-    this.quadVAO = (options.quadVAO || options.quadVAO === null) ? options.quadVAO : createQuadVAO(this.gl);
+    // Grid configuration (process early for texture creation)
+    const rawGridSize = options.gridSize || 64;
+    this.gridSize = Array.isArray(rawGridSize) 
+      ? rawGridSize 
+      : [rawGridSize, rawGridSize, rawGridSize];
+    const [Nx, Ny, Nz] = this.gridSize;
+    this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(Nz));
+    this.textureWidth = options.textureWidth || options.textureSize || (Nx * this.slicesPerRow);
+    this.textureHeight = options.textureHeight || options.textureSize || (Ny * Math.ceil(Nz / this.slicesPerRow));
+    this.textureSize = /** @deprecated */ (typeof options.textureSize === 'number' ? options.textureSize : this.textureWidth);
     
-    // Grid configuration
-    this.gridSize = options.gridSize || 64;
-    this.slicesPerRow = options.slicesPerRow || Math.ceil(Math.sqrt(this.gridSize));
-  // Non-square packed 3D texture dimensions (fallback to square textureSize)
-  this.textureWidth = options.textureWidth || options.textureSize || (this.gridSize * this.slicesPerRow);
-  this.textureHeight = options.textureHeight || options.textureSize || (this.gridSize * Math.ceil(this.gridSize / this.slicesPerRow));
-  // Legacy alias kept for backward-compat reads
-  this.textureSize = /** @deprecated */ (typeof options.textureSize === 'number' ? options.textureSize : this.textureWidth);
+    // Resource slots
+    this.inPotentialSpectrum = (options.inPotentialSpectrum || options.inPotentialSpectrum === null) ? options.inPotentialSpectrum : createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.outForceSpectrumX = (options.outForceSpectrumX || options.outForceSpectrumX === null) ? options.outForceSpectrumX : createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.outForceSpectrumY = (options.outForceSpectrumY || options.outForceSpectrumY === null) ? options.outForceSpectrumY : createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.outForceSpectrumZ = (options.outForceSpectrumZ || options.outForceSpectrumZ === null) ? options.outForceSpectrumZ : createComplexTexture(this.gl, this.textureWidth, this.textureHeight);
+    this.quadVAO = (options.quadVAO || options.quadVAO === null) ? options.quadVAO : createQuadVAO(this.gl);
     
     // Physics parameters
     this.worldSize = options.worldSize || [8, 8, 8];
@@ -156,7 +158,7 @@ export class KGradient {
         height: this.textureHeight, count: this.textureWidth * this.textureHeight,
         channels: ['real', 'imag'], pixels, format: this.gl.RG32F
       }),
-      gridSize: this.gridSize,
+      gridSize: [...this.gridSize],
       slicesPerRow: this.slicesPerRow,
       textureSize: this.textureSize,
       textureWidth: this.textureWidth,
@@ -166,7 +168,7 @@ export class KGradient {
     };
     
     value.toString = () =>
-`KGradient(${this.gridSize}³ grid) texture=${this.textureWidth}×${this.textureHeight} worldSize=[${this.worldSize}] #${this.renderCount}
+`KGradient(${this.gridSize[0]}×${this.gridSize[1]}×${this.gridSize[2]} grid) texture=${this.textureWidth}×${this.textureHeight} worldSize=[${this.worldSize}] #${this.renderCount}
 
 potentialSpectrum: ${value.potentialSpectrum}
 
@@ -217,7 +219,7 @@ potentialSpectrum: ${value.potentialSpectrum}
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_potentialSpectrum'), 0);
     
     // Set uniforms
-    gl.uniform1f(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize);
+    gl.uniform3i(gl.getUniformLocation(this.program, 'u_gridSize'), this.gridSize[0], this.gridSize[1], this.gridSize[2]);
     gl.uniform1f(gl.getUniformLocation(this.program, 'u_slicesPerRow'), this.slicesPerRow);
     // Provide packed texture dimensions for non-square support
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_textureSize'), this.textureWidth, this.textureHeight);
